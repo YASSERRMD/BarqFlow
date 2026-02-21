@@ -4,9 +4,9 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-barqflow-server = { path = "../../crates/server" }
-tokio.workspace        = true
-tracing.workspace      = true
+barqflow-server.workspace = true
+tokio.workspace = true
+tracing.workspace = true
 tracing-subscriber.workspace = true
-anyhow.workspace       = true
-dotenvy.workspace      = true
+dotenvy.workspace = true
+anyhow.workspace = true

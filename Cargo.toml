@@ -28,6 +28,7 @@ barqflow-registry = { path = "crates/registry" }
 barqflow-nodes = { path = "crates/nodes" }
 barqflow-db = { path = "crates/db" }
 barqflow-api = { path = "crates/api" }
+barqflow-server = { path = "crates/server" }
 # async runtime
 tokio        = { version = "1", features = ["full"] }
 # serialization
