@@ -33,3 +33,25 @@ pub struct ExecutionEntity {
     pub started_at: DateTime<Utc>,
     pub stopped_at: Option<DateTime<Utc>>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct StaticDataEntity {
+    pub id: Uuid,
+    pub node_id: String,
+    pub workflow_id: Uuid,
+    pub data: serde_json::Value,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct UserEntity {
+    pub id: Uuid,
+    pub email: String,
+    pub password_hash: String,
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
+    pub global_role: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}

@@ -1,5 +1,5 @@
 use crate::models::ExecutionEntity;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use sqlx::{PgPool, Result};
 use uuid::Uuid;
 
@@ -103,5 +103,19 @@ impl ExecutionRepo {
         .bind(id)
         .fetch_optional(&self.pool)
         .await
+    }
+
+    pub async fn delete_older_than(&self, before: DateTime<Utc>) -> Result<u64> {
+        let result = sqlx::query(
+            r#"
+            DELETE FROM executions
+            WHERE started_at < $1
+            "#
+        )
+        .bind(before)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.rows_affected())
     }
 }
