@@ -99,11 +99,6 @@ pub struct ExecutionStateManager {
 pub struct ExecutionMetrics {
     pub nodes_executed: u64,
     pub data_processed_bytes: u64,
-/// Central manager for active execution states
-pub struct ExecutionStateManager {
-    active_runs: std::sync::RwLock<HashMap<RunId, ExecutionState>>,
-    metrics: std::sync::atomic::AtomicU64, // Nodes executed
-    data_processed: std::sync::atomic::AtomicUsize, // Bytes processed
 }
 
 impl ExecutionStateManager {
@@ -147,52 +142,6 @@ impl ExecutionStateManager {
 
     pub async fn get_metrics(&self) -> ExecutionMetrics {
         self.metrics.read().await.clone()
-            active_runs: std::sync::RwLock::new(HashMap::new()),
-            metrics: std::sync::atomic::AtomicU64::new(0),
-            data_processed: std::sync::atomic::AtomicUsize::new(0),
-        }
-    }
-
-    /// Register a new run and return its state wrapper
-    pub fn start_run(&self, workflow_id: &str, manual: bool) -> RunId {
-        let state = ExecutionState::new(workflow_id, manual);
-        let id = state.id.clone();
-        
-        let mut runs = self.active_runs.write().unwrap();
-        runs.insert(id.clone(), state);
-        
-        id
-    }
-    
-    /// Finish an active run and optionally remove it from the active cache
-    pub fn finish_run(&self, id: &RunId, success: bool, remove: bool) -> Option<ExecutionState> {
-        let mut runs = self.active_runs.write().unwrap();
-        if let Some(mut state) = runs.remove(id) {
-            state.mark_finished(success);
-            
-            if !remove {
-                runs.insert(id.clone(), state.clone());
-            }
-            Some(state)
-        } else {
-            None
-        }
-    }
-
-    /// Increment node execution counter
-    pub fn record_node_execution(&self) {
-        self.metrics.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    }
-
-    /// Add to data processed metric
-    pub fn record_data_processed(&self, bytes: usize) {
-        self.data_processed.fetch_add(bytes, std::sync::atomic::Ordering::Relaxed);
-    }
-    
-    pub fn get_metrics(&self) -> (u64, usize) {
-        let nodes = self.metrics.load(std::sync::atomic::Ordering::Relaxed);
-        let data = self.data_processed.load(std::sync::atomic::Ordering::Relaxed);
-        (nodes, data)
     }
 }
 
@@ -253,37 +202,5 @@ mod tests {
         
         let active = manager.list_active().await;
         assert_eq!(active.len(), 2);
-    
-    #[test]
-    fn test_execution_state_manager_lifecycle() {
-        let manager = ExecutionStateManager::new();
-        let run_id = manager.start_run("wf-1", true);
-        
-        {
-            let runs = manager.active_runs.read().unwrap();
-            assert!(runs.contains_key(&run_id));
-        }
-        
-        let finished = manager.finish_run(&run_id, true, true);
-        assert!(finished.is_some());
-        assert_eq!(finished.unwrap().status, ExecutionStatus::Success);
-        
-        {
-            let runs = manager.active_runs.read().unwrap();
-            assert!(!runs.contains_key(&run_id)); // Removed from active cache
-        }
-    }
-    
-    #[test]
-    fn test_execution_state_manager_metrics() {
-        let manager = ExecutionStateManager::new();
-        manager.record_node_execution();
-        manager.record_node_execution();
-        manager.record_data_processed(500);
-        manager.record_data_processed(1024);
-        
-        let (nodes, data) = manager.get_metrics();
-        assert_eq!(nodes, 2);
-        assert_eq!(data, 1524);
     }
 }
