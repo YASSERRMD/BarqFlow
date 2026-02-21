@@ -1,9 +1,10 @@
 use barqflow_core::schema::{INode, INodeConnections, INodeParameters, IWorkflowSettings};
 use barqflow_core::types::NodeId;
+use petgraph::algo::{is_cyclic_directed, toposort};
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -116,6 +117,91 @@ impl WorkflowToGraphParser {
     }
 }
 
+pub struct GraphTraversal;
+
+impl GraphTraversal {
+    pub fn is_executable_dag(graph: &DiGraph<WorkflowNode, GraphEdge>) -> bool {
+        !is_cyclic_directed(graph)
+    }
+
+    pub fn topological_sort(
+        graph: &DiGraph<WorkflowNode, GraphEdge>,
+    ) -> Result<Vec<NodeIndex>, String> {
+        toposort(graph, None).map_err(|e| format!("Cycle detected at node {:?}", e.node_id()))
+    }
+
+    pub fn get_trigger_nodes(graph: &DiGraph<WorkflowNode, GraphEdge>) -> Vec<NodeIndex> {
+        graph
+            .node_indices()
+            .filter(|&idx| {
+                let node = &graph[idx];
+                node.type_.to_lowercase().contains("trigger")
+                    || node.type_.to_lowercase().contains("manual")
+            })
+            .collect()
+    }
+
+    pub fn get_parents(
+        graph: &DiGraph<WorkflowNode, GraphEdge>,
+        node: NodeIndex,
+    ) -> Vec<NodeIndex> {
+        graph
+            .edges(node)
+            .filter(|e| e.target() == node)
+            .map(|e| e.source())
+            .collect()
+    }
+
+    pub fn get_children(
+        graph: &DiGraph<WorkflowNode, GraphEdge>,
+        node: NodeIndex,
+    ) -> Vec<NodeIndex> {
+        graph
+            .edges(node)
+            .filter(|e| e.source() == node)
+            .map(|e| e.target())
+            .collect()
+    }
+
+    pub fn get_ancestors(
+        graph: &DiGraph<WorkflowNode, GraphEdge>,
+        start: NodeIndex,
+    ) -> HashSet<NodeIndex> {
+        let mut ancestors = HashSet::new();
+        let mut queue = VecDeque::new();
+        queue.push_back(start);
+
+        while let Some(current) = queue.pop_front() {
+            for parent in Self::get_parents(graph, current) {
+                if ancestors.insert(parent) {
+                    queue.push_back(parent);
+                }
+            }
+        }
+
+        ancestors
+    }
+
+    pub fn get_descendants(
+        graph: &DiGraph<WorkflowNode, GraphEdge>,
+        start: NodeIndex,
+    ) -> HashSet<NodeIndex> {
+        let mut descendants = HashSet::new();
+        let mut queue = VecDeque::new();
+        queue.push_back(start);
+
+        while let Some(current) = queue.pop_front() {
+            for child in Self::get_children(graph, current) {
+                if descendants.insert(child) {
+                    queue.push_back(child);
+                }
+            }
+        }
+
+        descendants
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,5 +259,70 @@ mod tests {
         assert_eq!(workflow_node.id, NodeId::new("TestNode"));
         assert_eq!(workflow_node.name, "Test Node");
         assert_eq!(workflow_node.type_, "test");
+    }
+
+    #[test]
+    fn test_is_executable_dag_valid() {
+        let workflow = WorkflowDef {
+            id: "test-dag".to_string(),
+            name: "Valid DAG".to_string(),
+            nodes: vec![
+                create_test_node("A", "A", "manualTrigger"),
+                create_test_node("B", "B", "set"),
+                create_test_node("C", "C", "set"),
+            ],
+            connections: INodeConnections(HashMap::new()),
+            settings: None,
+            static_data: None,
+            pin_data: None,
+            version_id: None,
+        };
+
+        let parsed = WorkflowToGraphParser::parse(&workflow).unwrap();
+        assert!(GraphTraversal::is_executable_dag(&parsed.graph));
+    }
+
+    #[test]
+    fn test_topological_sort() {
+        let workflow = WorkflowDef {
+            id: "test-topo".to_string(),
+            name: "Topological Sort".to_string(),
+            nodes: vec![
+                create_test_node("Start", "Start", "manualTrigger"),
+                create_test_node("Process", "Process", "set"),
+                create_test_node("End", "End", "noop"),
+            ],
+            connections: INodeConnections(HashMap::new()),
+            settings: None,
+            static_data: None,
+            pin_data: None,
+            version_id: None,
+        };
+
+        let parsed = WorkflowToGraphParser::parse(&workflow).unwrap();
+        let sorted = GraphTraversal::topological_sort(&parsed.graph).unwrap();
+        assert_eq!(sorted.len(), 3);
+    }
+
+    #[test]
+    fn test_get_trigger_nodes() {
+        let workflow = WorkflowDef {
+            id: "test-triggers".to_string(),
+            name: "Triggers Test".to_string(),
+            nodes: vec![
+                create_test_node("Manual", "Manual", "manualTrigger"),
+                create_test_node("Webhook", "Webhook", "webhookTrigger"),
+                create_test_node("Process", "Process", "set"),
+            ],
+            connections: INodeConnections(HashMap::new()),
+            settings: None,
+            static_data: None,
+            pin_data: None,
+            version_id: None,
+        };
+
+        let parsed = WorkflowToGraphParser::parse(&workflow).unwrap();
+        let triggers = GraphTraversal::get_trigger_nodes(&parsed.graph);
+        assert_eq!(triggers.len(), 2);
     }
 }
