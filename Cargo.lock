@@ -275,6 +275,7 @@ dependencies = [
  "barqflow-core",
  "petgraph",
  "rhai",
+ "serde",
  "serde_json",
  "thiserror",
 ]
@@ -299,6 +300,8 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "barqflow-core",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 
