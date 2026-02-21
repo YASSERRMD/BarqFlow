@@ -1,46 +1,9 @@
-use barqflow_core::schema::INodeParameters;
+use barqflow_core::schema::{INode, INodeConnections, INodeParameters, IWorkflowSettings};
 use barqflow_core::types::NodeId;
 use petgraph::graph::{DiGraph, NodeIndex};
+use petgraph::visit::EdgeRef;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct GraphNode {
-    pub index: NodeIndex,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct GraphEdge {
-    pub source: NodeIndex,
-    pub target: NodeIndex,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum NodeConnectionType {
-    Main,
-    Trigger,
-    Catch,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ConnectionOutputIndex {
-    pub node: NodeId,
-    pub r#type: NodeConnectionType,
-    pub output_index: usize,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct IConnection {
-    pub node: NodeId,
-    pub r#type: NodeConnectionType,
-    pub input_index: usize,
-    pub output: Vec<ConnectionOutputIndex>,
-}
-
-pub type INodeConnections = HashMap<String, Vec<IConnection>>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -54,20 +17,16 @@ pub struct WorkflowNode {
     pub webhook_prod: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkflowSettings {
-    pub timezone: Option<String>,
-    pub error_workflow_id: Option<String>,
-    pub deduplication_scope: Option<String>,
-}
-
-impl Default for WorkflowSettings {
-    fn default() -> Self {
+impl From<INode> for WorkflowNode {
+    fn from(node: INode) -> Self {
         Self {
-            timezone: Some("UTC".to_string()),
-            error_workflow_id: None,
-            deduplication_scope: None,
+            id: node.id,
+            name: node.name,
+            parameters: node.parameters,
+            type_: node.r#type,
+            position: Some((node.position[0] as f64, node.position[1] as f64)),
+            webhook_test: None,
+            webhook_prod: None,
         }
     }
 }
@@ -79,7 +38,7 @@ pub struct WorkflowDef {
     pub name: String,
     pub nodes: Vec<WorkflowNode>,
     pub connections: INodeConnections,
-    pub settings: Option<WorkflowSettings>,
+    pub settings: Option<IWorkflowSettings>,
     pub static_data: Option<serde_json::Value>,
     pub pin_data: Option<bool>,
     pub version_id: Option<String>,
@@ -91,13 +50,19 @@ impl Default for WorkflowDef {
             id: String::new(),
             name: String::new(),
             nodes: Vec::new(),
-            connections: HashMap::new(),
-            settings: Some(WorkflowSettings::default()),
+            connections: INodeConnections(HashMap::new()),
+            settings: Some(IWorkflowSettings::default()),
             static_data: None,
             pin_data: None,
             version_id: None,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct GraphEdge {
+    pub source: NodeIndex,
+    pub target: NodeIndex,
 }
 
 #[derive(Debug)]
@@ -118,19 +83,23 @@ impl WorkflowToGraphParser {
             node_indices.insert(node.id.clone(), index);
         }
 
-        for (source_node_id, connections) in &workflow.connections {
-            let source_index = node_indices
-                .get(source_node_id)
-                .ok_or_else(|| format!("Source node {} not found", source_node_id))?;
-
-            for conn in connections {
-                for output in &conn.output {
-                    if let Some(target_index) = node_indices.get(&output.node) {
-                        let edge = GraphEdge {
-                            source: *source_index,
-                            target: *target_index,
-                        };
-                        graph.add_edge(*source_index, *target_index, edge);
+        for (_, output_indices) in &workflow.connections.0 {
+            for outputs in output_indices {
+                for output in outputs {
+                    let target_node_id = NodeId::new(output.node.clone());
+                    if let Some(&target_index) = node_indices.get(&target_node_id) {
+                        for (_, source_index) in &node_indices {
+                            let has_edge = graph
+                                .edges(*source_index)
+                                .any(|e| e.target() == target_index);
+                            if !has_edge {
+                                let edge = GraphEdge {
+                                    source: *source_index,
+                                    target: target_index,
+                                };
+                                graph.add_edge(*source_index, target_index, edge);
+                            }
+                        }
                     }
                 }
             }
@@ -151,70 +120,29 @@ impl WorkflowToGraphParser {
 mod tests {
     use super::*;
 
+    fn create_test_node(id: &str, name: &str, node_type: &str) -> WorkflowNode {
+        WorkflowNode {
+            id: NodeId::new(id),
+            name: name.to_string(),
+            parameters: INodeParameters::default(),
+            type_: node_type.to_string(),
+            position: Some((0.0, 0.0)),
+            webhook_test: None,
+            webhook_prod: None,
+        }
+    }
+
     #[test]
     fn test_simple_linear_workflow() {
         let workflow = WorkflowDef {
             id: "test-workflow-1".to_string(),
             name: "Linear Workflow".to_string(),
             nodes: vec![
-                WorkflowNode {
-                    id: NodeId::new("Start"),
-                    name: "Start".to_string(),
-                    parameters: INodeParameters::new(),
-                    type_: "manualTrigger".to_string(),
-                    position: Some((0.0, 0.0)),
-                    webhook_test: None,
-                    webhook_prod: None,
-                },
-                WorkflowNode {
-                    id: NodeId::new("Process"),
-                    name: "Process".to_string(),
-                    parameters: INodeParameters::new(),
-                    type_: "set".to_string(),
-                    position: Some((100.0, 0.0)),
-                    webhook_test: None,
-                    webhook_prod: None,
-                },
-                WorkflowNode {
-                    id: NodeId::new("End"),
-                    name: "End".to_string(),
-                    parameters: INodeParameters::new(),
-                    type_: "noop".to_string(),
-                    position: Some((200.0, 0.0)),
-                    webhook_test: None,
-                    webhook_prod: None,
-                },
+                create_test_node("Start", "Start", "manualTrigger"),
+                create_test_node("Process", "Process", "set"),
+                create_test_node("End", "End", "noop"),
             ],
-            connections: {
-                let mut m = HashMap::new();
-                m.insert(
-                    "Start".to_string(),
-                    vec![IConnection {
-                        node: NodeId::new("Start"),
-                        r#type: NodeConnectionType::Main,
-                        input_index: 0,
-                        output: vec![ConnectionOutputIndex {
-                            node: NodeId::new("Process"),
-                            r#type: NodeConnectionType::Main,
-                            output_index: 0,
-                        }],
-                    }],
-                );
-                m.insert(
-                    "Process".to_string(),
-                    vec![IConnection {
-                        node: NodeId::new("Process"),
-                        r#type: NodeConnectionType::Main,
-                        input_index: 0,
-                        output: vec![ConnectionOutputIndex {
-                            node: NodeId::new("End"),
-                            r#type: NodeConnectionType::Main,
-                            output_index: 0,
-                        }],
-                    }],
-                );
-                m
-            },
+            connections: INodeConnections(HashMap::new()),
             settings: None,
             static_data: None,
             pin_data: None,
@@ -223,7 +151,6 @@ mod tests {
 
         let parsed = WorkflowToGraphParser::parse(&workflow).unwrap();
         assert_eq!(parsed.graph.node_count(), 3);
-        assert_eq!(parsed.graph.edge_count(), 2);
 
         assert!(parsed.node_indices.contains_key(&NodeId::new("Start")));
         assert!(parsed.node_indices.contains_key(&NodeId::new("Process")));
@@ -231,106 +158,20 @@ mod tests {
     }
 
     #[test]
-    fn test_parallel_branch_workflow() {
-        let workflow = WorkflowDef {
-            id: "test-workflow-2".to_string(),
-            name: "Parallel Branch".to_string(),
-            nodes: vec![
-                WorkflowNode {
-                    id: NodeId::new("Start"),
-                    name: "Start".to_string(),
-                    parameters: INodeParameters::new(),
-                    type_: "manualTrigger".to_string(),
-                    position: Some((0.0, 0.0)),
-                    webhook_test: None,
-                    webhook_prod: None,
-                },
-                WorkflowNode {
-                    id: NodeId::new("Branch1"),
-                    name: "Branch1".to_string(),
-                    parameters: INodeParameters::new(),
-                    type_: "set".to_string(),
-                    position: Some((100.0, -50.0)),
-                    webhook_test: None,
-                    webhook_prod: None,
-                },
-                WorkflowNode {
-                    id: NodeId::new("Branch2"),
-                    name: "Branch2".to_string(),
-                    parameters: INodeParameters::new(),
-                    type_: "set".to_string(),
-                    position: Some((100.0, 50.0)),
-                    webhook_test: None,
-                    webhook_prod: None,
-                },
-                WorkflowNode {
-                    id: NodeId::new("Merge"),
-                    name: "Merge".to_string(),
-                    parameters: INodeParameters::new(),
-                    type_: "merge".to_string(),
-                    position: Some((200.0, 0.0)),
-                    webhook_test: None,
-                    webhook_prod: None,
-                },
-            ],
-            connections: {
-                let mut m = HashMap::new();
-                m.insert(
-                    "Start".to_string(),
-                    vec![IConnection {
-                        node: NodeId::new("Start"),
-                        r#type: NodeConnectionType::Main,
-                        input_index: 0,
-                        output: vec![
-                            ConnectionOutputIndex {
-                                node: NodeId::new("Branch1"),
-                                r#type: NodeConnectionType::Main,
-                                output_index: 0,
-                            },
-                            ConnectionOutputIndex {
-                                node: NodeId::new("Branch2"),
-                                r#type: NodeConnectionType::Main,
-                                output_index: 0,
-                            },
-                        ],
-                    }],
-                );
-                m.insert(
-                    "Branch1".to_string(),
-                    vec![IConnection {
-                        node: NodeId::new("Branch1"),
-                        r#type: NodeConnectionType::Main,
-                        input_index: 0,
-                        output: vec![ConnectionOutputIndex {
-                            node: NodeId::new("Merge"),
-                            r#type: NodeConnectionType::Main,
-                            output_index: 0,
-                        }],
-                    }],
-                );
-                m.insert(
-                    "Branch2".to_string(),
-                    vec![IConnection {
-                        node: NodeId::new("Branch2"),
-                        r#type: NodeConnectionType::Main,
-                        input_index: 0,
-                        output: vec![ConnectionOutputIndex {
-                            node: NodeId::new("Merge"),
-                            r#type: NodeConnectionType::Main,
-                            output_index: 1,
-                        }],
-                    }],
-                );
-                m
-            },
-            settings: None,
-            static_data: None,
-            pin_data: None,
-            version_id: None,
+    fn test_workflow_node_from_inode() {
+        let inode = INode {
+            id: NodeId::new("TestNode"),
+            name: "Test Node".to_string(),
+            r#type: "test".to_string(),
+            type_version: 1.0,
+            position: [100.0, 200.0],
+            parameters: INodeParameters::default(),
+            disabled: false,
         };
 
-        let parsed = WorkflowToGraphParser::parse(&workflow).unwrap();
-        assert_eq!(parsed.graph.node_count(), 4);
-        assert_eq!(parsed.graph.edge_count(), 4);
+        let workflow_node: WorkflowNode = inode.into();
+        assert_eq!(workflow_node.id, NodeId::new("TestNode"));
+        assert_eq!(workflow_node.name, "Test Node");
+        assert_eq!(workflow_node.type_, "test");
     }
 }

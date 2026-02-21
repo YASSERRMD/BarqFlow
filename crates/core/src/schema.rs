@@ -62,19 +62,20 @@ mod tests {
     #[test]
     fn test_execution_data_aggregation() {
         let data1 = INodeExecutionData::new(IDataObject::from(json!({"id": 1})));
-        let data2 = INodeExecutionData::new(IDataObject::from(json!({"id": 2})))
-            .with_binary(
-                "image".into(),
-                IBinaryData {
-                    content: BinaryDataContent::Memory { data: "base64content".into() },
-                    mime_type: "image/png".into(),
-                    file_type: Some(BinaryFileType::Image),
-                    file_name: None,
-                    directory: None,
-                    file_extension: None,
-                    file_size: None,
+        let data2 = INodeExecutionData::new(IDataObject::from(json!({"id": 2}))).with_binary(
+            "image".into(),
+            IBinaryData {
+                content: BinaryDataContent::Memory {
+                    data: "base64content".into(),
                 },
-            );
+                mime_type: "image/png".into(),
+                file_type: Some(BinaryFileType::Image),
+                file_name: None,
+                directory: None,
+                file_extension: None,
+                file_size: None,
+            },
+        );
 
         let mut connections = ITaskDataConnections::new();
         connections.push(0, vec![data1.clone()]);
@@ -86,7 +87,7 @@ mod tests {
     }
 }
 
-/// The type of connection between nodes. 
+/// The type of connection between nodes.
 /// Determines if it's the main data flow or a specialized trigger/catch flow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -119,7 +120,7 @@ pub struct IConnection {
 pub struct INodeConnections(pub HashMap<NodeConnectionType, Vec<Vec<IConnection>>>);
 
 /// User-defined parameters for a node configuration, mapping string keys to generic values.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(transparent)]
 pub struct INodeParameters(pub HashMap<String, crate::types::GenericValue>);
 
