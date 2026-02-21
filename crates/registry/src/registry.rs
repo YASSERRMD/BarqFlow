@@ -237,7 +237,7 @@ mod tests {
 
         async fn execute(
             &self,
-            _context: &(dyn IExecuteFunctions + Send + Sync),
+            _context: &dyn IExecuteFunctions,
         ) -> Result<Vec<Vec<barqflow_core::schema::INodeExecutionData>>, BarqError> {
             Ok(vec![vec![barqflow_core::schema::INodeExecutionData::new(IDataObject::new())]])
         }
