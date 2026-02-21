@@ -6,8 +6,8 @@ use axum::{
 };
 use barqflow_db::workflows::WorkflowRepo;
 use barqflow_db::models::WorkflowEntity;
-use hyper::StatusCode;
-use serde::{Deserialize, Serialize};
+use axum::http::StatusCode;
+use serde::Deserialize;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -56,9 +56,9 @@ async fn create_workflow(
         .workflow_repo
         .create(
             &payload.name,
-            &payload.nodes.to_string(),
-            &payload.connections.to_string(),
-            &payload.settings.to_string(),
+            payload.nodes,
+            payload.connections,
+            payload.settings,
         )
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;

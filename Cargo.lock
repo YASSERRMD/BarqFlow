@@ -368,9 +368,14 @@ dependencies = [
  "barqflow-api",
  "barqflow-core",
  "barqflow-db",
+ "barqflow-registry",
+ "dotenvy",
+ "reqwest",
  "sqlx",
  "tokio",
+ "tokio-cron-scheduler",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

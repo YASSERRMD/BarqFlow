@@ -3,7 +3,6 @@ use argon2::{
     Argon2,
 };
 use axum::{
-    async_trait,
     extract::FromRequestParts,
     http::{request::Parts, StatusCode},
 };
@@ -59,7 +58,6 @@ pub fn generate_jwt(user_id: &str, role: &str) -> Result<String, AuthError> {
     .map_err(|_| AuthError)
 }
 
-#[async_trait]
 impl<S> FromRequestParts<S> for Claims
 where
     S: Send + Sync,
