@@ -1,0 +1,11 @@
+[package]
+name = "barqflow-flow"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+barqflow-core = { path = "../core" }
+petgraph.workspace  = true
+rhai.workspace      = true
+serde_json.workspace = true
+thiserror.workspace = true
