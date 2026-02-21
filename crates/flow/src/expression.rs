@@ -315,7 +315,6 @@ mod tests {
     }
 
     #[test]
-    fn test_expression_with_parameters() {
     fn test_expression_engine_json_access() {
         let engine = ExpressionEngine::new();
 
