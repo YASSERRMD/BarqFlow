@@ -58,20 +58,26 @@ impl INodeType for FilterNode {
     async fn execute(&self, context: &dyn IExecuteFunctions) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
         let input_data = context.get_input_data(0)?;
         
-        let operation = context.get_node_parameter("operation", None)
-            .await
-            .map(|v| v.0.as_str().unwrap_or("equals").to_string())
-            .unwrap_or_else(|_| "equals".to_string());
+        // Fix for operation extraction
+        let operation_param = context.get_node_parameter("operation", None).await;
+        let operation = match operation_param {
+            Ok(v) => v.0.as_str().unwrap_or("equals").to_string(),
+            Err(_) => "equals".to_string(),
+        };
             
-        let property1 = context.get_node_parameter("property1", None)
-            .await
-            .map(|v| v.0.as_str().unwrap_or("").to_string())
-            .unwrap_or_else(|_| "".to_string());
+        // Fix for property1 extraction
+        let property1_param = context.get_node_parameter("property1", None).await;
+        let property1 = match property1_param {
+            Ok(v) => v.0.as_str().unwrap_or("").to_string(),
+            Err(_) => "".to_string(),
+        };
 
-        let property2 = context.get_node_parameter("property2", None)
-            .await
-            .map(|v| v.0.as_str().unwrap_or("").to_string())
-            .ok();
+        // Fix for property2 extraction
+        let property2_param = context.get_node_parameter("property2", None).await;
+        let property2: Option<String> = match property2_param {
+            Ok(v) => v.0.as_str().map(|s| s.to_string()),
+            Err(_) => None,
+        };
 
         let mut output_items = Vec::new();
 
@@ -79,10 +85,22 @@ impl INodeType for FilterNode {
             let value1 = item.json.0.get(&property1).cloned();
             
             let should_keep = match (&value1, &property2, operation.as_str()) {
-                (Some(v1), Some(v2), "equals") => v1 == v2,
-                (Some(v1), Some(v2), "notEquals") => v1 != v2,
-                (Some(v1), Some(v2), "contains") => {
-                    if let (Some(s1), Some(s2)) = (v1.as_str(), v2.as_str()) {
+                (Some(v1), Some(ref v2), "equals") => {
+                    if let (Some(s1), Some(s2)) = (v1.as_str(), Some(v2.as_str())) {
+                        s1 == s2
+                    } else {
+                        false
+                    }
+                },
+                (Some(v1), Some(ref v2), "notEquals") => {
+                    if let (Some(s1), Some(s2)) = (v1.as_str(), Some(v2.as_str())) {
+                        s1 != s2
+                    } else {
+                        false
+                    }
+                },
+                (Some(v1), Some(ref v2), "contains") => {
+                    if let (Some(s1), Some(s2)) = (v1.as_str(), Some(v2.as_str())) {
                         s1.contains(s2)
                     } else {
                         false
@@ -116,24 +134,28 @@ impl INodeType for ItemListsNode {
     async fn execute(&self, context: &dyn IExecuteFunctions) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
         let input_data = context.get_input_data(0)?;
         
-        let mode = context.get_node_parameter("mode", None)
-            .await
-            .map(|v| v.0.as_str().unwrap_or("splitInBatches").to_string())
-            .unwrap_or_else(|_| "splitInBatches".to_string());
+        // Fix for mode extraction
+        let mode_param = context.get_node_parameter("mode", None).await;
+        let mode = match mode_param {
+            Ok(v) => v.0.as_str().unwrap_or("splitInBatches").to_string(),
+            Err(_) => "splitInBatches".to_string(),
+        };
 
-        let batch_size = context.get_node_parameter("batchSize", None)
-            .await
-            .ok()
-            .and_then(|v| v.0.as_u64())
-            .map(|n| n as usize)
-            .unwrap_or(1);
+        // Fix for batch_size extraction
+        let batch_size_param = context.get_node_parameter("batchSize", None).await;
+        let batch_size = match batch_size_param {
+            Ok(v) => v.0.as_u64().map(|n| n as usize).unwrap_or(1),
+            Err(_) => 1,
+        };
 
         match mode.as_str() {
             "splitInBatches" => {
-                let include_others = context.get_node_parameter("includeOtherElements", None)
-                    .await
-                    .map(|v| v.0.as_bool().unwrap_or(false))
-                    .unwrap_or(false);
+                // Fix for include_others extraction
+                let include_others_param = context.get_node_parameter("includeOtherElements", None).await;
+                let include_others = match include_others_param {
+                    Ok(v) => v.0.as_bool().unwrap_or(false),
+                    Err(_) => false,
+                };
 
                 let items_per_batch = input_data.chunks(batch_size).map(|chunk| {
                     chunk.iter().cloned().collect::<Vec<_>>()
