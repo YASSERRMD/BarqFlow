@@ -1,3 +1,4 @@
+pub mod code;
 pub mod deduplication;
 pub mod logic;
 pub mod manipulation;
