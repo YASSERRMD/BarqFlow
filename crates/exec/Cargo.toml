@@ -1,0 +1,12 @@
+[package]
+name = "barqflow-exec"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+barqflow-core = { path = "../core" }
+barqflow-flow = { path = "../flow" }
+barqflow-registry = { path = "../registry" }
+tokio.workspace     = true
+tracing.workspace   = true
+thiserror.workspace = true
