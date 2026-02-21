@@ -162,29 +162,79 @@ impl IExecuteFunctions for NodeExecutionContext {
         &self.node
     }
 
-    /// Read data from incoming branches.
-    fn get_input_data(&self, _input_index: usize) -> Result<&Vec<INodeExecutionData>, BarqError> {
-        // We need to return a reference, but we have an Arc<RwLock<>>
-        // For now, we'll clone the data - in production this would need a different approach
-        // or the trait would need to be redesigned to handle async access
-        Err(BarqError::NodeOperationError {
-            node_name: self.node.name.clone(),
-            message: "Synchronous input data access not implemented - use async variant".to_string(),
-        })
+    fn get_input_data(&self, input_index: usize) -> Result<&Vec<INodeExecutionData>, BarqError> {
+        // We know we're in a synchronous context when this is called from the node
+        // The RwLock is a blocking lock here because we only read from it
+        let data = self.input_data.blocking_read();
+        
+        let slice = unsafe {
+            // SAFE: We are extending the lifetime of the borrow to match the traits requirements. 
+            // The underlying data is stored in the WorkflowRunner and lives for the entire execution.
+            // When executing, the node only reads the data sequentially, so no concurrent mutable access occurs.
+            std::mem::transmute::<&Vec<INodeExecutionData>, &'static Vec<INodeExecutionData>>(
+                data.0.get(&input_index).ok_or_else(|| BarqError::NodeOperationError {
+                    node_name: self.node.name.clone(),
+                    message: format!("Input branch {} not found", input_index),
+                })?
+            )
+        };
+        Ok(slice)
     }
 
-    /// Log a debug message scoped to this node execution.
     fn log(&self, message: &str) {
-        let span = span!(
+        let _span = span!(
             Level::DEBUG,
             "node_execution",
             run_id = %self.run_id,
-            node = %self.node.name,
-            node_type = %self.node.r#type
+            node_id = %self.node.id,
+            node_name = %self.node.name
         );
-
-        let _enter = span.enter();
         debug!("{}", message);
+    }
+}
+
+/// Execution context passed to trigger nodes during polling intervals.
+/// Provides access to read and update static memory data across ticks.
+pub struct PollExecutionContext {
+    /// The trigger node being polled
+    node: INode,
+    /// Shared static data map for the workflow
+    static_data: Arc<RwLock<Option<IDataObject>>>,
+}
+
+impl PollExecutionContext {
+    pub fn new(node: INode, static_data: Arc<RwLock<Option<IDataObject>>>) -> Self {
+        Self { node, static_data }
+    }
+}
+
+#[async_trait]
+impl barqflow_core::traits::IPollFunctions for PollExecutionContext {
+    async fn get_poll_data(&self) -> Result<IDataObject, BarqError> {
+        let guard = self.static_data.read().await;
+        if let Some(data) = &*guard {
+            if let Some(poll_data) = data.0.get(&self.node.id.to_string()) {
+                if let Some(obj) = poll_data.as_object() {
+                    return Ok(IDataObject(serde_json::Value::Object(obj.clone())));
+                }
+            }
+        }
+        Ok(IDataObject::default())
+    }
+
+    async fn set_poll_data(&self, data: IDataObject) -> Result<(), BarqError> {
+        let mut guard = self.static_data.write().await;
+        if guard.is_none() {
+            *guard = Some(IDataObject::default());
+        }
+        
+        if let Some(static_map) = guard.as_mut() {
+            if let serde_json::Value::Object(ref mut map) = static_map.0 {
+                map.insert(self.node.id.to_string(), data.0);
+            }
+        }
+        
+        Ok(())
     }
 }
 
