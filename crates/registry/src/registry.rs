@@ -4,9 +4,6 @@
 
 use crate::node_properties::INodeProperties;
 use barqflow_core::traits::INodeType;
-use barqflow_core::types::IDataObject;
-use barqflow_core::errors::BarqError;
-use serde_json::json;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use barqflow_core::traits::ICredentialType;
@@ -263,7 +260,10 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use barqflow_core::traits::IExecuteFunctions;
+    use barqflow_core::types::IDataObject;
+    use barqflow_core::errors::BarqError;
     use crate::node_properties::{INodeProperty, NodePropertyType};
+    use serde_json::json;
 
     // Mock node implementation for testing
     struct MockNode;
