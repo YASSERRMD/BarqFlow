@@ -1,0 +1,16 @@
+[package]
+name = "barqflow-api"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+barqflow-core = { path = "../core" }
+barqflow-exec = { path = "../exec" }
+sqlx.workspace       = true
+serde_json.workspace = true
+thiserror.workspace  = true
+uuid.workspace       = true
+aes-gcm.workspace    = true
+argon2.workspace     = true
+jsonwebtoken.workspace = true
+tokio.workspace      = true

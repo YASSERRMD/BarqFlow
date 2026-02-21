@@ -1,0 +1,9 @@
+[package]
+name = "barqflow-registry"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+barqflow-core = { path = "../core" }
+async-trait.workspace = true
+tokio.workspace       = true

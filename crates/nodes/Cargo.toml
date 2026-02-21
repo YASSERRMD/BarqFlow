@@ -1,0 +1,14 @@
+[package]
+name = "barqflow-nodes"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+barqflow-core     = { path = "../core" }
+barqflow-registry = { path = "../registry" }
+reqwest.workspace   = true
+rhai.workspace      = true
+tokio.workspace     = true
+serde_json.workspace = true
+tokio-cron-scheduler.workspace = true
+async-trait.workspace = true

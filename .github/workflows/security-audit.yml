@@ -1,0 +1,9 @@
+name: Security Audit
+on:
+  schedule:
+    - cron: '0 0 * * *'
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
