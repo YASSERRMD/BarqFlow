@@ -10,3 +10,7 @@ barqflow-registry = { path = "../registry" }
 tokio.workspace     = true
 tracing.workspace   = true
 thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+async-trait.workspace = true
