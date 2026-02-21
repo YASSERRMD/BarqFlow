@@ -1,0 +1,58 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/core",
+    "crates/flow",
+    "crates/exec",
+    "crates/registry",
+    "crates/nodes",
+    "crates/api",
+    "crates/server",
+    "bin/barqflow",
+]
+
+[workspace.package]
+version      = "0.1.0"
+edition      = "2021"
+authors      = ["Permus Software House <dev@permus.io>"]
+license      = "BUSL-1.1"
+repository   = "https://github.com/permus/barqflow"
+rust-version = "1.80"
+
+[workspace.dependencies]
+# async runtime
+tokio        = { version = "1", features = ["full"] }
+# serialization
+serde        = { version = "1", features = ["derive"] }
+serde_json   = "1"
+# ids
+uuid         = { version = "1", features = ["v4", "serde"] }
+# error handling
+thiserror    = "2"
+anyhow       = "1"
+# logging
+tracing      = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# async traits
+async-trait  = "0.1"
+# http
+axum         = { version = "0.8", features = ["ws", "multipart", "macros"] }
+tower        = "0.5"
+tower-http   = { version = "0.6", features = ["cors", "trace", "compression-gzip"] }
+reqwest      = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+# database
+sqlx         = { version = "0.8", features = ["postgres", "sqlite", "runtime-tokio", "migrate", "uuid"] }
+# scripting engine
+rhai         = "1"
+# graph
+petgraph     = "0.6"
+# crypto
+aes-gcm      = "0.10"
+argon2       = "0.5"
+# auth
+jsonwebtoken = "9"
+# scheduling
+tokio-cron-scheduler = "0.13"
+# config
+config       = "0.14"
+dotenvy      = "0.15"
