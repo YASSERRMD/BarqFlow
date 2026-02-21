@@ -1,144 +1,353 @@
-# BarqFlow Complete Implementation Plan (Deep n8n Architecture)
+# BarqFlow Massive Implementation Architecture (50+ Phases)
 
-This detailed plan breaks down the entire system into highly granular, independently verifiable phases based heavily on the actual n8n codebase (specifically `packages/core` and `packages/workflow`).
-
-Each phase builds upon the previous one without cyclic dependencies. The tasks inside each phase represent the atomic commits that will be made to branch `phase_X_xyz`.
+This architecture document represents a hyper-granular, totally atomic 50+ phase implementation plan, replicating the entire feature set of n8n into a Rust virtual workspace. Every single phase operates completely independently, and every item is an atomic Git commit mapped to an isolated branch.
 
 ---
 
-## Phase 2: Core Primitives & Interfaces (`crates/core`)
-*Purpose: Define the absolutely lowest-level data structures based on n8n's `workflow/src/interfaces.ts`. Zero dependencies.*
+## Part 1: Core Primitives & Base Schemas (`crates/core`)
 
-- [ ] Define `ItemId` and `RunId` UUID aliases in `types.rs`
-- [ ] Define `IBinaryData` struct matching n8n (mimeType, fileExtension, base64 payload vs fs reference) in `types.rs`
-- [ ] Define `IDataObject` wrapper (mapping to `serde_json::Value` / `HashMap`) in `types.rs`
-- [ ] Define `INodeExecutionData` struct (json data + binary data references) in `schema.rs`
-- [ ] Define `INodeParameters` enum for raw input values in `schema.rs`
-- [ ] Define `INodeConnections` map structure representing the graph edges in `schema.rs`
-- [ ] Define `INode` struct representing a single step definition in `schema.rs`
-- [ ] Define `IWorkflow` struct (the entire graph of nodes and connections) in `schema.rs`
-- [ ] Implement `BarqError` variants matching n8n: `ExpressionError`, `NodeApiError`, `NodeOperationError` in `errors.rs`
-- [ ] Define strictly typed `INodeType` trait (the logic implementation of a Node) in `traits.rs`
-- [ ] Define strictly typed `IExecuteFunctions` trait (the context passed to a running node) in `traits.rs`
-- [ ] Implement unit tests for `INodeExecutionData` serialization
+### Phase 2: Core Identification Types
+- [ ] Define `ItemId` (UUID mapping)
+- [ ] Define `RunId` (UUID mapping)
+- [ ] Define `WorkflowId` (UUID mapping)
+- [ ] Define `NodeId` (String alias)
+- [ ] Write unit tests for ID serialization/deserialization
 
-## Phase 3: Graph Traversal Engine (`crates/flow`)
-*Purpose: Process the `IWorkflow` struct. Convert connections into an executable graph. Independent of nodes.*
+### Phase 3: Core Data Structures (JSON)
+- [ ] Define `IDataObject` wrapping `serde_json::Map`
+- [ ] Define `GenericValue` wrapping `serde_json::Value`
+- [ ] Implement `From<serde_json::Value>` traits for `IDataObject`
+- [ ] Write serialization tests for deeply nested JSON objects
 
-- [ ] Initialize `petgraph` Directed Acyclic Graph (DAG) structures
-- [ ] Implement function to parse `IWorkflow` into `petgraph::DiGraph` covering Main/Alternative routing
-- [ ] Implement Topological Sort to generate strict execution ordering
-- [ ] Implement Cycle Detection (Return `BarqError::WorkflowOperationError` if cycle found)
-- [ ] Implement Parent Node Resolver (find ancestors of a specific node for data resolution)
-- [ ] Write suite of unit tests for Graph topological sorting
-- [ ] Write suite of unit tests for Cycle Detection
+### Phase 4: Core Data Structures (Binary)
+- [ ] Define `BinaryFileType` Enum (text, json, image, audio, video, pdf, html)
+- [ ] Define `IBinaryData` struct (mimeType, fileName, fileExtension)
+- [ ] Implement abstract pointers for Binary data (memory buffer vs filesystem reference)
+- [ ] Write unit tests for Binary metadata serialization
 
-## Phase 4: Expression Evaluation Engine (`crates/flow`)
-*Purpose: Implement n8n's `{{ $json.data }}` expression syntax using Rhai. Independent of node logic.*
+### Phase 5: Core Execution Data Models
+- [ ] Define `INodeExecutionData` composed of JSON data and optional binary references
+- [ ] Define `ITaskDataConnections` representing inputs passed into a node during execution
+- [ ] Define `NodeExecutionHint` for UI messaging
+- [ ] Write aggregation tests for `INodeExecutionData` arrays
 
-- [ ] Set up `rhai` Engine instance with secure sandboxing
-- [ ] Implement Expression Parser to extract `{{ }}` blocks from strings
-- [ ] Create Rhai `Scope` builder to inject `$json`, `$binary`, `$env`, `$parameter`
-- [ ] Implement Context Traversal logic (fetching `$json` from previously executed nodes)
-- [ ] Add Rhai registered functions mapping to n8n built-ins (e.g., `$today`, `$now`, `$evaluateExpression`)
-- [ ] Implement deep-object recursive expression evaluation
-- [ ] Write comprehensive unit tests for syntax parsing
-- [ ] Write comprehensive unit tests for Context interpolation
+### Phase 6: Core Graph Models
+- [ ] Define `NodeConnectionType` Enum (main, trigger, catch)
+- [ ] Define `IConnection` struct (target node, type, output index)
+- [ ] Define `INodeConnections` map structure
+- [ ] Define `INodeParameters` map structure for user-defined node config
+- [ ] Define `IWorkflowSettings` (timezone, error workflow triggers, deduplication scope)
+- [ ] Define `WorkflowDef` combining nodes, connections, and settings
 
-## Phase 5: Executable Node Context & Binary Data (`crates/exec`)
-*Purpose: Build the `IExecuteFunctions` concrete implementation that wraps a running node, and handle binary streams.*
+### Phase 7: Core System Errors
+- [ ] Implement `BarqError` Enum using `thiserror`
+- [ ] Add `WorkflowActivationError` variant
+- [ ] Add `ExecutionCancelledError` variant
+- [ ] Add `NodeApiError` variant
+- [ ] Add `ExpressionError` variant
+- [ ] Add `NodeOperationError` variant
+- [ ] Write error display trait implementations
 
-- [ ] Implement `BinaryDataManager` mapped to local `fs` (to abstract away large buffer memory limits)
-- [ ] Implement `GetNodeParameter` utility with Rhai expression evaluation hooks
-- [ ] Implement `GetNodeParameter` type assertions (`ensureType: string/number/boolean`)
-- [ ] Implement `InputData` router (merging outputs from multiple upstream branches)
-- [ ] Implement Context Logger proxy (redirecting node logs to system tracing spans)
-- [ ] Implement `ReturnJsonArray` standardized helper
-- [ ] Write tests validating that Binary streams are correctly written and read from the temp FS
+### Phase 8: Core Interfaces & Traits
+- [ ] Define `INodeType` async trait (execute methods, node metadata)
+- [ ] Define `IExecuteFunctions` trait (context provided to running nodes)
+- [ ] Define `ICredentialType` trait (authentication abstractions)
+- [ ] Define `IPollFunctions` trait (specific context for polling triggers)
 
-## Phase 6: Core Execution Loop & Sub-Workflows (`crates/exec`)
-*Purpose: The main runner that walks the topological graph and invokes nodes sequentially.*
+---
 
-- [ ] Define `IRun` and `IRunExecutionData` structs for state tracking
-- [ ] Create `ExecutionState` manager to track memory buffers per node
-- [ ] Implement the `runNode` method (calls the active trait and catches panics/errors)
-- [ ] Implement the main topological execution while-loop (forward propagation)
-- [ ] Implement Conditional Branching logic (handling nodes that return multi-index arrays like IF/Switch)
-- [ ] Implement **Sub-Workflow Runner Hook** (allowing a node to spawn a child execution tracker)
-- [ ] Implement Checkpointing hook system (for pausing/resuming async workflows/waiting for webhooks)
-- [ ] Implement Error Routing (if node fails, trigger `Error Trigger` node if exists)
-- [ ] Write end-to-end unit tests executing a dummy 3-node graph
+## Part 2: Graph Engine & Expression Resolver (`crates/flow`)
 
-## Phase 7: Node & Credential Registry & Sandbox (`crates/registry`)
-*Purpose: The runtime map of all installed nodes and security boundaries.*
+### Phase 9: Graph Infrastructure Initialization
+- [ ] Setup `petgraph` dependency
+- [ ] Define `GraphNode` and `GraphEdge` typed indices
+- [ ] Implement `WorkflowToGraphParser` returning `petgraph::DiGraph`
+- [ ] Write unit tests validating complex multi-branch graph generation
 
-- [ ] Define `INodeTypeDescription` structs for UI form generation (matching n8n's properties model)
-- [ ] Implement `NodeRegistry` thread-safe Singleton (RwLock wrapping a HashMap of NodeTypes)
-- [ ] Define `ICredentialType` structure for defining UI forms for Auth
-- [ ] Implement credential Pre-Authentication and Validation hooks capability
-- [ ] Implement `CredentialRegistry` thread-safe Singleton
-- [ ] Create macros for static Node Registration at startup
-- [ ] Write registry unit tests validating duplicate-registration handling
+### Phase 10: Graph Traversal & Topo Sort
+- [ ] Implement `isExecutableDAG` cycle detection validation
+- [ ] Implement standard forward topological sort for sequential execution
+- [ ] Implement parent/ancestor resolution mapping (finding all paths to Node A)
+- [ ] Write tests ensuring triggers are always topologically sorted first
 
-## Phase 8: Standard Built-in Nodes Foundation (`crates/nodes`)
-*Purpose: Implement the absolute baseline nodes necessary to build basic workflows.*
+### Phase 11: Expression Syntax Parser (Rhai)
+- [ ] Set up `rhai` Engine sandbox parameters
+- [ ] Implement `Regex`-based extractor for `{{ }}` blocks inside generic strings
+- [ ] Implement AST validator for isolated `rhai` script blocks
+- [ ] Write unit tests testing valid vs invalid expression block syntax
 
-- [ ] Implement `ManualTrigger` node (Entrypoint for testing)
-- [ ] Implement `Set` node (Basic data mutation & expression usage)
-- [ ] Implement `If` node (Basic boolean branching outputting to index 0 or 1)
-- [ ] Implement `Switch` node (Multi-branch routing mapping strings to outputs)
-- [ ] Implement `ExecuteWorkflow` node (Invokes the Sub-Workflow hooks from `crates/exec`)
-- [ ] Write isolated execution tests for `Set`, `If`, and `Switch` nodes
+### Phase 12: Expression Context Injection
+- [ ] Create specialized `rhai::Scope` generator
+- [ ] Inject `$json` mapping to the current item's execution data
+- [ ] Inject `$binary` mapping to current item's binary keys
+- [ ] Inject `$parameter` mapping to the active node's parameters
+- [ ] Inject `$env` mapping to global system environment variables
+- [ ] Write context injection safety bounds tests
 
-## Phase 9: Complex Nodes & Deduplication (`crates/nodes`)
-*Purpose: Implement nodes requiring external IO, scheduling, and stateful triggers.*
+### Phase 13: Expression Node State Traversal
+- [ ] Implement `$item("NodeName").$json` abstraction to search backward in the graph
+- [ ] Implement graph backward traversal caching to optimize ancestor lookups
+- [ ] Hook the graph traversal results into the `rhai::Scope` functions
+- [ ] Write integration block tests for complex `$item` expressions
 
-- [ ] Implement `HttpRequest` node using `reqwest` (GET/POST/Auth/JSON serialization)
-- [ ] Implement `Webhook` trigger node (Requires tight integration with Server router)
-- [ ] Implement `Cron` trigger node using `tokio-cron-scheduler`
-- [ ] Implement `Code` node (Executing raw Javascript-like Rhai scripts safely)
-- [ ] Implement `PollingTrigger` abstract logic, handling generic setInterval style runs
-- [ ] Implement `DeduplicationService` (Ensuring polling triggers don't process the same ID twice)
-- [ ] Write integration block tests for `HttpRequest` mock calls
+### Phase 14: Built-in Expression Functions
+- [ ] Register `now()` equivalent in Rhai
+- [ ] Register `today()` equivalent in Rhai
+- [ ] Register `hash()` manipulation functions in Rhai
+- [ ] Register URL decoding/encoding string functions in Rhai
+- [ ] Write tests validating that custom Rhai functions execute correctly
 
-## Phase 10: Database Access Layer (`crates/api`)
-*Purpose: Persistence layer using SQLx. Strictly CRUD, no web routing.*
+---
 
-- [ ] Create SQLx Postgres Connection Pool builder
-- [ ] Write DB Migration for `workflow_entities` (id, name, active, definitions, timestamps)
-- [ ] Write DB Migration for `execution_entities` (id, workflow_id, status, data, wait_till, stopped_at)
-- [ ] Write DB Migration for `credential_entities` (id, name, type, data_encrypted)
-- [ ] Write DB Migration for `static_data` (Stores deduplication markers and polling cursors)
-- [ ] Implement `WorkflowRepository` struct with CRUD operations
-- [ ] Implement `ExecutionRepository` struct with insert and status-update operations
-- [ ] Implement `AES-256-GCM` encryption/decryption module for credentials
-- [ ] Implement `CredentialRepository` struct with implicit encryption
-- [ ] Write integration tests for Repositories using SQLx mock/test macros
+## Part 3: Node Ecosystem & Security (`crates/registry`)
 
-## Phase 11: REST API, Auth & OAuth2 Flows (`crates/api`)
-*Purpose: Axum controllers exposing the repositories.*
+### Phase 15: Node Form Descriptions (UI Contracts)
+- [ ] Define `INodeProperties` structs representing UI components (Strings, Booleans, Options, Collections)
+- [ ] Define `NodePropertyOptions` for dropdowns
+- [ ] Define `NodeDisplayOptions` (show parameter X only if parameter Y is Z)
+- [ ] Write serialization tests ensuring UI contracts map perfectly to JSON
 
-- [ ] Set up `Argon2` password hashing module
-- [ ] Construct JWT generation and validation layers
-- [ ] Implement `POST /rest/login` controller
-- [ ] Implement `GET /rest/workflows` and `POST /rest/workflows` controllers
-- [ ] Implement `GET /rest/node-types` registry exposition controller for the UI
-- [ ] Implement `POST /rest/credentials/test` endpoint to invoke the validation hooks
-- [ ] Implement **OAuth2 Callback Endpoints** (`/rest/oauth2-credential/callback`)
-- [ ] Implement `POST /rest/executions/` controller manual workflow triggering
-- [ ] Implement `GET /rest/executions/:id` controller for polling UI
-- [ ] Write Axum `Router` API unit tests using `tower::ServiceExt`
+### Phase 16: Node Type Registry
+- [ ] Implement `NodeRegistry` thread-safe `RwLock<HashMap>`
+- [ ] Implement `register_node` macro/function
+- [ ] Implement `get_node_by_name` lookup
+- [ ] Implement versioning alias resolution (falling back to v1 if v2 missing)
+- [ ] Write duplicate registration conflict tests
 
-## Phase 12: Server Orchestration (`crates/server`)
-*Purpose: The main entrypoint that wires Repositories, Registries, Exec Engine, and API together.*
+### Phase 17: Credential Form Descriptions (UI Contracts)
+- [ ] Define `ICredentialsProperties` structs
+- [ ] Define generic `OAuth2` specific pre-built form models
+- [ ] Define `Authenticate` generic injection properties (headers vs body vs query)
+- [ ] Write serialization tests for Authentication UI configurations
 
-- [ ] Initialize `tracing-subscriber` env logger
-- [ ] Initialize SQLx DB pool and run automated migrations
-- [ ] Populate `NodeRegistry` with all implementations from `crates/nodes`
-- [ ] Setup Axum state wrapping DB Pool + Registry + Exec Engine
-- [ ] Spawn detached Tokio task for the `Cron` trigger manager polling
-- [ ] Dynamically mount `Webhook` trigger Axum routes mapping directly to the active workflow cache
-- [ ] Start Axum HTTP listener on standard port
-- [ ] Manually test server boot sequence
+### Phase 18: Credential Registry & Validation
+- [ ] Implement `CredentialRegistry` `RwLock<HashMap>`
+- [ ] Implement `register_credential` function
+- [ ] Implement `ICredentialTestRequest` rules engine to ping APIs for validation
+- [ ] Write unit tests testing validation rule processing
 
-*(Web UI phase omitted from independent phased plan as per instructions)*
+---
+
+## Part 4: Execution Engine & Lifecycle (`crates/exec`)
+
+### Phase 19: Binary Data Filesystem Abstraction
+- [ ] Implement `BinaryStorageConfig` (path directory resolution)
+- [ ] Implement `store_binary_to_fs` taking `axum::body::Bytes`
+- [ ] Implement `read_binary_from_fs` returning streaming chunks
+- [ ] Implement `delete_binary_from_fs` for cleanup
+- [ ] Write integration tests for temp file lifecycle
+
+### Phase 20: Execution State Management
+- [ ] Define `RunExecutionData` struct representing a full execution log
+- [ ] Implement `ExecutionStateManager` wrapping active runs
+- [ ] Implement metrics counters for `Nodes Executed`, `Data Processed`
+- [ ] Write thread-safety tests for state managers updating the same run
+
+### Phase 21: Node Execution Context (IExecuteFunctions)
+- [ ] Implement `GetNodeParameter` utility tying into the Rhai expression engine
+- [ ] Implement `EnsureType` coercions inside `GetNodeParameter`
+- [ ] Implement `GetCredentials` mapping to SQLx DB (mocked for now)
+- [ ] Implement Logger Proxies injecting `RunId` and `NodeId` into standard tracing spans
+- [ ] Write parameter resolution tests
+
+### Phase 22: Execution Router (The Core Loop)
+- [ ] Implement single-thread `run_node` wrapper that traps panics
+- [ ] Implement topological graph walker consuming topological index arrays
+- [ ] Implement mapping between `Node A`'s output array and `Node B`'s input items
+- [ ] Add item loop constraints (Iterating over multiple items inside a single node execution)
+- [ ] Write tests ensuring inputs properly map to outputs without loss
+
+### Phase 23: Branching & Conditional Routing
+- [ ] Modifying graph walker to process nested arrays (Output Index 0 vs Index 1)
+- [ ] Handle `If` / `Switch` node behaviors where path execution splits
+- [ ] Handle `Merge` nodes waiting for multiple incoming branches to resolve
+- [ ] Write complex branching execution tests
+
+### Phase 24: Execution Suspend & Resume (Checkpointing)
+- [ ] Implement `Wait` node serialization hooks
+- [ ] Suspend execution loop, serialize state to DB, and drop the Tokio task
+- [ ] Implement `Resume` hook reconstructing the execution context from DB
+- [ ] Write integration test pausing and resuming a mock execution
+
+### Phase 25: Error Triggers & Handlers
+- [ ] Implement conditional `ErrorTrigger` checks
+- [ ] If execution fails, spawn secondary execution with `ErrorTrigger` workflow
+- [ ] Implement `Continue On Fail` boolean flag handling for standard nodes
+- [ ] Write tests ensuring errors correctly trigger the fallback loops
+
+### Phase 26: Sub-Workflow Invocation
+- [ ] Implement `ExecuteWorkflow` runtime hook
+- [ ] Allow a node to push a new Execution ID onto the stack and await its `RunExecutionData` output
+- [ ] Aggregate child sub-workflow outputs back into the parent node output
+- [ ] Write nested workflow integration tests
+
+---
+
+## Part 5: Node Sub-Systems & Triggers (`crates/nodes`)
+
+### Phase 27: Base Manipulation Nodes
+- [ ] Implement `SetNode` (Overriding fields, resolving expressions)
+- [ ] Implement `FilterNode` (Removing items from the array based on expressions)
+- [ ] Implement `ItemListsNode` (Splitting items into batches)
+- [ ] Write isolated execution tests for manipulation elements
+
+### Phase 28: Base Logic Nodes
+- [ ] Implement `IfNode` (Boolean routing to paths 0 and 1)
+- [ ] Implement `SwitchNode` (String multi-routing mapping values to paths)
+- [ ] Implement `MergeNode` (Joining two diverse branches into one output array)
+- [ ] Write isolated branching tests
+
+### Phase 29: Base Interaction Nodes
+- [ ] Implement `HttpRequestNode` (reqwest integration with complex JSON/Form parsing)
+- [ ] Implement URL encoding/decoding, redirect following, proxy config
+- [ ] Implement Binary file downloading inside `HttpRequestNode`
+- [ ] Write network mocking tests (using mockito/wiremock)
+
+### Phase 30: Base Trigger Nodes
+- [ ] Implement `ManualTriggerNode` (For UI-based tests)
+- [ ] Implement `WebhookNode` (Static configuration mapping methods to logic)
+- [ ] Write structural tests for Webhook route validation
+
+### Phase 31: Scheduled Polling Engine
+- [ ] Implement `tokio-cron-scheduler` core event loop
+- [ ] Setup memory map of active Cron schedules linked to `WorkflowId`
+- [ ] Implement `CronTriggerNode`
+- [ ] Write automated tick tests for cron triggers
+
+### Phase 32: Arbitrary Polling Triggers
+- [ ] Define `IPollFunctions` trait
+- [ ] Implement generic polling loop (e.g., checking an API every X minutes)
+- [ ] Hook polling errors into the standard telemetry stream
+- [ ] Write tests simulating a mock polling trigger
+
+### Phase 33: Deduplication Service
+- [ ] Implement `DeduplicationManager`
+- [ ] Handle `incremented_key` vs `array_of_ids` deduplication modes
+- [ ] Wrap polling nodes in Deduplication wrappers so events fire only once
+- [ ] Write hash-based deduplication verification tests
+
+### Phase 34: Sandbox Execution Nodes
+- [ ] Implement `CodeNode` (User-defined rhai/JS evaluation)
+- [ ] Implement deep isolation parameters to prevent arbitrary execution
+- [ ] Implement structured return mapping (forcing Code node to return valid DataObject Arrays)
+- [ ] Write sandbox escape prevention tests
+
+---
+
+## Part 6: Persistence & ORM Layers (`crates/api`)
+
+### Phase 35: DB Core Infrastucture
+- [ ] Setup `sqlx` Postgres Config with max connection limits
+- [ ] Setup `uuid` generating functions internally
+- [ ] Implement automatic DB Migration execution on boot
+- [ ] Write basic DB connectivity test logic
+
+### Phase 36: Workflow CRUD Entities
+- [ ] Database migration for `workflow_entity`
+- [ ] Database migration for `tag_entity` and many-to-many relationships
+- [ ] Implement `WorkflowRepository` (Find, Create, Update, Delete)
+- [ ] Implement `findAllByActive` specialized query
+- [ ] Write SQLx test macros for workflow entity lifecycle
+
+### Phase 37: Execution CRUD Entities
+- [ ] Database migration for `execution_entity`
+- [ ] Implement `ExecutionRepository`
+- [ ] Implement specific update queries optimizing massive JSONB payload storage
+- [ ] Implement pruning jobs to delete old executions
+- [ ] Write tests for execution fetching and payload sizes
+
+### Phase 38: Credential Cryptography Layer
+- [ ] Implement `AES-256-GCM` generic encryption module
+- [ ] Implement secret key derivation from system environment variable
+- [ ] Serialize objects to/from encrypted Base64 strings
+- [ ] Write encryption verification testing
+
+### Phase 39: Credential CRUD Entities
+- [ ] Database migration for `credential_entity`
+- [ ] Implement `CredentialRepository`
+- [ ] Integrate Cryptography layer automatically into Repository reads/writes
+- [ ] Write tests ensuring plain text credentials never enter postgres queries
+
+### Phase 40: Static Data Storage
+- [ ] Database migration for `static_data` (Stores polling cursors, dedup keys)
+- [ ] Implement `StaticDataRepository`
+- [ ] Link `StaticDataRepository` directly into `crates/exec` polling logic
+- [ ] Write data continuity tests
+
+### Phase 41: User CRUD Entities
+- [ ] Database migration for `user_entity`
+- [ ] Implement `UserRepository`
+- [ ] Write basic access tests
+
+---
+
+## Part 7: Auth, REST API, & Webhook Orchestration (`crates/api`)
+
+### Phase 42: Authentication Core
+- [ ] Setup `argon2` for secure password hashing
+- [ ] Setup `jsonwebtoken` for stateless session encoding
+- [ ] Implement JWT decoding Axum Middleware (`tower` layer)
+- [ ] Write unit tests for JWT expiration validation
+
+### Phase 43: Auth/User Controllers
+- [ ] Implement `POST /rest/login`
+- [ ] Implement `POST /rest/users` (Registration)
+- [ ] Implement `GET /rest/users/me` (Profile retrieval)
+- [ ] Write route integration tests
+
+### Phase 44: Workflow/Execution Controllers
+- [ ] Implement `GET /rest/workflows` & `POST /rest/workflows`
+- [ ] Implement `PUT /rest/workflows/:id/activate` (State toggling)
+- [ ] Implement `GET /rest/executions` & `GET /rest/executions/:id`
+- [ ] Implement `POST /rest/executions/:workflowId` (Manual trigger)
+- [ ] Write route integration tests
+
+### Phase 45: Credential Controllers & Testing
+- [ ] Implement `GET /rest/credentials` & `POST /rest/credentials`
+- [ ] Implement `POST /rest/credentials/test` triggering the validation hooks
+- [ ] Write route integration tests
+
+### Phase 46: OAuth2 Callback Mechanics
+- [ ] Implement `GET /rest/oauth2-credential/callback`
+- [ ] Exchange authorization codes dynamically using reqwest server-side
+- [ ] Update credential entities with live auth tokens automatically
+- [ ] Write mock OAuth2 callback tests
+
+### Phase 47: Dynamic Webhook Routing
+- [ ] Implement a dynamic router traversing the `active_workflows` cache
+- [ ] Register `GET/POST /webhook/:path` catch-all endpoints dynamically
+- [ ] Translate Axum HTTP Request entities into n8n Webhook Trigger payloads
+- [ ] Write end-to-end tests sending a mock HTTP request to a dynamic webhook
+
+---
+
+## Part 8: Server Orchestration & Web UI (`crates/server` / `web/`)
+
+### Phase 48: Global State Registration
+- [ ] Initialize `tracing` subscriber stack
+- [ ] Initialize SQLx Pool
+- [ ] Inject SQLx traits into Node Registry and Credential Registry
+- [ ] Boot standard Execution Manager State
+- [ ] Write boot sequence tests
+
+### Phase 49: Active Workflow Boot Sequence
+- [ ] Query DB for all active workflows
+- [ ] Register all active Webhooks in the Axum Router
+- [ ] Register all active Crons in the `CronScheduler`
+- [ ] Register all active Pollers in the `StaticData` loop
+- [ ] Write tests ensuring deactivated workflows are suspended successfully
+
+### Phase 50: Production Assembly
+- [ ] Mount REST API behind `/rest/` prefix
+- [ ] Mount Webhooks behind `/webhook/` prefix
+- [ ] Configure graceful shutdown hooks terminating pending executions
+- [ ] Write E2E startup-to-shutdown test in memory
+
+### Phase 51+: Web UI Development
+- [ ] Initialize Vue 3 Single Page Application (Vite)
+- [ ] Build Vue Router configurations mapping to n8n routes
+- [ ] Implement UI State Management using Pinia for UI Auth/Flows
+- [ ] Implement `editor-ui` flow canvas component
+- [ ] Implement generic dynamic property form renderer for Nodes
+- [ ] Implement dynamic credential form renderer
+- [ ] Wire Web UI to build static assets and serve them via Axum in production mode
