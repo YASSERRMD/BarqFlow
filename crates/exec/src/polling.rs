@@ -12,6 +12,7 @@ use chrono::{DateTime, Utc};
 use tokio::time::{interval, Duration, MissedTickBehavior};
 
 use crate::context::PollExecutionContext;
+use crate::deduplication::{DeduplicationManager, DeduplicationMode};
 
 pub struct ActivePoller {
     workflow_id: String,
@@ -79,6 +80,21 @@ impl PollingEngine {
         let mut interval_timer = interval(Duration::from_secs(interval_seconds));
         interval_timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
+        let mut dedup_mode_opt = None;
+        let mut dedup_key_opt = None;
+        if let Some(mode_val) = target_node.parameters.0.get("deduplicationMode") {
+            if let Some(s) = mode_val.0.as_str() {
+                match s {
+                    "array_of_ids" => dedup_mode_opt = Some(DeduplicationMode::ArrayOfIds),
+                    "incremented_key" => dedup_mode_opt = Some(DeduplicationMode::IncrementedKey),
+                    _ => {}
+                }
+            }
+        }
+        if let Some(key_val) = target_node.parameters.0.get("deduplicationKey") {
+            dedup_key_opt = key_val.0.as_str().map(|s| s.to_string());
+        }
+
         let handle = tokio::spawn(async move {
             info!("Started polling loop for node {} in workflow {} every {}s", target_node.name, workflow_id, interval_seconds);
             
@@ -87,12 +103,47 @@ impl PollingEngine {
 
                 let ctx = PollExecutionContext::new(target_node.clone(), static_data.clone());
                 match node_impl.poll(&ctx).await {
-                    Ok(events) => {
+                    Ok(mut events) => {
                         // Triggers usually return empty 2D arrays if nothing new arrived
                         let has_items = events.iter().any(|arr| !arr.is_empty());
                         if has_items {
-                            debug!("Poller {} discovered {} new event branches", target_node.name, events.len());
-                            callback(events);
+                            if let (Some(mode), Some(key_path)) = (&dedup_mode_opt, &dedup_key_opt) {
+                                let mut new_branches = Vec::new();
+                                for branch in events {
+                                    let branch_data: Vec<IDataObject> = branch.into_iter().map(|d| d.json).collect();
+                                    
+                                    let mut state_lock = static_data.write().await;
+                                    if state_lock.is_none() {
+                                        *state_lock = Some(IDataObject::default());
+                                    }
+                                    let global_state = state_lock.as_mut().unwrap();
+
+                                    let dedup_state_key = format!("{}_dedup", target_node.id.to_string());
+                                    let mut dedup_state = IDataObject::default();
+                                    
+                                    if let serde_json::Value::Object(map) = &global_state.0 {
+                                        if let Some(v) = map.get(&dedup_state_key) {
+                                            dedup_state = IDataObject(v.clone());
+                                        }
+                                    }
+
+                                    let filtered = DeduplicationManager::filter_new_events(branch_data, mode.clone(), key_path, &mut dedup_state);
+                                    
+                                    if let serde_json::Value::Object(ref mut map) = global_state.0 {
+                                        map.insert(dedup_state_key, dedup_state.0);
+                                    }
+
+                                    let new_branch: Vec<INodeExecutionData> = filtered.into_iter().map(|d| INodeExecutionData::new(d)).collect();
+                                    new_branches.push(new_branch);
+                                }
+                                events = new_branches;
+                            }
+
+                            let has_items_after = events.iter().any(|arr| !arr.is_empty());
+                            if has_items_after {
+                                debug!("Poller {} discovered {} new event branches", target_node.name, events.len());
+                                callback(events);
+                            }
                         }
                     }
                     Err(e) => {
