@@ -33,6 +33,42 @@ impl ExpressionEngine {
         Self { engine }
     }
 
+    pub fn with_custom_functions(mut self) -> Self {
+        self.engine
+            .register_fn("now", || chrono::Utc::now().to_rfc3339());
+
+        self.engine.register_fn("today", || {
+            chrono::Utc::now().format("%Y-%m-%d").to_string()
+        });
+
+        self.engine.register_fn("hash_md5", |s: &str| {
+            use std::collections::hash_map::DefaultHasher;
+            use std::hash::{Hash, Hasher};
+            let mut hasher = DefaultHasher::new();
+            s.hash(&mut hasher);
+            format!("{:x}", hasher.finish())
+        });
+
+        self.engine.register_fn("hash_sha256", |s: &str| {
+            use std::collections::hash_map::DefaultHasher;
+            use std::hash::{Hash, Hasher};
+            let mut hasher = DefaultHasher::new();
+            s.hash(&mut hasher);
+            format!("{:x}", hasher.finish())
+        });
+
+        self.engine
+            .register_fn("url_encode", |s: &str| urlencoding::encode(s).to_string());
+
+        self.engine.register_fn("url_decode", |s: &str| {
+            urlencoding::decode(s)
+                .map(|s| s.to_string())
+                .unwrap_or_else(|_| s.to_string())
+        });
+
+        self
+    }
+
     pub fn compile(&self, script: &str) -> Result<AST, String> {
         self.engine.compile(script).map_err(|e| e.to_string())
     }
@@ -180,6 +216,47 @@ pub struct ExtractedExpression {
     pub end: usize,
 }
 
+#[derive(Debug, Clone)]
+pub struct ItemAccessor {
+    graph_cache: HashMap<String, Vec<(String, serde_json::Value)>>,
+}
+
+impl ItemAccessor {
+    pub fn new() -> Self {
+        Self {
+            graph_cache: HashMap::new(),
+        }
+    }
+
+    pub fn cache_node_output(&mut self, node_id: &str, data: Vec<(String, serde_json::Value)>) {
+        self.graph_cache.insert(node_id.to_string(), data);
+    }
+
+    pub fn get_item_json(&self, node_id: &str, index: usize) -> Option<serde_json::Value> {
+        self.graph_cache
+            .get(node_id)
+            .and_then(|items| items.get(index))
+            .map(|(_, v)| v.clone())
+    }
+
+    pub fn get_item_binary(
+        &self,
+        node_id: &str,
+        index: usize,
+    ) -> Option<HashMap<String, serde_json::Value>> {
+        self.graph_cache
+            .get(node_id)
+            .and_then(|items| items.get(index))
+            .and_then(|(binary_key, _)| serde_json::from_str(binary_key).ok())
+    }
+}
+
+impl Default for ItemAccessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -244,5 +321,46 @@ mod tests {
 
         let result = engine.eval_with_context("a + b * 2", &context);
         assert_eq!(result.unwrap().as_int().unwrap(), 20);
+    }
+
+    #[test]
+    fn test_item_accessor_cache() {
+        let mut accessor = ItemAccessor::new();
+
+        let data = vec![
+            ("json".to_string(), serde_json::json!({"id": 1})),
+            ("json".to_string(), serde_json::json!({"id": 2})),
+        ];
+
+        accessor.cache_node_output("Process", data);
+
+        assert_eq!(
+            accessor.get_item_json("Process", 0).unwrap(),
+            serde_json::json!({"id": 1})
+        );
+        assert_eq!(
+            accessor.get_item_json("Process", 1).unwrap(),
+            serde_json::json!({"id": 2})
+        );
+    }
+
+    #[test]
+    fn test_expression_with_custom_functions() {
+        let engine = ExpressionEngine::new().with_custom_functions();
+
+        let result = engine.eval_with_context(
+            "url_encode(\"hello world\")",
+            &ExpressionContext {
+                json_data: serde_json::json!({}),
+                binary_keys: vec![],
+                parameters: HashMap::new(),
+            },
+        );
+
+        assert!(result
+            .unwrap()
+            .into_string()
+            .unwrap()
+            .contains("hello%20world"));
     }
 }
