@@ -82,15 +82,55 @@ impl NodeExecutionContext {
                 }
             })?;
 
-        // Check if this is an expression (simplified check - in real implementation would use Rhai)
+    // Check if this is an expression
         if let Some(expr_str) = raw_value.0.as_str() {
             if expr_str.starts_with("{{") && expr_str.ends_with("}}") {
-                // For now, return a simple placeholder
-                // Full expression evaluation would be implemented with Rhai in a later phase
-                return Ok(GenericValue(serde_json::json!({
-                    "expression": expr_str,
-                    "note": "Expression evaluation not yet implemented - will use Rhai in Phase 12"
-                })));
+                // Remove the {{ }} wrappers for Rhai
+                let stripped_expr = expr_str[2..expr_str.len() - 2].trim().to_string();
+                let expr_str_owned = expr_str.to_string();
+                
+                // Get data we need across await boundary FIRST
+                let json_data = {
+                    let input = self.input_data.read().await;
+                    // Default to first item of first input branch for evaluation, prioritizing main
+                    input.0.get(&0).and_then(|items| items.first()).map(|item| &item.json.0).cloned().unwrap_or_else(|| serde_json::json!({}))
+                };
+                
+                let params_map: HashMap<String, serde_json::Value> = self.node.parameters.0.iter().map(|(k, v)| (k.clone(), v.0.clone())).collect();
+                let node_name = self.node.name.clone();
+
+                // Perform the evaluation in a strict scope so non-Send types are dropped
+                let eval_result = {
+                    let engine = barqflow_flow::expression::ExpressionEngine::new().with_custom_functions();
+                    
+                    let expr_ctx = barqflow_flow::expression::ExpressionContext {
+                        json_data,
+                        binary_keys: vec![], // Binary streams mapping skipped for simplified phase 21
+                        parameters: params_map,
+                    };
+                    
+                    engine.eval_with_context(&stripped_expr, &expr_ctx)
+                };
+
+                return match eval_result {
+                    Ok(dyn_val) if dyn_val.is_unit() => Ok(GenericValue(serde_json::Value::Null)),
+                    Ok(dyn_val) if dyn_val.is_string() => Ok(GenericValue(serde_json::Value::String(dyn_val.into_string().unwrap()))),
+                    Ok(dyn_val) if dyn_val.is_int() => Ok(GenericValue(serde_json::json!(dyn_val.as_int().unwrap()))),
+                    Ok(dyn_val) if dyn_val.is_bool() => Ok(GenericValue(serde_json::Value::Bool(dyn_val.as_bool().unwrap()))),
+                    Ok(dyn_val) if dyn_val.is_float() => Ok(GenericValue(serde_json::json!(dyn_val.as_float().unwrap()))),
+                    Ok(_) => {
+                        Err(BarqError::ExpressionError {
+                            node_name,
+                            message: format!("Expression '{}' resulted in unsupported complex Rhai Dynamic type", expr_str_owned),
+                        })
+                    }
+                    Err(e) => {
+                        Err(BarqError::ExpressionError {
+                            node_name,
+                            message: format!("Failed to evaluate expression '{}': {}", expr_str_owned, e),
+                        })
+                    }
+                };
             }
         }
 
@@ -333,7 +373,7 @@ mod tests {
         let mut params = HashMap::new();
         params.insert(
             "exprParam".to_string(),
-            GenericValue(json!("{{ $json.someValue }}")),
+            GenericValue(json!("{{ json[\"someValue\"] }}")),
         );
 
         let node = INode {
@@ -346,20 +386,25 @@ mod tests {
             disabled: false,
         };
 
-        let context = NodeExecutionContext::new(
+        let mut context = NodeExecutionContext::new(
             node,
             ITaskDataConnections::default(),
             None,
             uuid::Uuid::new_v4(),
         );
+        let mut new_data = ITaskDataConnections::new();
+        new_data.push(
+            0,
+            vec![INodeExecutionData::new(IDataObject::from(json!({ "someValue": "evalResult" })))],
+        );
+        context.update_input_data(new_data).await;
 
         let result = context
             .get_node_parameter("exprParam", None)
             .await
             .unwrap();
 
-        // Should return placeholder indicating expression not yet fully evaluated
-        assert!(result.0.is_object());
+        assert_eq!(result.0, json!("evalResult"));
     }
 
     #[tokio::test]
