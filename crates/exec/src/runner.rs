@@ -169,14 +169,7 @@ impl WorkflowRunner {
             .map(|n| WorkflowNode::from(n.clone()))
             .collect();
 
-        let connections = workflow
-            .connections
-            .values()
-            .next()
-            .cloned()
-            .unwrap_or_else(|| barqflow_core::schema::INodeConnections(
-                std::collections::HashMap::new()
-            ));
+        let connections: std::collections::HashMap<String, barqflow_core::schema::INodeConnections> = std::collections::HashMap::new();
 
         WorkflowDef {
             id: workflow.id.0.to_string(),
