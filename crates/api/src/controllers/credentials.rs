@@ -6,8 +6,8 @@ use axum::{
 };
 use barqflow_db::credentials::CredentialRepo;
 use barqflow_db::models::CredentialEntity;
-use hyper::StatusCode;
-use serde::{Deserialize, Serialize};
+use axum::http::StatusCode;
+use serde::Deserialize;
 
 #[derive(Clone)]
 pub struct AppState {

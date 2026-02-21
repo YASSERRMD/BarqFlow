@@ -3,9 +3,9 @@ use axum::{
     extract::{State, Json},
     routing::{get, post},
     Router,
+    http::StatusCode,
 };
 use barqflow_db::users::UserRepo;
-use hyper::StatusCode;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone)]
