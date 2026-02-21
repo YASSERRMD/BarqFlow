@@ -17,3 +17,4 @@ async-trait.workspace = true
 bytes.workspace = true
 tempfile.workspace = true
 chrono = { version = "0.4.43", features = ["serde"] }
+petgraph.workspace = true
