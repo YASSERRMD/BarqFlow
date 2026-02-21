@@ -38,7 +38,7 @@ pub struct WorkflowDef {
     pub id: String,
     pub name: String,
     pub nodes: Vec<WorkflowNode>,
-    pub connections: INodeConnections,
+    pub connections: HashMap<String, INodeConnections>,
     pub settings: Option<IWorkflowSettings>,
     pub static_data: Option<serde_json::Value>,
     pub pin_data: Option<bool>,
@@ -51,7 +51,7 @@ impl Default for WorkflowDef {
             id: String::new(),
             name: String::new(),
             nodes: Vec::new(),
-            connections: INodeConnections(HashMap::new()),
+            connections: HashMap::new(),
             settings: Some(IWorkflowSettings::default()),
             static_data: None,
             pin_data: None,
@@ -64,6 +64,8 @@ impl Default for WorkflowDef {
 pub struct GraphEdge {
     pub source: NodeIndex,
     pub target: NodeIndex,
+    pub source_output_index: usize,
+    pub target_input_index: usize,
 }
 
 #[derive(Debug)]
@@ -71,6 +73,7 @@ pub struct ParsedGraph {
     pub graph: DiGraph<WorkflowNode, GraphEdge>,
     pub node_indices: HashMap<NodeId, NodeIndex>,
     pub reverse_indices: HashMap<NodeIndex, NodeId>,
+    pub name_to_index: HashMap<String, NodeIndex>,
 }
 
 pub struct WorkflowToGraphParser;
@@ -80,28 +83,28 @@ impl WorkflowToGraphParser {
         let mut graph = DiGraph::new();
         let mut node_indices = HashMap::new();
         let mut reverse_indices = HashMap::new();
+        let mut name_to_index = HashMap::new();
 
         for node in &workflow.nodes {
             let index = graph.add_node(node.clone());
             node_indices.insert(node.id.clone(), index);
             reverse_indices.insert(index, node.id.clone());
+            name_to_index.insert(node.name.clone(), index);
         }
 
-        for (_, output_indices) in &workflow.connections.0 {
-            for outputs in output_indices {
-                for output in outputs {
-                    let target_node_id = NodeId::new(output.node.clone());
-                    if let Some(&target_index) = node_indices.get(&target_node_id) {
-                        for (_, source_index) in &node_indices {
-                            let has_edge = graph
-                                .edges(*source_index)
-                                .any(|e| e.target() == target_index);
-                            if !has_edge {
+        for (source_node_name, node_connections) in &workflow.connections {
+            if let Some(&source_index) = name_to_index.get(source_node_name) {
+                for (_, output_arrays) in &node_connections.0 {
+                    for (output_index, connections) in output_arrays.iter().enumerate() {
+                        for connection in connections {
+                            if let Some(&target_index) = name_to_index.get(&connection.node) {
                                 let edge = GraphEdge {
-                                    source: *source_index,
+                                    source: source_index,
                                     target: target_index,
+                                    source_output_index: output_index,
+                                    target_input_index: connection.index,
                                 };
-                                graph.add_edge(*source_index, target_index, edge);
+                                graph.add_edge(source_index, target_index, edge);
                             }
                         }
                     }
@@ -113,6 +116,7 @@ impl WorkflowToGraphParser {
             graph,
             node_indices,
             reverse_indices,
+            name_to_index,
         })
     }
 

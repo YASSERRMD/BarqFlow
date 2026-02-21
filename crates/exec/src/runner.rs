@@ -11,6 +11,7 @@ use barqflow_core::types::{GenericValue, IDataObject, NodeId, RunId, WorkflowId}
 use barqflow_flow::graph::{GraphTraversal, ParsedGraph, WorkflowDef, WorkflowNode};
 use barqflow_registry::registry::NodeRegistry;
 use petgraph::graph::NodeIndex;
+use petgraph::visit::EdgeRef;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -169,14 +170,7 @@ impl WorkflowRunner {
             .map(|n| WorkflowNode::from(n.clone()))
             .collect();
 
-        let connections = workflow
-            .connections
-            .values()
-            .next()
-            .cloned()
-            .unwrap_or_else(|| barqflow_core::schema::INodeConnections(
-                std::collections::HashMap::new()
-            ));
+        let connections = workflow.connections.clone();
 
         WorkflowDef {
             id: workflow.id.0.to_string(),
@@ -199,16 +193,19 @@ impl WorkflowRunner {
     ) -> Result<ITaskDataConnections, BarqError> {
         let mut input_data = ITaskDataConnections::new();
 
-        // Get all parent nodes (predecessors)
-        let parents = GraphTraversal::get_parents(&parsed.graph, node_index);
+        // Get all incoming edges
+        let incoming_edges = parsed.graph.edges_directed(node_index, petgraph::Direction::Incoming);
 
-        for (input_index, parent_idx) in parents.iter().enumerate() {
-            let parent_node = &parsed.graph[*parent_idx];
+        for edge in incoming_edges {
+            let source_index = edge.source();
+            let source_node = &parsed.graph[source_index];
 
-            if let Some(parent_result) = data_cache.get(&parent_node.id) {
-                // For now, we take output index 0 and map to sequential input indices
-                // A real implementation would need to handle connection routing properly
-                if let Some(output_data) = parent_result.outputs.get(0) {
+            if let Some(source_result) = data_cache.get(&source_node.id) {
+                // Map the output index of the source to the input index of the target
+                let output_index = edge.weight().source_output_index;
+                let input_index = edge.weight().target_input_index;
+
+                if let Some(output_data) = source_result.outputs.get(output_index) {
                     input_data.push(input_index, output_data.clone());
                 }
             }
@@ -265,11 +262,16 @@ impl WorkflowRunner {
             context.run_id.0,
         );
 
-        // Execute the node
-        let execute_result = node_info.node_impl.execute(&exec_context).await;
+        // Execute the node in an isolated task to trap panics
+        let node_impl = node_info.node_impl.clone();
+        
+        // Spawn the task to isolate any panics occurring in the injected node logic
+        let execute_result = tokio::spawn(async move {
+            node_impl.execute(&exec_context).await
+        }).await;
 
-        match execute_result {
-            Ok(outputs) => {
+        let node_result = match execute_result {
+            Ok(Ok(outputs)) => {
                 debug!(
                     "Node {} executed successfully, produced {} output streams",
                     node.name,
@@ -282,6 +284,23 @@ impl WorkflowRunner {
                     error: None,
                 })
             }
+            Ok(Err(e)) => Err(e),
+            Err(join_err) => {
+                let msg = if join_err.is_panic() {
+                    "Node execution panicked".to_string()
+                } else {
+                    "Node execution task cancelled".to_string()
+                };
+                error!("Node {} critical failure: {}", node.name, msg);
+                Err(BarqError::NodeOperationError {
+                    node_name: node.name.clone(),
+                    message: msg,
+                })
+            }
+        };
+
+        match node_result {
+            Ok(res) => Ok(res),
             Err(e) => {
                 error!("Node {} failed: {}", node.name, e);
                 if self.config.continue_on_fail {
@@ -325,20 +344,42 @@ mod tests {
 
         async fn execute(
             &self,
-            _context: &dyn IExecuteFunctions,
+            context: &dyn IExecuteFunctions,
         ) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
-            // Return mock output data
-            let output = INodeExecutionData::new(IDataObject::from(json!({
+            // get_input_data returns Option or Result? Let's check trait. Actually it returns Option<&Vec<INodeExecutionData>> or similar.
+            // Wait, let's just bypass it for the mock and return a generic success if we can't fetch it easily.
+            // Actually, let's just always return a static output to avoid borrowing issues in the test.
+            let output = INodeExecutionData::new(IDataObject::from(serde_json::json!({
                 "result": "mock_output"
             })));
             Ok(vec![vec![output]])
         }
     }
 
+    struct MockPanicNode;
+
+    #[async_trait]
+    impl barqflow_core::traits::INodeType for MockPanicNode {
+        fn get_description(&self) -> IDataObject {
+            IDataObject::from(json!({
+                "name": "mockPanic",
+                "displayName": "Mock Panic Node",
+                "description": "A node that always panics"
+            }))
+        }
+
+        async fn execute(
+            &self,
+            _context: &dyn IExecuteFunctions,
+        ) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
+            panic!("Intentional mock panic");
+        }
+    }
+
     fn create_mock_registry() -> Arc<NodeRegistry> {
         let registry = Arc::new(NodeRegistry::new());
 
-        // Register mock node type
+        // Register mock pass through node type
         let node_info = barqflow_registry::registry::NodeInfo {
             name: "mockPassThrough".to_string(),
             display_name: "Mock Pass Through".to_string(),
@@ -353,8 +394,25 @@ mod tests {
             max_inputs: 1,
             node_impl: Arc::new(MockPassThroughNode),
         };
-
         registry.register_node(node_info).unwrap();
+
+        // Register mock panic node type
+        let panic_node_info = barqflow_registry::registry::NodeInfo {
+            name: "mockPanic".to_string(),
+            display_name: "Mock Panic Node".to_string(),
+            version: 1.0,
+            description: "A node that panics".to_string(),
+            properties: INodeProperties {
+                display_name: Some("Panic Properties".to_string()),
+                properties: vec![],
+                required_values: None,
+            },
+            is_trigger: false,
+            max_inputs: 1,
+            node_impl: Arc::new(MockPanicNode),
+        };
+        registry.register_node(panic_node_info).unwrap();
+        
         registry
     }
 
@@ -452,5 +510,33 @@ mod tests {
 
         assert!(!context.manual);
         assert_eq!(context.workflow.name, "Test Workflow");
+    }
+
+    #[tokio::test]
+    async fn test_panic_node_caught() {
+        let registry = create_mock_registry();
+        let config = ExecutionConfig {
+            continue_on_fail: true,
+            ..Default::default()
+        };
+        let runner = WorkflowRunner::new(registry, config);
+
+        let mut workflow = create_test_workflow();
+        // Replace node 1 with panic node
+        workflow.nodes[0].r#type = "mockPanic".to_string();
+
+        let context = WorkflowRunContext {
+            run_id: RunId::new(),
+            workflow,
+            static_data: None,
+            manual: true,
+        };
+
+        let results = runner.run_workflow(context).await.unwrap();
+        
+        assert_eq!(results.len(), 1);
+        let result = &results["TestNode"];
+        assert!(!result.success);
+        assert!(result.error.as_ref().unwrap().contains("panicked"));
     }
 }
