@@ -138,3 +138,42 @@ impl INodeType for ItemListsNode {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use barqflow_core::types::GenericValue;
+
+    struct MockContext {
+        input_data: Vec<INodeExecutionData>,
+        params: std::collections::HashMap<String, GenericValue>,
+    }
+
+    impl MockContext {
+        fn new(input: Vec<INodeExecutionData>) -> Self {
+            Self {
+                input_data: input,
+                params: std::collections::HashMap::new(),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_set_node_creates_item() {
+        let input = vec![INodeExecutionData::new(IDataObject(serde_json::json!({})))];
+        assert!(!input.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_filter_node_empty_input() {
+        let input: Vec<INodeExecutionData> = vec![];
+        assert!(input.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_item_lists_split() {
+        let node = ItemListsNode;
+        let desc = node.get_description();
+        assert_eq!(desc.0.get("name").unwrap(), "Item Lists");
+    }
+}

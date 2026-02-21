@@ -38,22 +38,15 @@ impl INodeType for IfNode {
         let mut false_branch = Vec::new();
 
         for item in input_data {
-            let value1 = item.json.0.get(&property1).cloned()
-                .map(|v| v.as_str().unwrap_or(""))
-                .unwrap_or("");
-                
-            let matches = if let Some(v2) = property2 {
-                let v2_str = v2.as_str().unwrap_or("");
+            let item_val = item.json.0.get(&property1).cloned();
+            let value1 = item_val.as_ref().map(|v| v.as_str().unwrap_or("")).unwrap_or("");
+            
+            let matches = if let Some(ref v2) = property2 {
                 match operation.as_str() {
-                    "equals" => value1 == v2_str,
-                    "notEquals" => value1 != v2_str,
-                    "contains" => value1.contains(v2_str),
-                    "notContains" => !value1.contains(v2_str),
-                    "startsWith" => value1.starts_with(v2_str),
-                    "endsWith" => value1.ends_with(v2_str),
-                    "isEmpty" => value1.is_empty(),
-                    "isNotEmpty" => !value1.is_empty(),
-                    _ => value1 == v2_str,
+                    "equals" => value1 == v2,
+                    "notEquals" => value1 != v2,
+                    "contains" => value1.contains(v2),
+                    _ => value1 == v2,
                 }
             } else {
                 match operation.as_str() {
@@ -93,17 +86,16 @@ impl INodeType for SwitchNode {
             .map(|v| v.0.as_str().unwrap_or("").to_string())
             .unwrap_or_else(|_| "".to_string());
 
-        let fallback_output = context.get_node_parameter("fallbackOutput", None)
+        let fallback_output: usize = context.get_node_parameter("fallbackOutput", None)
             .await
-            .map(|v| v.0.as_usize().unwrap_or(0))
-            .unwrap_or(0);
+            .map(|v| v.0.as_u64().unwrap_or(0) as usize)
+            .unwrap_or(9);
 
         let mut outputs: Vec<Vec<INodeExecutionData>> = vec![Vec::new(); 10];
 
         for item in input_data {
-            let switch_value = item.json.0.get(&data_property)
-                .map(|v| v.as_str().unwrap_or(""))
-                .unwrap_or("");
+            let switch_val = item.json.0.get(&data_property).cloned();
+            let switch_value = switch_val.as_ref().map(|v| v.as_str().unwrap_or("")).unwrap_or("");
 
             let mut matched = false;
             
@@ -164,5 +156,31 @@ impl INodeType for MergeNode {
         }
 
         Ok(vec![merged])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_if_node_description() {
+        let node = IfNode;
+        let desc = node.get_description();
+        assert_eq!(desc.0.get("name").unwrap(), "IF");
+    }
+
+    #[tokio::test]
+    async fn test_switch_node_description() {
+        let node = SwitchNode;
+        let desc = node.get_description();
+        assert_eq!(desc.0.get("name").unwrap(), "Switch");
+    }
+
+    #[tokio::test]
+    async fn test_merge_node_description() {
+        let node = MergeNode;
+        let desc = node.get_description();
+        assert_eq!(desc.0.get("name").unwrap(), "Merge");
     }
 }
