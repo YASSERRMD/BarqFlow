@@ -306,6 +306,16 @@ mod tests {
     }
 
     #[test]
+    fn test_replace_expressions() {
+        let input = "Hello {{name}}, your score is {{score}}";
+        let replacements = vec!["World".to_string(), "100".to_string()];
+
+        let result = ExpressionExtractor::replace_expressions(input, &replacements);
+        assert_eq!(result, "Hello World, your score is 100");
+    }
+
+    #[test]
+    fn test_expression_with_parameters() {
     fn test_expression_engine_json_access() {
         let engine = ExpressionEngine::new();
 
