@@ -1,4 +1,5 @@
 use axum::Router;
+use tower_http::services::{ServeDir, ServeFile};
 use barqflow_db::{CredentialRepo, ExecutionRepo, WorkflowRepo};
 use barqflow_db::users::UserRepo;
 use std::sync::Arc;
@@ -33,4 +34,8 @@ pub fn create_router(state: AppState) -> Router {
     Router::new()
         .nest("/rest", rest_routes)
         .nest("/webhook", webh_routes)
+        .fallback_service(
+            ServeDir::new("web/dist")
+                .not_found_service(ServeFile::new("web/dist/index.html")),
+        )
 }
