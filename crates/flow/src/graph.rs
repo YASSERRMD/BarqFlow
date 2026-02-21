@@ -70,6 +70,7 @@ pub struct GraphEdge {
 pub struct ParsedGraph {
     pub graph: DiGraph<WorkflowNode, GraphEdge>,
     pub node_indices: HashMap<NodeId, NodeIndex>,
+    pub reverse_indices: HashMap<NodeIndex, NodeId>,
 }
 
 pub struct WorkflowToGraphParser;
@@ -78,10 +79,12 @@ impl WorkflowToGraphParser {
     pub fn parse(workflow: &WorkflowDef) -> Result<ParsedGraph, String> {
         let mut graph = DiGraph::new();
         let mut node_indices = HashMap::new();
+        let mut reverse_indices = HashMap::new();
 
         for node in &workflow.nodes {
             let index = graph.add_node(node.clone());
             node_indices.insert(node.id.clone(), index);
+            reverse_indices.insert(index, node.id.clone());
         }
 
         for (_, output_indices) in &workflow.connections.0 {
@@ -109,6 +112,7 @@ impl WorkflowToGraphParser {
         Ok(ParsedGraph {
             graph,
             node_indices,
+            reverse_indices,
         })
     }
 
@@ -199,6 +203,52 @@ impl GraphTraversal {
         }
 
         descendants
+    }
+
+    pub fn find_all_paths(
+        graph: &DiGraph<WorkflowNode, GraphEdge>,
+        from: NodeIndex,
+        to: NodeIndex,
+    ) -> Vec<Vec<NodeIndex>> {
+        let mut all_paths = Vec::new();
+        let mut current_path = vec![from];
+        let mut visited = HashSet::new();
+        visited.insert(from);
+
+        Self::dfs_find_paths(
+            graph,
+            from,
+            to,
+            &mut current_path,
+            &mut visited,
+            &mut all_paths,
+        );
+
+        all_paths
+    }
+
+    fn dfs_find_paths(
+        graph: &DiGraph<WorkflowNode, GraphEdge>,
+        current: NodeIndex,
+        target: NodeIndex,
+        path: &mut Vec<NodeIndex>,
+        visited: &mut HashSet<NodeIndex>,
+        all_paths: &mut Vec<Vec<NodeIndex>>,
+    ) {
+        if current == target {
+            all_paths.push(path.clone());
+            return;
+        }
+
+        for child in Self::get_children(graph, current) {
+            if !visited.contains(&child) {
+                visited.insert(child);
+                path.push(child);
+                Self::dfs_find_paths(graph, child, target, path, visited, all_paths);
+                path.pop();
+                visited.remove(&child);
+            }
+        }
     }
 }
 
@@ -324,5 +374,31 @@ mod tests {
         let parsed = WorkflowToGraphParser::parse(&workflow).unwrap();
         let triggers = GraphTraversal::get_trigger_nodes(&parsed.graph);
         assert_eq!(triggers.len(), 2);
+    }
+
+    #[test]
+    fn test_get_parents_and_children() {
+        let workflow = WorkflowDef {
+            id: "test-parents".to_string(),
+            name: "Parents Test".to_string(),
+            nodes: vec![
+                create_test_node("A", "A", "manualTrigger"),
+                create_test_node("B", "B", "set"),
+                create_test_node("C", "C", "set"),
+            ],
+            connections: INodeConnections(HashMap::new()),
+            settings: None,
+            static_data: None,
+            pin_data: None,
+            version_id: None,
+        };
+
+        let parsed = WorkflowToGraphParser::parse(&workflow).unwrap();
+
+        if let Some(b_idx) = parsed.node_indices.get(&NodeId::new("B")) {
+            let parents = GraphTraversal::get_parents(&parsed.graph, *b_idx);
+            let children = GraphTraversal::get_children(&parsed.graph, *b_idx);
+            println!("Parents of B: {:?}, Children of B: {:?}", parents, children);
+        }
     }
 }
