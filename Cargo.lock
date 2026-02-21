@@ -257,6 +257,7 @@ dependencies = [
  "barqflow-core",
  "serde",
  "serde_json",
+ "thiserror",
  "tokio",
 ]
 
