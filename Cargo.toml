@@ -21,6 +21,13 @@ repository   = "https://github.com/permus/barqflow"
 rust-version = "1.80"
 
 [workspace.dependencies]
+barqflow-core = { path = "crates/core" }
+barqflow-flow = { path = "crates/flow" }
+barqflow-exec = { path = "crates/exec" }
+barqflow-registry = { path = "crates/registry" }
+barqflow-nodes = { path = "crates/nodes" }
+barqflow-db = { path = "crates/db" }
+barqflow-api = { path = "crates/api" }
 # async runtime
 tokio        = { version = "1", features = ["full"] }
 # serialization
