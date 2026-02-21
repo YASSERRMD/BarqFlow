@@ -9,6 +9,7 @@ barqflow-registry = { path = "../registry" }
 reqwest.workspace   = true
 rhai.workspace      = true
 tokio.workspace     = true
+serde.workspace     = true
 serde_json.workspace = true
 tokio-cron-scheduler.workspace = true
 async-trait.workspace = true
