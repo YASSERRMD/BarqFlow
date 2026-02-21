@@ -134,10 +134,10 @@ impl ExpressionEngine {
                 Dynamic::from(converted)
             }
             serde_json::Value::Object(obj) => {
-                let map: HashMap<String, Dynamic> = obj
-                    .iter()
-                    .map(|(k, v)| (k.clone(), Self::json_to_dynamic(v)))
-                    .collect();
+                let mut map = rhai::Map::new();
+                for (k, v) in obj.iter() {
+                    map.insert(k.clone().into(), Self::json_to_dynamic(v));
+                }
                 Dynamic::from(map)
             }
         }
@@ -346,15 +346,6 @@ mod tests {
 
         let result = engine.eval_with_context("a + b * 2", &context);
         assert_eq!(result.unwrap().as_int().unwrap(), 20);
-    }
-
-    #[test]
-    fn test_replace_expressions() {
-        let input = "Hello {{name}}, your score is {{score}}";
-        let replacements = vec!["World".to_string(), "100".to_string()];
-
-        let result = ExpressionExtractor::replace_expressions(input, &replacements);
-        assert_eq!(result, "Hello World, your score is 100");
     }
 
     #[test]

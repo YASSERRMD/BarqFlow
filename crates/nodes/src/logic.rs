@@ -16,8 +16,7 @@ impl INodeType for IfNode {
     }
 
     async fn execute(&self, context: &dyn IExecuteFunctions) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
-        let input_data = context.get_input_data(0)?;
-        
+        let input_data = context.get_input_data(0)?;        
         let operation = context.get_node_parameter("operation", None)
             .await
             .map(|v| v.0.as_str().unwrap_or("equals").to_string())
@@ -28,31 +27,28 @@ impl INodeType for IfNode {
             .map(|v| v.0.as_str().unwrap_or("").to_string())
             .unwrap_or_else(|_| "".to_string());
 
-        let property2: Option<String> = context.get_node_parameter("value2", None)
-            .await
-            .map(|v| v.0.as_str().map(|s| s.to_string()))
-            .ok()
-            .flatten();
-
         let mut true_branch = Vec::new();
         let mut false_branch = Vec::new();
 
         for item in input_data {
-            let item_val = item.json.0.get(&property1).cloned();
-            let value1 = item_val.as_ref().map(|v| v.as_str().unwrap_or("")).unwrap_or("");
-            
-            let matches = if let Some(ref v2) = property2 {
+            let item_value = item.json.0.get(&property1)
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
+            let v1_str = item_value.as_str().unwrap_or("");
+                
+            let matches = if let Ok(prop2_result) = context.get_node_parameter("value2", None).await {
+                let v2 = prop2_result.0.as_str().unwrap_or("");
                 match operation.as_str() {
-                    "equals" => value1 == v2,
-                    "notEquals" => value1 != v2,
-                    "contains" => value1.contains(v2),
-                    _ => value1 == v2,
+                    "equals" => v1_str == v2,
+                    "notEquals" => v1_str != v2,
+                    "contains" => v1_str.contains(v2),
+                    _ => v1_str == v2,
                 }
             } else {
                 match operation.as_str() {
-                    "exists" => !value1.is_empty(),
-                    "notExists" => value1.is_empty(),
-                    _ => !value1.is_empty(),
+                    "exists" => !v1_str.is_empty(),
+                    "notExists" => v1_str.is_empty(),
+                    _ => !v1_str.is_empty(),
                 }
             };
 
@@ -79,8 +75,7 @@ impl INodeType for SwitchNode {
     }
 
     async fn execute(&self, context: &dyn IExecuteFunctions) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
-        let input_data = context.get_input_data(0)?;
-        
+        let input_data = context.get_input_data(0)?;        
         let data_property = context.get_node_parameter("dataProperty", None)
             .await
             .map(|v| v.0.as_str().unwrap_or("").to_string())
@@ -94,11 +89,12 @@ impl INodeType for SwitchNode {
         let mut outputs: Vec<Vec<INodeExecutionData>> = vec![Vec::new(); 10];
 
         for item in input_data {
-            let switch_val = item.json.0.get(&data_property).cloned();
-            let switch_value = switch_val.as_ref().map(|v| v.as_str().unwrap_or("")).unwrap_or("");
+            let switch_val = item.json.0.get(&data_property)
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
+            let switch_value = switch_val.as_str().unwrap_or("");
 
-            let mut matched = false;
-            
+            let mut matched = false;            
             for i in 0..8 {
                 let case_prop = format!("case{}", i);
                 if let Ok(case_value) = context.get_node_parameter(&case_prop, None).await {
@@ -141,17 +137,7 @@ impl INodeType for MergeNode {
 
         for input_index in 0..2 {
             if let Ok(input_data) = context.get_input_data(input_index) {
-                match mode.as_str() {
-                    "append" => {
-                        merged.extend(input_data.iter().cloned());
-                    },
-                    "combine" => {
-                        merged.extend(input_data.iter().cloned());
-                    },
-                    _ => {
-                        merged.extend(input_data.iter().cloned());
-                    }
-                }
+                merged.extend(input_data.iter().cloned());
             }
         }
 

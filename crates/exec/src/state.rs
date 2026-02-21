@@ -3,6 +3,8 @@ use barqflow_core::types::RunId;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 /// Enum describing the current status of an execution run
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -87,6 +89,119 @@ impl ExecutionState {
     }
 }
 
+/// Manages execution states for active workflow runs
+pub struct ExecutionStateManager {
+    states: Arc<RwLock<HashMap<RunId, ExecutionState>>>,
+    metrics: Arc<RwLock<ExecutionMetrics>>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ExecutionMetrics {
+    pub nodes_executed: u64,
+    pub data_processed_bytes: u64,
+/// Central manager for active execution states
+pub struct ExecutionStateManager {
+    active_runs: std::sync::RwLock<HashMap<RunId, ExecutionState>>,
+    metrics: std::sync::atomic::AtomicU64, // Nodes executed
+    data_processed: std::sync::atomic::AtomicUsize, // Bytes processed
+}
+
+impl ExecutionStateManager {
+    pub fn new() -> Self {
+        Self {
+            states: Arc::new(RwLock::new(HashMap::new())),
+            metrics: Arc::new(RwLock::new(ExecutionMetrics::default())),
+        }
+    }
+
+    pub async fn create(&self, workflow_id: &str, manual: bool) -> ExecutionState {
+        let state = ExecutionState::new(workflow_id, manual);
+        let id = state.id.clone();
+        self.states.write().await.insert(id.clone(), state.clone());
+        state
+    }
+
+    pub async fn get(&self, run_id: &RunId) -> Option<ExecutionState> {
+        self.states.read().await.get(run_id).cloned()
+    }
+
+    pub async fn update(&self, run_id: &RunId, state: ExecutionState) {
+        self.states.write().await.insert(run_id.clone(), state);
+    }
+
+    pub async fn remove(&self, run_id: &RunId) -> Option<ExecutionState> {
+        self.states.write().await.remove(run_id)
+    }
+
+    pub async fn list_active(&self) -> Vec<ExecutionState> {
+        self.states.read().await.values().cloned().collect()
+    }
+
+    pub async fn increment_nodes_executed(&self) {
+        self.metrics.write().await.nodes_executed += 1;
+    }
+
+    pub async fn add_data_processed(&self, bytes: u64) {
+        self.metrics.write().await.data_processed_bytes += bytes;
+    }
+
+    pub async fn get_metrics(&self) -> ExecutionMetrics {
+        self.metrics.read().await.clone()
+            active_runs: std::sync::RwLock::new(HashMap::new()),
+            metrics: std::sync::atomic::AtomicU64::new(0),
+            data_processed: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+
+    /// Register a new run and return its state wrapper
+    pub fn start_run(&self, workflow_id: &str, manual: bool) -> RunId {
+        let state = ExecutionState::new(workflow_id, manual);
+        let id = state.id.clone();
+        
+        let mut runs = self.active_runs.write().unwrap();
+        runs.insert(id.clone(), state);
+        
+        id
+    }
+    
+    /// Finish an active run and optionally remove it from the active cache
+    pub fn finish_run(&self, id: &RunId, success: bool, remove: bool) -> Option<ExecutionState> {
+        let mut runs = self.active_runs.write().unwrap();
+        if let Some(mut state) = runs.remove(id) {
+            state.mark_finished(success);
+            
+            if !remove {
+                runs.insert(id.clone(), state.clone());
+            }
+            Some(state)
+        } else {
+            None
+        }
+    }
+
+    /// Increment node execution counter
+    pub fn record_node_execution(&self) {
+        self.metrics.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Add to data processed metric
+    pub fn record_data_processed(&self, bytes: usize) {
+        self.data_processed.fetch_add(bytes, std::sync::atomic::Ordering::Relaxed);
+    }
+    
+    pub fn get_metrics(&self) -> (u64, usize) {
+        let nodes = self.metrics.load(std::sync::atomic::Ordering::Relaxed);
+        let data = self.data_processed.load(std::sync::atomic::Ordering::Relaxed);
+        (nodes, data)
+    }
+}
+
+impl Default for ExecutionStateManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -109,5 +224,66 @@ mod tests {
         let mut fail_state = ExecutionState::new("wf", false);
         fail_state.mark_finished(false);
         assert_eq!(fail_state.status, ExecutionStatus::Error);
+    }
+
+    #[tokio::test]
+    async fn test_execution_state_manager() {
+        let manager = ExecutionStateManager::new();
+        
+        let state = manager.create("test-wf", true).await;
+        assert_eq!(state.workflow_id, "test-wf");
+        
+        let retrieved = manager.get(&state.id).await.unwrap();
+        assert_eq!(retrieved.id, state.id);
+        
+        manager.increment_nodes_executed().await;
+        manager.add_data_processed(100).await;
+        
+        let metrics = manager.get_metrics().await;
+        assert_eq!(metrics.nodes_executed, 1);
+        assert_eq!(metrics.data_processed_bytes, 100);
+    }
+
+    #[tokio::test]
+    async fn test_list_active() {
+        let manager = ExecutionStateManager::new();
+        
+        manager.create("wf1", false).await;
+        manager.create("wf2", true).await;
+        
+        let active = manager.list_active().await;
+        assert_eq!(active.len(), 2);
+    
+    #[test]
+    fn test_execution_state_manager_lifecycle() {
+        let manager = ExecutionStateManager::new();
+        let run_id = manager.start_run("wf-1", true);
+        
+        {
+            let runs = manager.active_runs.read().unwrap();
+            assert!(runs.contains_key(&run_id));
+        }
+        
+        let finished = manager.finish_run(&run_id, true, true);
+        assert!(finished.is_some());
+        assert_eq!(finished.unwrap().status, ExecutionStatus::Success);
+        
+        {
+            let runs = manager.active_runs.read().unwrap();
+            assert!(!runs.contains_key(&run_id)); // Removed from active cache
+        }
+    }
+    
+    #[test]
+    fn test_execution_state_manager_metrics() {
+        let manager = ExecutionStateManager::new();
+        manager.record_node_execution();
+        manager.record_node_execution();
+        manager.record_data_processed(500);
+        manager.record_data_processed(1024);
+        
+        let (nodes, data) = manager.get_metrics();
+        assert_eq!(nodes, 2);
+        assert_eq!(data, 1524);
     }
 }
