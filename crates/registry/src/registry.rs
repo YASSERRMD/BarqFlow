@@ -9,6 +9,49 @@ use barqflow_core::errors::BarqError;
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use barqflow_core::traits::ICredentialType;
+
+/// Information about a registered Credential type
+#[derive(Clone)]
+pub struct CredentialInfo {
+    /// The credential type identifier (e.g. "httpBasicAuth")
+    pub name: String,
+    /// Credential Type object implementation trait
+    pub cred_impl: Arc<dyn ICredentialType>,
+}
+
+/// Thread-safe Credential registry for authentication flows
+pub struct CredentialRegistry {
+    credentials: RwLock<HashMap<String, CredentialInfo>>,
+}
+
+impl CredentialRegistry {
+    pub fn new() -> Self {
+        Self {
+            credentials: RwLock::new(HashMap::new()),
+        }
+    }
+
+    pub fn register_credential(&self, info: CredentialInfo) -> Result<(), String> {
+        let mut creds = self.credentials.write().map_err(|e| e.to_string())?;
+        if creds.contains_key(&info.name) {
+            return Err(format!("Credential '{}' already registered", info.name));
+        }
+        creds.insert(info.name.clone(), info);
+        Ok(())
+    }
+
+    pub fn get_credential(&self, name: &str) -> Option<CredentialInfo> {
+        let creds = self.credentials.read().ok()?;
+        creds.get(name).cloned()
+    }
+}
+
+impl Default for CredentialRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Information about a registered node type.
 #[derive(Clone)]
