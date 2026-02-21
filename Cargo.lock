@@ -246,6 +246,7 @@ dependencies = [
  "barqflow-registry",
  "reqwest",
  "rhai",
+ "serde",
  "serde_json",
  "tokio",
  "tokio-cron-scheduler",
