@@ -1,4 +1,5 @@
-use barqflow_core::types::{INodeParameters, NodeId};
+use barqflow_core::schema::INodeParameters;
+use barqflow_core::types::NodeId;
 use petgraph::graph::{DiGraph, NodeIndex};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

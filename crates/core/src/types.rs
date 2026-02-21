@@ -129,6 +129,88 @@ mod tests {
         assert_eq!(data_object.0, deserialized.0);
         assert_eq!(data_object.0, val);
     }
+
+    #[test]
+    fn test_deeply_nested_json_serialization() {
+        use serde_json::json;
+        // Create a deeply nested JSON object structure
+        let deeply_nested = json!({
+            "workflow": {
+                "name": "Complex Data Pipeline",
+                "nodes": [
+                    {
+                        "id": "node1",
+                        "type": "trigger",
+                        "parameters": {
+                            "expression": "{{ $json.data }}",
+                            "options": {
+                                "recursive": true,
+                                "depth": 5
+                            }
+                        },
+                        "metadata": {
+                            "created": "2024-01-15T10:30:00Z",
+                            "tags": ["production", "critical"]
+                        }
+                    },
+                    {
+                        "id": "node2",
+                        "type": "processor",
+                        "connections": {
+                            "main": [
+                                [{"node": "node3", "type": "main", "index": 0}]
+                            ]
+                        }
+                    }
+                ],
+                "settings": {
+                    "execution": {
+                        "timeout": 30000,
+                        "retry": {
+                            "max": 3,
+                            "backoff": "exponential"
+                        }
+                    },
+                    "error_workflow": {
+                        "enabled": true,
+                        "path": "/workflows/error-handler"
+                    }
+                }
+            },
+            "environment": {
+                "variables": {
+                    "API_ENDPOINT": "https://api.example.com",
+                    "TIMEOUT": "30"
+                },
+                "features": {
+                    "advanced_mode": true,
+                    "beta_features": ["experimental", "preview"]
+                }
+            }
+        });
+
+        let data_object = IDataObject::from(deeply_nested.clone());
+        let serialized = serde_json::to_string(&data_object).unwrap();
+        let deserialized: IDataObject = serde_json::from_str(&serialized).unwrap();
+
+        // Verify the data integrity after serialization/deserialization
+        assert_eq!(data_object.0, deserialized.0);
+        assert_eq!(data_object.0, deeply_nested);
+
+        // Verify specific nested values can be accessed
+        assert_eq!(
+            data_object.0["workflow"]["name"],
+            "Complex Data Pipeline"
+        );
+        assert_eq!(
+            data_object.0["workflow"]["nodes"][0]["parameters"]["options"]["depth"],
+            5
+        );
+        assert_eq!(
+            data_object.0["environment"]["variables"]["API_ENDPOINT"],
+            "https://api.example.com"
+        );
+    }
 }
 
 /// GenericValue wrapping a serde_json::Value
@@ -172,15 +254,14 @@ impl From<serde_json::Value> for IDataObject {
         if value.is_object() {
             Self(value)
         } else {
-            // Fallback or handle error. Here we just wrap it, but generally IDataObject should be an object.
-            // Ideally it should return an error, but From trait doesn't allow it. 
-            // In a real scenario, TryFrom is better or we enforce it's an object.
             let mut map = serde_json::Map::new();
             map.insert("data".to_string(), value);
             Self(serde_json::Value::Object(map))
         }
     }
 }
+
+
 
 /// Category of binary file type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -232,7 +313,9 @@ mod binary_tests {
     #[test]
     fn test_binary_data_memory_serialization() {
         let bin = IBinaryData {
-            content: BinaryDataContent::Memory { data: "base64content".into() },
+            content: BinaryDataContent::Memory {
+                data: "base64content".into(),
+            },
             mime_type: "image/png".into(),
             file_type: Some(BinaryFileType::Image),
             file_name: Some("test.png".into()),
@@ -245,7 +328,7 @@ mod binary_tests {
         assert!(serialized.contains(r#""data":"base64content""#));
         assert!(serialized.contains(r#""mimeType":"image/png""#));
         assert!(serialized.contains(r#""fileType":"image""#));
-        
+
         let deserialized: IBinaryData = serde_json::from_str(&serialized).unwrap();
         assert_eq!(bin, deserialized);
     }
@@ -253,7 +336,9 @@ mod binary_tests {
     #[test]
     fn test_binary_data_fs_serialization() {
         let bin = IBinaryData {
-            content: BinaryDataContent::FileSystem { id: "1234-abcd".into() },
+            content: BinaryDataContent::FileSystem {
+                id: "1234-abcd".into(),
+            },
             mime_type: "application/pdf".into(),
             file_type: Some(BinaryFileType::Pdf),
             file_name: None,
@@ -265,7 +350,7 @@ mod binary_tests {
         let serialized = serde_json::to_string(&bin).unwrap();
         assert!(serialized.contains(r#""id":"1234-abcd""#));
         assert!(serialized.contains(r#""fileType":"pdf""#));
-        
+
         let deserialized: IBinaryData = serde_json::from_str(&serialized).unwrap();
         assert_eq!(bin, deserialized);
     }
