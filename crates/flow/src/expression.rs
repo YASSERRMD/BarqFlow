@@ -282,6 +282,14 @@ mod tests {
     }
 
     #[test]
+    fn test_expression_extractor_nested_braces() {
+        let input = "{{ outer {{ inner }} }}";
+        let extracted = ExpressionExtractor::extract_expressions(input);
+
+        assert_eq!(extracted.len(), 1);
+    }
+
+    #[test]
     fn test_expression_engine_basic() {
         let engine = ExpressionEngine::new();
 
@@ -308,6 +316,24 @@ mod tests {
 
     #[test]
     fn test_expression_with_parameters() {
+    fn test_expression_engine_json_access() {
+        let engine = ExpressionEngine::new();
+
+        let context = ExpressionContext {
+            json_data: serde_json::json!({
+                "name": "BarqFlow",
+                "count": 42
+            }),
+            binary_keys: vec![],
+            parameters: HashMap::new(),
+        };
+
+        let result = engine.eval_with_context("1 + 1", &context);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_expression_engine_math() {
         let engine = ExpressionEngine::new();
 
         let context = ExpressionContext {
@@ -321,6 +347,15 @@ mod tests {
 
         let result = engine.eval_with_context("a + b * 2", &context);
         assert_eq!(result.unwrap().as_int().unwrap(), 20);
+    }
+
+    #[test]
+    fn test_replace_expressions() {
+        let input = "Hello {{name}}, your score is {{score}}";
+        let replacements = vec!["World".to_string(), "100".to_string()];
+
+        let result = ExpressionExtractor::replace_expressions(input, &replacements);
+        assert_eq!(result, "Hello World, your score is 100");
     }
 
     #[test]

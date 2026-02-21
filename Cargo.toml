@@ -6,6 +6,7 @@ members = [
     "crates/exec",
     "crates/registry",
     "crates/nodes",
+    "crates/db",
     "crates/api",
     "crates/server",
     "bin/barqflow",
@@ -20,21 +21,34 @@ repository   = "https://github.com/permus/barqflow"
 rust-version = "1.80"
 
 [workspace.dependencies]
+barqflow-core = { path = "crates/core" }
+barqflow-flow = { path = "crates/flow" }
+barqflow-exec = { path = "crates/exec" }
+barqflow-registry = { path = "crates/registry" }
+barqflow-nodes = { path = "crates/nodes" }
+barqflow-db = { path = "crates/db" }
+barqflow-api = { path = "crates/api" }
 # async runtime
 tokio        = { version = "1", features = ["full"] }
 # serialization
 serde        = { version = "1", features = ["derive"] }
 serde_json   = "1"
+# bytes
+bytes        = "1"
 # ids
 uuid         = { version = "1", features = ["v4", "serde"] }
 # error handling
 thiserror    = "2"
 anyhow       = "1"
+# time
+chrono       = { version = "0.4", features = ["serde"] }
 # logging
 tracing      = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # async traits
 async-trait  = "0.1"
+# testing
+tempfile     = "3"
 # http
 axum         = { version = "0.8", features = ["ws", "multipart", "macros"] }
 tower        = "0.5"

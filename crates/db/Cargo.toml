@@ -1,17 +1,13 @@
 [package]
-name = "barqflow-api"
+name = "barqflow-db"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-barqflow-core.workspace = true
-barqflow-db.workspace = true
-barqflow-exec.workspace = true
-axum.workspace = true
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "json", "uuid", "chrono"] }
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
+chrono.workspace = true
 thiserror.workspace = true
-tracing.workspace = true
-sqlx.workspace = true
