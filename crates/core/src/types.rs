@@ -181,3 +181,92 @@ impl From<serde_json::Value> for IDataObject {
         }
     }
 }
+
+/// Category of binary file type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BinaryFileType {
+    Text,
+    Json,
+    Image,
+    Audio,
+    Video,
+    Pdf,
+    Html,
+}
+
+/// Represents the actual content of a binary file.
+/// It can either reside in memory as a base64 string or on the filesystem with an ID pointer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum BinaryDataContent {
+    /// In memory representation (typically base64)
+    Memory { data: String },
+    /// Filesystem ID reference for large files.
+    FileSystem { id: String },
+}
+
+/// Standardized representation of binary data passing between workflow nodes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IBinaryData {
+    #[serde(flatten)]
+    pub content: BinaryDataContent,
+    pub mime_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_type: Option<BinaryFileType>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub directory: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_extension: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_size: Option<String>,
+}
+
+#[cfg(test)]
+mod binary_tests {
+    use super::*;
+
+    #[test]
+    fn test_binary_data_memory_serialization() {
+        let bin = IBinaryData {
+            content: BinaryDataContent::Memory { data: "base64content".into() },
+            mime_type: "image/png".into(),
+            file_type: Some(BinaryFileType::Image),
+            file_name: Some("test.png".into()),
+            directory: None,
+            file_extension: Some("png".into()),
+            file_size: None,
+        };
+
+        let serialized = serde_json::to_string(&bin).unwrap();
+        assert!(serialized.contains(r#""data":"base64content""#));
+        assert!(serialized.contains(r#""mimeType":"image/png""#));
+        assert!(serialized.contains(r#""fileType":"image""#));
+        
+        let deserialized: IBinaryData = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(bin, deserialized);
+    }
+
+    #[test]
+    fn test_binary_data_fs_serialization() {
+        let bin = IBinaryData {
+            content: BinaryDataContent::FileSystem { id: "1234-abcd".into() },
+            mime_type: "application/pdf".into(),
+            file_type: Some(BinaryFileType::Pdf),
+            file_name: None,
+            directory: None,
+            file_extension: None,
+            file_size: None,
+        };
+
+        let serialized = serde_json::to_string(&bin).unwrap();
+        assert!(serialized.contains(r#""id":"1234-abcd""#));
+        assert!(serialized.contains(r#""fileType":"pdf""#));
+        
+        let deserialized: IBinaryData = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(bin, deserialized);
+    }
+}
