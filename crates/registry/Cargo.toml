@@ -7,3 +7,5 @@ edition.workspace = true
 barqflow-core = { path = "../core" }
 async-trait.workspace = true
 tokio.workspace       = true
+serde.workspace = true
+serde_json.workspace = true
