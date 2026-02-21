@@ -134,10 +134,10 @@ impl ExpressionEngine {
                 Dynamic::from(converted)
             }
             serde_json::Value::Object(obj) => {
-                let map: HashMap<String, Dynamic> = obj
-                    .iter()
-                    .map(|(k, v)| (k.clone(), Self::json_to_dynamic(v)))
-                    .collect();
+                let mut map = rhai::Map::new();
+                for (k, v) in obj.iter() {
+                    map.insert(k.clone().into(), Self::json_to_dynamic(v));
+                }
                 Dynamic::from(map)
             }
         }

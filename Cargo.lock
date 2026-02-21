@@ -210,12 +210,14 @@ dependencies = [
  "bytes",
  "chrono",
  "petgraph",
+ "rhai",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror",
  "tokio",
  "tracing",
+ "urlencoding",
  "uuid",
 ]
 
