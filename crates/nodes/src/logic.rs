@@ -144,3 +144,29 @@ impl INodeType for MergeNode {
         Ok(vec![merged])
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_if_node_description() {
+        let node = IfNode;
+        let desc = node.get_description();
+        assert_eq!(desc.0.get("name").unwrap(), "IF");
+    }
+
+    #[tokio::test]
+    async fn test_switch_node_description() {
+        let node = SwitchNode;
+        let desc = node.get_description();
+        assert_eq!(desc.0.get("name").unwrap(), "Switch");
+    }
+
+    #[tokio::test]
+    async fn test_merge_node_description() {
+        let node = MergeNode;
+        let desc = node.get_description();
+        assert_eq!(desc.0.get("name").unwrap(), "Merge");
+    }
+}
