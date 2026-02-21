@@ -110,4 +110,74 @@ mod tests {
         let deserialized: NodeId = serde_json::from_str(&serialized).unwrap();
         assert_eq!(id, deserialized);
     }
+
+    #[test]
+    fn test_data_object_serialization() {
+        use serde_json::json;
+        let val: serde_json::Value = json!({
+            "name": "BarqFlow",
+            "active": true,
+            "nested": {
+                "key": "value"
+            }
+        });
+
+        let data_object = IDataObject::from(val.clone());
+        let serialized = serde_json::to_string(&data_object).unwrap();
+        let deserialized: IDataObject = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(data_object.0, deserialized.0);
+        assert_eq!(data_object.0, val);
+    }
+}
+
+/// GenericValue wrapping a serde_json::Value
+/// Represents any generic data value that can be processed by a node.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct GenericValue(pub serde_json::Value);
+
+impl From<serde_json::Value> for GenericValue {
+    fn from(value: serde_json::Value) -> Self {
+        Self(value)
+    }
+}
+
+impl Default for GenericValue {
+    fn default() -> Self {
+        Self(serde_json::Value::Null)
+    }
+}
+
+/// IDataObject wrapping a serde_json::Map or Object
+/// Represents a structured collection of key-value pairs typical in workflow data.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct IDataObject(pub serde_json::Value);
+
+impl IDataObject {
+    pub fn new() -> Self {
+        Self(serde_json::Value::Object(serde_json::Map::new()))
+    }
+}
+
+impl Default for IDataObject {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl From<serde_json::Value> for IDataObject {
+    fn from(value: serde_json::Value) -> Self {
+        if value.is_object() {
+            Self(value)
+        } else {
+            // Fallback or handle error. Here we just wrap it, but generally IDataObject should be an object.
+            // Ideally it should return an error, but From trait doesn't allow it. 
+            // In a real scenario, TryFrom is better or we enforce it's an object.
+            let mut map = serde_json::Map::new();
+            map.insert("data".to_string(), value);
+            Self(serde_json::Value::Object(map))
+        }
+    }
 }
