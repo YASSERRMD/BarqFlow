@@ -3,6 +3,7 @@ pub mod branching;
 pub mod checkpoint;
 pub mod context;
 pub mod error_handler;
+pub mod polling;
 pub mod runner;
 pub mod state;
 pub mod subworkflow;

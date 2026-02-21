@@ -1,6 +1,6 @@
 pub mod deduplication;
-pub mod http;
-pub mod manipulation;
 pub mod logic;
+pub mod manipulation;
 pub mod scheduler;
+pub mod http;
 pub mod trigger;
