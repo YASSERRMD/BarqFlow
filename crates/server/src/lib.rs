@@ -1,4 +1,2 @@
-// Server crate lib
-pub async fn start() -> anyhow::Result<()> {
-    Ok(())
-}
+pub mod boot;
+pub mod state;

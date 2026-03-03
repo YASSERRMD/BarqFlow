@@ -2,3 +2,5 @@ tmp/
 git_workflow.md
 plan.md
 target/
+node_modules/
+web/node_modules/

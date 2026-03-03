@@ -45,11 +45,27 @@ pub trait INodeType: Send + Sync {
     }
 }
 
+/// Represents a configuration for pinging an API to verify credential validity
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct ICredentialTestRequest {
+    /// The HTTP method to use for the test (e.g. "GET")
+    pub method: String,
+    /// The target URL to ping
+    pub url: String,
+    /// Expected successful HTTP status codes
+    pub expected_status: Vec<u16>,
+}
+
 /// Defines an Authentication Credential blueprint, matching ICredentialType
 #[async_trait]
 pub trait ICredentialType: Send + Sync {
     /// Returns the UI metadata form for registering these credentials
     fn get_description(&self) -> crate::types::IDataObject; // Maps to ICredentialDescription
+
+    /// Configuration on how to ping the underlying API to test credential validity
+    fn test_request(&self) -> Option<ICredentialTestRequest> {
+        None
+    }
 
     /// Optional hook to validate the credential externally when user clicks "test"
     async fn test_credential(&self, _credential_data: &HashMap<String, crate::types::GenericValue>) -> Result<bool, BarqError> {

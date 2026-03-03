@@ -109,6 +109,118 @@ pub struct INodeProperties {
     pub required_values: Option<Vec<String>>,
 }
 
+/// Describes how the credential will be injected into HTTP requests for actual usage
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthenticateRequestProperties {
+    /// How the credential should be passed (e.g., "header", "body", "qs" for query string)
+    pub r#in: String,
+    /// The key/name of the credential in the request
+    pub name: String,
+    /// The value payload, often containing expression references to form properties (e.g., "={{\$credentials.apiKey}}")
+    pub value: String,
+}
+
+/// The root credential description contract sent to the UI
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ICredentialProperties {
+    /// Internal ID / name of the credential type
+    pub name: String,
+    /// Display name shown in UI dropdowns
+    pub display_name: String,
+    /// The list of input fields the user must fill out
+    pub properties: Vec<INodeProperty>,
+    /// Optional instructional text mapping how to get the credential
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub documentation_url: Option<String>,
+    /// Specifies how the credential applies itself to a standard HTTP request automatically
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub authenticate: Option<AuthenticateRequestProperties>,
+}
+
+/// Helper functions to generate standard, repetitive credential forms
+pub struct CredentialStandardForms;
+
+impl CredentialStandardForms {
+    /// Generates a standard OAuth2 configuration property block
+    pub fn oauth2_properties() -> Vec<INodeProperty> {
+        vec![
+            INodeProperty {
+                display_name: "Grant Type".to_string(),
+                name: "grantType".to_string(),
+                r#type: NodePropertyType::Options,
+                default: Some(serde_json::json!("authorizationCode")),
+                description: None,
+                hint: None,
+                required: true,
+                options: Some(vec![
+                    NodePropertyOption {
+                        name: "Authorization Code".to_string(),
+                        value: serde_json::json!("authorizationCode"),
+                        description: None,
+                    },
+                    NodePropertyOption {
+                        name: "Client Credentials".to_string(),
+                        value: serde_json::json!("clientCredentials"),
+                        description: None,
+                    },
+                ]),
+                display_options: None,
+            },
+            INodeProperty {
+                display_name: "Authorization URL".to_string(),
+                name: "authUrl".to_string(),
+                r#type: NodePropertyType::String,
+                default: None,
+                description: Some("The URL to authorize the user".to_string()),
+                hint: None,
+                required: true,
+                options: None,
+                display_options: Some(NodeDisplayOptions {
+                    r#show: Some(NodeDisplayCondition {
+                        property: "grantType".to_string(),
+                        values: vec![serde_json::json!("authorizationCode")],
+                    }),
+                }),
+            },
+            INodeProperty {
+                display_name: "Access Token URL".to_string(),
+                name: "accessTokenUrl".to_string(),
+                r#type: NodePropertyType::String,
+                default: None,
+                description: Some("The URL to retrieve the access token".to_string()),
+                hint: None,
+                required: true,
+                options: None,
+                display_options: None,
+            },
+            INodeProperty {
+                display_name: "Client ID".to_string(),
+                name: "clientId".to_string(),
+                r#type: NodePropertyType::String,
+                default: None,
+                description: Some("The OAuth2 Client ID".to_string()),
+                hint: None,
+                required: true,
+                options: None,
+                display_options: None,
+            },
+            INodeProperty {
+                display_name: "Client Secret".to_string(),
+                name: "clientSecret".to_string(),
+                r#type: NodePropertyType::String,
+                default: None,
+                description: Some("The OAuth2 Client Secret".to_string()),
+                hint: None,
+                required: true,
+                options: None,
+                display_options: None,
+            },
+        ]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -267,5 +379,32 @@ mod tests {
 
         let deserialized: INodeProperty = serde_json::from_str(&serialized).unwrap();
         assert_eq!(prop, deserialized);
+    }
+    
+    #[test]
+    fn test_credential_serialization() {
+        let auth = AuthenticateRequestProperties {
+            r#in: "header".to_string(),
+            name: "Authorization".to_string(),
+            value: "Bearer ={{$credentials.oauthToken}}".to_string(),
+        };
+        
+        let props = ICredentialProperties {
+            name: "githubOAuth2Api".to_string(),
+            display_name: "GitHub OAuth2 API".to_string(),
+            properties: CredentialStandardForms::oauth2_properties(),
+            documentation_url: Some("https://docs.github.com/en/rest".to_string()),
+            authenticate: Some(auth),
+        };
+        
+        let serialized = serde_json::to_string(&props).unwrap();
+        
+        assert!(serialized.contains("\"name\":\"githubOAuth2Api\""));
+        assert!(serialized.contains("\"value\":\"Bearer ={{$credentials.oauthToken}}\""));
+        assert!(serialized.contains("\"name\":\"grantType\""));
+        
+        let deserialized: ICredentialProperties = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized.properties.len(), 5);
+        assert_eq!(deserialized.authenticate.unwrap().r#in, "header");
     }
 }

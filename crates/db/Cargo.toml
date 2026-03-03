@@ -1,0 +1,16 @@
+[package]
+name = "barqflow-db"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "json", "uuid", "chrono"] }
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+thiserror.workspace = true
+aes-gcm.workspace = true
+rand = "0.10.0"
+base64 = "0.22.1"
