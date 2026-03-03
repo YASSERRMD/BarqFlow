@@ -7,8 +7,9 @@ edition.workspace = true
 barqflow-core     = { path = "../core" }
 barqflow-registry = { path = "../registry" }
 reqwest.workspace   = true
-rhai.workspace      = true
+rhai = { workspace = true, features = ["serde"] }
 tokio.workspace     = true
+serde.workspace     = true
 serde_json.workspace = true
 tokio-cron-scheduler.workspace = true
 async-trait.workspace = true

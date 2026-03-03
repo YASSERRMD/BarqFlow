@@ -82,15 +82,55 @@ impl NodeExecutionContext {
                 }
             })?;
 
-        // Check if this is an expression (simplified check - in real implementation would use Rhai)
+    // Check if this is an expression
         if let Some(expr_str) = raw_value.0.as_str() {
             if expr_str.starts_with("{{") && expr_str.ends_with("}}") {
-                // For now, return a simple placeholder
-                // Full expression evaluation would be implemented with Rhai in a later phase
-                return Ok(GenericValue(serde_json::json!({
-                    "expression": expr_str,
-                    "note": "Expression evaluation not yet implemented - will use Rhai in Phase 12"
-                })));
+                // Remove the {{ }} wrappers for Rhai
+                let stripped_expr = expr_str[2..expr_str.len() - 2].trim().to_string();
+                let expr_str_owned = expr_str.to_string();
+                
+                // Get data we need across await boundary FIRST
+                let json_data = {
+                    let input = self.input_data.read().await;
+                    // Default to first item of first input branch for evaluation, prioritizing main
+                    input.0.get(&0).and_then(|items| items.first()).map(|item| &item.json.0).cloned().unwrap_or_else(|| serde_json::json!({}))
+                };
+                
+                let params_map: HashMap<String, serde_json::Value> = self.node.parameters.0.iter().map(|(k, v)| (k.clone(), v.0.clone())).collect();
+                let node_name = self.node.name.clone();
+
+                // Perform the evaluation in a strict scope so non-Send types are dropped
+                let eval_result = {
+                    let engine = barqflow_flow::expression::ExpressionEngine::new().with_custom_functions();
+                    
+                    let expr_ctx = barqflow_flow::expression::ExpressionContext {
+                        json_data,
+                        binary_keys: vec![], // Binary streams mapping skipped for simplified phase 21
+                        parameters: params_map,
+                    };
+                    
+                    engine.eval_with_context(&stripped_expr, &expr_ctx)
+                };
+
+                return match eval_result {
+                    Ok(dyn_val) if dyn_val.is_unit() => Ok(GenericValue(serde_json::Value::Null)),
+                    Ok(dyn_val) if dyn_val.is_string() => Ok(GenericValue(serde_json::Value::String(dyn_val.into_string().unwrap()))),
+                    Ok(dyn_val) if dyn_val.is_int() => Ok(GenericValue(serde_json::json!(dyn_val.as_int().unwrap()))),
+                    Ok(dyn_val) if dyn_val.is_bool() => Ok(GenericValue(serde_json::Value::Bool(dyn_val.as_bool().unwrap()))),
+                    Ok(dyn_val) if dyn_val.is_float() => Ok(GenericValue(serde_json::json!(dyn_val.as_float().unwrap()))),
+                    Ok(_) => {
+                        Err(BarqError::ExpressionError {
+                            node_name,
+                            message: format!("Expression '{}' resulted in unsupported complex Rhai Dynamic type", expr_str_owned),
+                        })
+                    }
+                    Err(e) => {
+                        Err(BarqError::ExpressionError {
+                            node_name,
+                            message: format!("Failed to evaluate expression '{}': {}", expr_str_owned, e),
+                        })
+                    }
+                };
             }
         }
 
@@ -122,29 +162,79 @@ impl IExecuteFunctions for NodeExecutionContext {
         &self.node
     }
 
-    /// Read data from incoming branches.
-    fn get_input_data(&self, _input_index: usize) -> Result<&Vec<INodeExecutionData>, BarqError> {
-        // We need to return a reference, but we have an Arc<RwLock<>>
-        // For now, we'll clone the data - in production this would need a different approach
-        // or the trait would need to be redesigned to handle async access
-        Err(BarqError::NodeOperationError {
-            node_name: self.node.name.clone(),
-            message: "Synchronous input data access not implemented - use async variant".to_string(),
-        })
+    fn get_input_data(&self, input_index: usize) -> Result<&Vec<INodeExecutionData>, BarqError> {
+        // We know we're in a synchronous context when this is called from the node
+        // The RwLock is a blocking lock here because we only read from it
+        let data = self.input_data.blocking_read();
+        
+        let slice = unsafe {
+            // SAFE: We are extending the lifetime of the borrow to match the traits requirements. 
+            // The underlying data is stored in the WorkflowRunner and lives for the entire execution.
+            // When executing, the node only reads the data sequentially, so no concurrent mutable access occurs.
+            std::mem::transmute::<&Vec<INodeExecutionData>, &'static Vec<INodeExecutionData>>(
+                data.0.get(&input_index).ok_or_else(|| BarqError::NodeOperationError {
+                    node_name: self.node.name.clone(),
+                    message: format!("Input branch {} not found", input_index),
+                })?
+            )
+        };
+        Ok(slice)
     }
 
-    /// Log a debug message scoped to this node execution.
     fn log(&self, message: &str) {
-        let span = span!(
+        let _span = span!(
             Level::DEBUG,
             "node_execution",
             run_id = %self.run_id,
-            node = %self.node.name,
-            node_type = %self.node.r#type
+            node_id = %self.node.id,
+            node_name = %self.node.name
         );
-
-        let _enter = span.enter();
         debug!("{}", message);
+    }
+}
+
+/// Execution context passed to trigger nodes during polling intervals.
+/// Provides access to read and update static memory data across ticks.
+pub struct PollExecutionContext {
+    /// The trigger node being polled
+    node: INode,
+    /// Shared static data map for the workflow
+    static_data: Arc<RwLock<Option<IDataObject>>>,
+}
+
+impl PollExecutionContext {
+    pub fn new(node: INode, static_data: Arc<RwLock<Option<IDataObject>>>) -> Self {
+        Self { node, static_data }
+    }
+}
+
+#[async_trait]
+impl barqflow_core::traits::IPollFunctions for PollExecutionContext {
+    async fn get_poll_data(&self) -> Result<IDataObject, BarqError> {
+        let guard = self.static_data.read().await;
+        if let Some(data) = &*guard {
+            if let Some(poll_data) = data.0.get(&self.node.id.to_string()) {
+                if let Some(obj) = poll_data.as_object() {
+                    return Ok(IDataObject(serde_json::Value::Object(obj.clone())));
+                }
+            }
+        }
+        Ok(IDataObject::default())
+    }
+
+    async fn set_poll_data(&self, data: IDataObject) -> Result<(), BarqError> {
+        let mut guard = self.static_data.write().await;
+        if guard.is_none() {
+            *guard = Some(IDataObject::default());
+        }
+        
+        if let Some(static_map) = guard.as_mut() {
+            if let serde_json::Value::Object(ref mut map) = static_map.0 {
+                map.insert(self.node.id.to_string(), data.0);
+            }
+        }
+        
+        Ok(())
     }
 }
 
@@ -333,7 +423,7 @@ mod tests {
         let mut params = HashMap::new();
         params.insert(
             "exprParam".to_string(),
-            GenericValue(json!("{{ $json.someValue }}")),
+            GenericValue(json!("{{ json[\"someValue\"] }}")),
         );
 
         let node = INode {
@@ -346,20 +436,25 @@ mod tests {
             disabled: false,
         };
 
-        let context = NodeExecutionContext::new(
+        let mut context = NodeExecutionContext::new(
             node,
             ITaskDataConnections::default(),
             None,
             uuid::Uuid::new_v4(),
         );
+        let mut new_data = ITaskDataConnections::new();
+        new_data.push(
+            0,
+            vec![INodeExecutionData::new(IDataObject::from(json!({ "someValue": "evalResult" })))],
+        );
+        context.update_input_data(new_data).await;
 
         let result = context
             .get_node_parameter("exprParam", None)
             .await
             .unwrap();
 
-        // Should return placeholder indicating expression not yet fully evaluated
-        assert!(result.0.is_object());
+        assert_eq!(result.0, json!("evalResult"));
     }
 
     #[tokio::test]

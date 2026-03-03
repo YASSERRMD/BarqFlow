@@ -4,9 +4,6 @@
 
 use crate::node_properties::INodeProperties;
 use barqflow_core::traits::INodeType;
-use barqflow_core::types::IDataObject;
-use barqflow_core::errors::BarqError;
-use serde_json::json;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use barqflow_core::traits::ICredentialType;
@@ -44,6 +41,16 @@ impl CredentialRegistry {
     pub fn get_credential(&self, name: &str) -> Option<CredentialInfo> {
         let creds = self.credentials.read().ok()?;
         creds.get(name).cloned()
+    }
+
+    /// Retrieves the test rules for a given credential type if available
+    pub fn test_credential_rules(&self, name: &str) -> Result<Option<barqflow_core::traits::ICredentialTestRequest>, String> {
+        let creds = self.credentials.read().map_err(|e| e.to_string())?;
+        if let Some(info) = creds.get(name) {
+            Ok(info.cred_impl.test_request())
+        } else {
+            Err(format!("Credential '{}' not found", name))
+        }
     }
 }
 
@@ -263,7 +270,10 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use barqflow_core::traits::IExecuteFunctions;
+    use barqflow_core::types::IDataObject;
+    use barqflow_core::errors::BarqError;
     use crate::node_properties::{INodeProperty, NodePropertyType};
+    use serde_json::json;
 
     // Mock node implementation for testing
     struct MockNode;
@@ -423,5 +433,43 @@ mod tests {
         assert!(names.contains(&"httpRequest".to_string()));
         assert!(names.contains(&"webhook".to_string()));
         assert!(names.contains(&"code".to_string()));
+    }
+
+    struct MockCredential {
+        name: String,
+    }
+
+    #[async_trait]
+    impl ICredentialType for MockCredential {
+        fn get_description(&self) -> IDataObject {
+            IDataObject::from(json!({ "name": self.name }))
+        }
+        
+        fn test_request(&self) -> Option<barqflow_core::traits::ICredentialTestRequest> {
+            Some(barqflow_core::traits::ICredentialTestRequest {
+                method: "GET".to_string(),
+                url: "https://api.example.com/me".to_string(),
+                expected_status: vec![200],
+            })
+        }
+    }
+
+    #[test]
+    fn test_credential_validation_rules() {
+        let registry = CredentialRegistry::new();
+        let cred_impl = Arc::new(MockCredential { name: "testAuth".to_string() });
+        
+        registry.register_credential(CredentialInfo {
+            name: "testAuth".to_string(),
+            cred_impl,
+        }).unwrap();
+        
+        let rules = registry.test_credential_rules("testAuth").unwrap().unwrap();
+        assert_eq!(rules.method, "GET");
+        assert_eq!(rules.url, "https://api.example.com/me");
+        assert_eq!(rules.expected_status, vec![200]);
+        
+        let missing = registry.test_credential_rules("doesNotExist");
+        assert!(missing.is_err());
     }
 }

@@ -4,13 +4,20 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-barqflow-core = { path = "../core" }
-barqflow-exec = { path = "../exec" }
-sqlx.workspace       = true
+barqflow-core.workspace = true
+barqflow-db.workspace = true
+barqflow-exec.workspace = true
+axum.workspace = true
+tokio.workspace = true
+serde.workspace = true
 serde_json.workspace = true
-thiserror.workspace  = true
-uuid.workspace       = true
-aes-gcm.workspace    = true
-argon2.workspace     = true
+uuid.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+sqlx.workspace = true
+tower.workspace = true
 jsonwebtoken.workspace = true
-tokio.workspace      = true
+argon2.workspace = true
+axum-extra = "0.12.5"
+tower-http = { workspace = true, features = ["fs"] }
+chrono.workspace = true
