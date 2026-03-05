@@ -16,7 +16,7 @@ pub struct WebhookState {
 
 pub fn webhook_routes(state: WebhookState) -> Router {
     Router::new()
-        .route("/*path", any(handle_webhook))
+        .route("/{*path}", any(handle_webhook))
         .with_state(state)
 }
 

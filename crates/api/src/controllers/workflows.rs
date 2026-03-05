@@ -17,7 +17,7 @@ pub struct AppState {
 pub fn workflow_routes(state: AppState) -> Router {
     Router::new()
         .route("/workflows", get(get_workflows).post(create_workflow))
-        .route("/workflows/:id/activate", put(toggle_workflow_active))
+        .route("/workflows/{id}/activate", put(toggle_workflow_active))
         .with_state(state)
 }
 

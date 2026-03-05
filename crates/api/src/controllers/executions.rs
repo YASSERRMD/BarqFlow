@@ -16,8 +16,8 @@ pub struct AppState {
 
 pub fn execution_routes(state: AppState) -> Router {
     Router::new()
-        .route("/executions/:id", get(get_execution))
-        .route("/executions/workflow/:workflow_id", post(create_execution))
+        .route("/executions/{id}", get(get_execution))
+        .route("/executions/workflow/{workflow_id}", post(create_execution))
         .with_state(state)
 }
 
