@@ -208,17 +208,17 @@ impl ConditionEvaluator {
         // Supports paths like "$json.field", "$json.nested.field"
         let parts: Vec<&str> = field.split('.').collect();
 
-        let mut current = &data.0;
+        let mut current = serde_json::Value::Object(data.0.clone());
 
         // Skip the first part if it's "$json"
         for part in parts.iter().skip(if parts.first().map(|p| p.starts_with('$')).unwrap_or(false) { 1 } else { 0 }) {
-            current = match current.get(part) {
-                Some(value) => value,
+            current = match current.get(*part) {
+                Some(value) => value.clone(),
                 None => return serde_json::Value::Null,
             };
         }
 
-        current.clone()
+        current
     }
 
     fn check_equals(a: &serde_json::Value, b: &serde_json::Value) -> bool {
@@ -319,12 +319,12 @@ impl DataMerger {
                     // Add data from this input to the merged object
                     map.insert(
                         format!("input{}", input_idx),
-                        item.json.0.clone()
+                        serde_json::Value::Object(item.json.0.clone())
                     );
                 }
             }
 
-            result.push(INodeExecutionData::new(IDataObject(serde_json::Value::Object(map))));
+            result.push(INodeExecutionData::new(IDataObject(map)));
         }
 
         result

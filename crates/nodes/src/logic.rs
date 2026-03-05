@@ -9,7 +9,7 @@ pub struct IfNode;
 #[async_trait]
 impl INodeType for IfNode {
     fn get_description(&self) -> IDataObject {
-        IDataObject(serde_json::json!({
+        IDataObject::from(serde_json::json!({
             "name": "IF",
             "description": "Route items based on conditions"
         }))
@@ -19,12 +19,12 @@ impl INodeType for IfNode {
         let input_data = context.get_input_data(0)?;        
         let operation = context.get_node_parameter("operation", None)
             .await
-            .map(|v| v.0.as_str().unwrap_or("equals").to_string())
+            .map(|v| v.as_str().unwrap_or("equals").to_string())
             .unwrap_or_else(|_| "equals".to_string());
             
         let property1 = context.get_node_parameter("value1", None)
             .await
-            .map(|v| v.0.as_str().unwrap_or("").to_string())
+            .map(|v| v.as_str().unwrap_or("").to_string())
             .unwrap_or_else(|_| "".to_string());
 
         let mut true_branch = Vec::new();
@@ -37,7 +37,7 @@ impl INodeType for IfNode {
             let v1_str = item_value.as_str().unwrap_or("");
                 
             let matches = if let Ok(prop2_result) = context.get_node_parameter("value2", None).await {
-                let v2 = prop2_result.0.as_str().unwrap_or("");
+                let v2 = prop2_result.as_str().unwrap_or("");
                 match operation.as_str() {
                     "equals" => v1_str == v2,
                     "notEquals" => v1_str != v2,
@@ -68,7 +68,7 @@ pub struct SwitchNode;
 #[async_trait]
 impl INodeType for SwitchNode {
     fn get_description(&self) -> IDataObject {
-        IDataObject(serde_json::json!({
+        IDataObject::from(serde_json::json!({
             "name": "Switch",
             "description": "Route items based on matching values"
         }))
@@ -78,12 +78,12 @@ impl INodeType for SwitchNode {
         let input_data = context.get_input_data(0)?;        
         let data_property = context.get_node_parameter("dataProperty", None)
             .await
-            .map(|v| v.0.as_str().unwrap_or("").to_string())
+            .map(|v| v.as_str().unwrap_or("").to_string())
             .unwrap_or_else(|_| "".to_string());
 
         let fallback_output: usize = context.get_node_parameter("fallbackOutput", None)
             .await
-            .map(|v| v.0.as_u64().unwrap_or(0) as usize)
+            .map(|v| v.as_u64().unwrap_or(0) as usize)
             .unwrap_or(9);
 
         let mut outputs: Vec<Vec<INodeExecutionData>> = vec![Vec::new(); 10];
@@ -98,7 +98,7 @@ impl INodeType for SwitchNode {
             for i in 0..8 {
                 let case_prop = format!("case{}", i);
                 if let Ok(case_value) = context.get_node_parameter(&case_prop, None).await {
-                    let case_str = case_value.0.as_str().unwrap_or("");
+                    let case_str = case_value.as_str().unwrap_or("");
                     if switch_value == case_str {
                         outputs[i].push(item.clone());
                         matched = true;
@@ -121,7 +121,7 @@ pub struct MergeNode;
 #[async_trait]
 impl INodeType for MergeNode {
     fn get_description(&self) -> IDataObject {
-        IDataObject(serde_json::json!({
+        IDataObject::from(serde_json::json!({
             "name": "Merge",
             "description": "Merge multiple branches into one"
         }))
@@ -130,7 +130,7 @@ impl INodeType for MergeNode {
     async fn execute(&self, context: &dyn IExecuteFunctions) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
         let mode = context.get_node_parameter("mode", None)
             .await
-            .map(|v| v.0.as_str().unwrap_or("append").to_string())
+            .map(|v| v.as_str().unwrap_or("append").to_string())
             .unwrap_or_else(|_| "append".to_string());
 
         let mut merged = Vec::new();

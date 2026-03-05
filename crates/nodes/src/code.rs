@@ -23,7 +23,7 @@ impl Default for CodeNode {
 #[async_trait]
 impl INodeType for CodeNode {
     fn get_description(&self) -> IDataObject {
-        IDataObject(json!({
+        IDataObject::from(json!({
             "name": "Code",
             "description": "Execute custom Rhai scripts securely",
             "displayName": "Code",
@@ -43,7 +43,7 @@ impl INodeType for CodeNode {
         context: &dyn IExecuteFunctions,
     ) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
         let code_val = context.get_node_parameter("code", None).await?;
-        let code = code_val.0.as_str().unwrap_or("return items;").to_string();
+        let code = code_val.as_str().unwrap_or("return items;").to_string();
 
         // Ensure Rhai execution is isolated (no OS access, etc.)
         // By default, `Engine::new()` avoids exposing OS boundaries unless manually registered
@@ -112,7 +112,7 @@ impl INodeType for CodeNode {
 
                     match rhai::serde::from_dynamic::<Value>(&target_map.into()) {
                         Ok(val) => {
-                            output_items.push(INodeExecutionData::new(IDataObject(val)));
+                            output_items.push(INodeExecutionData::new(IDataObject::from(val)));
                         }
                         Err(e) => {
                             return Err(BarqError::NodeOperationError {
@@ -161,7 +161,7 @@ mod tests {
             _fallback: Option<GenericValue>,
         ) -> Result<GenericValue, BarqError> {
             if parameter_name == "code" {
-                Ok(GenericValue(json!(self.code)))
+                Ok(serde_json::json!(self.code))
             } else {
                 Err(BarqError::NodeOperationError { node_name: "".into(), message: "Param not found".into() })
             }
@@ -188,7 +188,7 @@ mod tests {
                 
                 items
             "#.to_string(),
-            inputs: vec![INodeExecutionData::new(IDataObject(json!({ "test": true })))],
+            inputs: vec![INodeExecutionData::new(IDataObject::from(json!({ "test": true })))],
         };
 
         let result = node.execute(&ctx).await.unwrap();

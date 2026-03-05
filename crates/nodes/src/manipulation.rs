@@ -9,7 +9,7 @@ pub struct SetNode;
 #[async_trait]
 impl INodeType for SetNode {
     fn get_description(&self) -> IDataObject {
-        IDataObject(serde_json::json!({
+        IDataObject::from(serde_json::json!({
             "name": "Set",
             "description": "Sets values on items and returns them"
         }))
@@ -23,15 +23,13 @@ impl INodeType for SetNode {
             let mut new_item = item.json.0.clone();
             
             if let Ok(options) = context.get_node_parameter("assignments", None).await {
-                if let Some(assignments) = options.0.as_array() {
+                if let Some(assignments) = options.as_array() {
                     for assignment in assignments {
                         if let (Some(name), Some(value)) = (
                             assignment.get("name").and_then(|v| v.as_str()),
                             assignment.get("value")
                         ) {
-                            if let serde_json::Value::Object(ref mut map) = new_item {
-                                map.insert(name.to_string(), value.clone());
-                            }
+                            new_item.insert(name.to_string(), value.clone());
                         }
                     }
                 }
@@ -49,7 +47,7 @@ pub struct FilterNode;
 #[async_trait]
 impl INodeType for FilterNode {
     fn get_description(&self) -> IDataObject {
-        IDataObject(serde_json::json!({
+        IDataObject::from(serde_json::json!({
             "name": "Filter",
             "description": "Filters items based on conditions"
         }))
@@ -60,12 +58,12 @@ impl INodeType for FilterNode {
         
         let operation = context.get_node_parameter("operation", None)
             .await
-            .map(|v| v.0.as_str().unwrap_or("equals").to_string())
+            .map(|v| v.as_str().unwrap_or("equals").to_string())
             .unwrap_or_else(|_| "equals".to_string());
             
         let property1 = context.get_node_parameter("property1", None)
             .await
-            .map(|v| v.0.as_str().unwrap_or("").to_string())
+            .map(|v| v.as_str().unwrap_or("").to_string())
             .unwrap_or_else(|_| "".to_string());
 
         let mut output_items = Vec::new();
@@ -81,7 +79,7 @@ impl INodeType for FilterNode {
                     keep = v1.is_null();
                 } else if let Some(v2) = context.get_node_parameter("property2", None).await.ok() {
                     let v1_str = v1.as_str().unwrap_or("");
-                    let v2_str = v2.0.as_str().unwrap_or("");
+                    let v2_str = v2.as_str().unwrap_or("");
                     if operation == "equals" {
                         keep = v1_str == v2_str;
                     } else if operation == "notEquals" {
@@ -106,7 +104,7 @@ pub struct ItemListsNode;
 #[async_trait]
 impl INodeType for ItemListsNode {
     fn get_description(&self) -> IDataObject {
-        IDataObject(serde_json::json!({
+        IDataObject::from(serde_json::json!({
             "name": "Item Lists",
             "description": "Split items into batches or combine items"
         }))
@@ -117,13 +115,13 @@ impl INodeType for ItemListsNode {
         
         let mode = context.get_node_parameter("mode", None)
             .await
-            .map(|v| v.0.as_str().unwrap_or("splitInBatches").to_string())
+            .map(|v| v.as_str().unwrap_or("splitInBatches").to_string())
             .unwrap_or_else(|_| "splitInBatches".to_string());
 
         let batch_size = context.get_node_parameter("batchSize", None)
             .await
             .ok()
-            .and_then(|v| v.0.as_u64())
+            .and_then(|v| v.as_u64())
             .map(|n| n as usize)
             .unwrap_or(1);
 
@@ -160,7 +158,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_set_node_creates_item() {
-        let input = vec![INodeExecutionData::new(IDataObject(serde_json::json!({})))];
+        let input = vec![INodeExecutionData::new(IDataObject::from(serde_json::json!({})))];
         assert!(!input.is_empty());
     }
 

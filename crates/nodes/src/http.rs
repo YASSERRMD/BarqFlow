@@ -32,7 +32,7 @@ impl Default for HttpRequestNode {
 #[async_trait]
 impl INodeType for HttpRequestNode {
     fn get_description(&self) -> IDataObject {
-        IDataObject(serde_json::json!({
+        IDataObject::from(serde_json::json!({
             "name": "HTTP Request",
             "description": "Send HTTP request to external service"
         }))
@@ -41,7 +41,7 @@ impl INodeType for HttpRequestNode {
     async fn execute(&self, context: &dyn barqflow_core::traits::IExecuteFunctions) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
         let url = context.get_node_parameter("url", None)
             .await
-            .map(|v| v.0.as_str().unwrap_or("").to_string())
+            .map(|v| v.as_str().unwrap_or("").to_string())
             .unwrap_or_default();
 
         if url.is_empty() {
@@ -53,13 +53,13 @@ impl INodeType for HttpRequestNode {
 
         let method = context.get_node_parameter("method", None)
             .await
-            .map(|v| v.0.as_str().unwrap_or("GET").to_string())
+            .map(|v| v.as_str().unwrap_or("GET").to_string())
             .unwrap_or_else(|_| "GET".to_string());
 
         let body = context.get_node_parameter("body", None)
             .await
             .ok()
-            .and_then(|v| v.0.as_str().map(|s| s.to_string()));
+            .and_then(|v| v.as_str().map(|s| s.to_string()));
 
         let request = match method.to_uppercase().as_str() {
             "POST" => self.client.post(&url),
@@ -88,7 +88,7 @@ impl INodeType for HttpRequestNode {
             "body": body_text
         });
 
-        let output_item = INodeExecutionData::new(IDataObject(output));
+        let output_item = INodeExecutionData::new(IDataObject::from(output));
         Ok(vec![vec![output_item]])
     }
 }

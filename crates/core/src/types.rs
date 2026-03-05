@@ -213,51 +213,61 @@ mod tests {
     }
 }
 
-/// GenericValue wrapping a serde_json::Value
 /// Represents any generic data value that can be processed by a node.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct GenericValue(pub serde_json::Value);
+pub type GenericValue = serde_json::Value;
 
-impl From<serde_json::Value> for GenericValue {
-    fn from(value: serde_json::Value) -> Self {
-        Self(value)
-    }
-}
-
-impl Default for GenericValue {
-    fn default() -> Self {
-        Self(serde_json::Value::Null)
-    }
-}
-
-/// IDataObject wrapping a serde_json::Map or Object
 /// Represents a structured collection of key-value pairs typical in workflow data.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(transparent)]
-pub struct IDataObject(pub serde_json::Value);
+pub struct IDataObject(pub serde_json::Map<String, serde_json::Value>);
 
 impl IDataObject {
     pub fn new() -> Self {
-        Self(serde_json::Value::Object(serde_json::Map::new()))
+        Self(serde_json::Map::new())
+    }
+
+    pub fn insert(&mut self, key: impl Into<String>, value: impl Into<serde_json::Value>) -> Option<serde_json::Value> {
+        self.0.insert(key.into(), value.into())
+    }
+
+    pub fn get(&self, key: &str) -> Option<&serde_json::Value> {
+        self.0.get(key)
+    }
+
+    pub fn remove(&mut self, key: &str) -> Option<serde_json::Value> {
+        self.0.remove(key)
     }
 }
 
-impl Default for IDataObject {
-    fn default() -> Self {
-        Self::new()
+impl std::ops::Deref for IDataObject {
+    type Target = serde_json::Map<String, serde_json::Value>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for IDataObject {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 
 impl From<serde_json::Value> for IDataObject {
     fn from(value: serde_json::Value) -> Self {
-        if value.is_object() {
-            Self(value)
+        if let serde_json::Value::Object(map) = value {
+            Self(map)
         } else {
             let mut map = serde_json::Map::new();
             map.insert("data".to_string(), value);
-            Self(serde_json::Value::Object(map))
+            Self(map)
         }
+    }
+}
+
+impl From<serde_json::Map<String, serde_json::Value>> for IDataObject {
+    fn from(map: serde_json::Map<String, serde_json::Value>) -> Self {
+        Self(map)
     }
 }
 

@@ -83,7 +83,7 @@ impl NodeExecutionContext {
             })?;
 
     // Check if this is an expression
-        if let Some(expr_str) = raw_value.0.as_str() {
+        if let Some(expr_str) = raw_value.as_str() {
             if expr_str.starts_with("{{") && expr_str.ends_with("}}") {
                 // Remove the {{ }} wrappers for Rhai
                 let stripped_expr = expr_str[2..expr_str.len() - 2].trim().to_string();
@@ -93,10 +93,10 @@ impl NodeExecutionContext {
                 let json_data = {
                     let input = self.input_data.read().await;
                     // Default to first item of first input branch for evaluation, prioritizing main
-                    input.0.get(&0).and_then(|items| items.first()).map(|item| &item.json.0).cloned().unwrap_or_else(|| serde_json::json!({}))
+                    input.0.get(&0).and_then(|items| items.first()).map(|item| serde_json::Value::Object(item.json.0.clone())).unwrap_or_else(|| serde_json::json!({}))
                 };
                 
-                let params_map: HashMap<String, serde_json::Value> = self.node.parameters.0.iter().map(|(k, v)| (k.clone(), v.0.clone())).collect();
+                let params_map: HashMap<String, serde_json::Value> = self.node.parameters.0.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
                 let node_name = self.node.name.clone();
 
                 // Perform the evaluation in a strict scope so non-Send types are dropped
@@ -113,11 +113,11 @@ impl NodeExecutionContext {
                 };
 
                 return match eval_result {
-                    Ok(dyn_val) if dyn_val.is_unit() => Ok(GenericValue(serde_json::Value::Null)),
-                    Ok(dyn_val) if dyn_val.is_string() => Ok(GenericValue(serde_json::Value::String(dyn_val.into_string().unwrap()))),
-                    Ok(dyn_val) if dyn_val.is_int() => Ok(GenericValue(serde_json::json!(dyn_val.as_int().unwrap()))),
-                    Ok(dyn_val) if dyn_val.is_bool() => Ok(GenericValue(serde_json::Value::Bool(dyn_val.as_bool().unwrap()))),
-                    Ok(dyn_val) if dyn_val.is_float() => Ok(GenericValue(serde_json::json!(dyn_val.as_float().unwrap()))),
+                    Ok(dyn_val) if dyn_val.is_unit() => Ok(serde_json::Value::Null),
+                    Ok(dyn_val) if dyn_val.is_string() => Ok(serde_json::Value::String(dyn_val.into_string().unwrap())),
+                    Ok(dyn_val) if dyn_val.is_int() => Ok(serde_json::json!(dyn_val.as_int().unwrap())),
+                    Ok(dyn_val) if dyn_val.is_bool() => Ok(serde_json::Value::Bool(dyn_val.as_bool().unwrap())),
+                    Ok(dyn_val) if dyn_val.is_float() => Ok(serde_json::json!(dyn_val.as_float().unwrap())),
                     Ok(_) => {
                         Err(BarqError::ExpressionError {
                             node_name,
@@ -215,7 +215,7 @@ impl barqflow_core::traits::IPollFunctions for PollExecutionContext {
         if let Some(data) = &*guard {
             if let Some(poll_data) = data.0.get(&self.node.id.to_string()) {
                 if let Some(obj) = poll_data.as_object() {
-                    return Ok(IDataObject(serde_json::Value::Object(obj.clone())));
+                    return Ok(IDataObject(obj.clone()));
                 }
             }
         }
@@ -229,9 +229,7 @@ impl barqflow_core::traits::IPollFunctions for PollExecutionContext {
         }
         
         if let Some(static_map) = guard.as_mut() {
-            if let serde_json::Value::Object(ref mut map) = static_map.0 {
-                map.insert(self.node.id.to_string(), data.0);
-            }
+            static_map.0.insert(self.node.id.to_string(), serde_json::Value::Object(data.0));
         }
         
         Ok(())
