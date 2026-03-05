@@ -132,7 +132,7 @@ mod tests {
                 "description": "Dummy Node for Testing"
             }).as_object().unwrap().clone();
             
-            IDataObject(serde_json::Value::Object(map))
+            IDataObject::from(serde_json::Value::Object(map))
         }
 
         async fn execute(

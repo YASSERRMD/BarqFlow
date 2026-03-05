@@ -70,7 +70,8 @@ impl ExpressionEngine {
     }
 
     pub fn compile(&self, script: &str) -> Result<AST, String> {
-        self.engine.compile(script).map_err(|e| e.to_string())
+        let transformed_script = script.replace("$json", "json").replace("$env", "env").replace("$input", "input");
+        self.engine.compile(&transformed_script).map_err(|e| e.to_string())
     }
 
     pub fn eval_with_context(
@@ -78,10 +79,11 @@ impl ExpressionEngine {
         script: &str,
         context: &ExpressionContext,
     ) -> Result<Dynamic, String> {
+        let transformed_script = script.replace("$json", "json").replace("$env", "env").replace("$input", "input");
         let mut scope = self.create_scope(context);
 
         self.engine
-            .eval_with_scope::<Dynamic>(&mut scope, script)
+            .eval_with_scope::<Dynamic>(&mut scope, &transformed_script)
             .map_err(|e| e.to_string())
     }
 

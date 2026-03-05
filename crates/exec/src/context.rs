@@ -298,7 +298,7 @@ mod tests {
 
     fn create_test_node(name: &str) -> INode {
         let mut params = HashMap::new();
-        params.insert("testParam".to_string(), GenericValue(json!("testValue")));
+        params.insert("testParam".to_string(), json!("testValue"));
 
         INode {
             id: NodeId::new(name),
@@ -339,7 +339,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(result.0, json!("testValue"));
+        assert_eq!(result, json!("testValue"));
     }
 
     #[tokio::test]
@@ -352,13 +352,13 @@ mod tests {
             uuid::Uuid::new_v4(),
         );
 
-        let fallback = GenericValue(json!("fallbackValue"));
+        let fallback = json!("fallbackValue");
         let result = context
             .get_node_parameter("nonExistentParam", Some(fallback))
             .await
             .unwrap();
 
-        assert_eq!(result.0, json!("fallbackValue"));
+        assert_eq!(result, json!("fallbackValue"));
     }
 
     #[tokio::test]
@@ -421,7 +421,7 @@ mod tests {
         let mut params = HashMap::new();
         params.insert(
             "exprParam".to_string(),
-            GenericValue(json!("{{ json[\"someValue\"] }}")),
+            json!("{{ json[\"someValue\"] }}"),
         );
 
         let node = INode {
@@ -452,7 +452,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(result.0, json!("evalResult"));
+        assert_eq!(result, json!("evalResult"));
     }
 
     #[tokio::test]

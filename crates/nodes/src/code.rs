@@ -180,8 +180,7 @@ mod tests {
         
         let ctx = MockCodeContext {
             code: r#"
-                let first = items[0].json;
-                first.hello = "sandbox";
+                items[0].json.hello = "sandbox";
                 
                 let new_item = #{ json: #{ added: true } };
                 items.push(new_item);
@@ -195,11 +194,11 @@ mod tests {
         let branch = &result[0];
         assert_eq!(branch.len(), 2);
         
-        let first_json = branch[0].json.0.as_object().unwrap();
+        let first_json = &branch[0].json.0;
         assert_eq!(first_json.get("test").unwrap().as_bool().unwrap(), true);
         assert_eq!(first_json.get("hello").unwrap().as_str().unwrap(), "sandbox");
         
-        let second_json = branch[1].json.0.as_object().unwrap();
+        let second_json = &branch[1].json.0;
         assert_eq!(second_json.get("added").unwrap().as_bool().unwrap(), true);
     }
 
@@ -222,7 +221,7 @@ mod tests {
         match err {
             BarqError::NodeOperationError { message, .. } => {
                 assert!(message.contains("Rhai execution error"));
-                assert!(message.contains("maximum number of operations"), "{}", message);
+                assert!(message.contains("Too many operations"), "{}", message);
             }
             _ => panic!("Expected NodeOperationError"),
         }

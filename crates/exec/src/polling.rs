@@ -205,18 +205,14 @@ mod tests {
             let poll_data_res = context.get_poll_data().await;
             let mut count = 0;
             if let Ok(data) = poll_data_res {
-                if let serde_json::Value::Object(map) = &data.0 {
-                    if let Some(v) = map.get("count") {
-                        count = v.as_u64().unwrap_or(0);
-                    }
+                if let Some(v) = data.0.get("count") {
+                    count = v.as_u64().unwrap_or(0);
                 }
             }
             
             count += 1;
             let mut new_poll_data = IDataObject::default();
-            if let serde_json::Value::Object(ref mut map) = new_poll_data.0 {
-                map.insert("count".to_string(), json!(count));
-            }
+            new_poll_data.0.insert("count".to_string(), json!(count));
             context.set_poll_data(new_poll_data).await?;
 
             let output_item = INodeExecutionData::new(IDataObject::from(json!({ "trigger_count": count })));
@@ -280,11 +276,9 @@ mod tests {
         // Verify static memory updated correctly
         let data_lock = static_data.read().await;
         let data = data_lock.as_ref().unwrap();
-        if let serde_json::Value::Object(map) = &data.0 {
-            let node_memory = map.get(&node_id.to_string()).unwrap().as_object().unwrap();
-            let count = node_memory.get("count").unwrap().as_u64().unwrap();
-            assert!(count >= 2, "Static data should have been updated deeply across polls");
-        }
+        let node_memory = data.0.get(&node_id.to_string()).unwrap().as_object().unwrap();
+        let count = node_memory.get("count").unwrap().as_u64().unwrap();
+        assert!(count >= 2, "Static data should have been updated deeply across polls");
 
         // Stop poller cleanly
         engine.stop_poller(&workflow.id.to_string(), &node_id.to_string()).await;
