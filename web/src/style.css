@@ -1,0 +1,16 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+    body {
+        @apply bg-canvas text-slate-800 antialiased font-sans;
+    }
+}
+
+/* Custom Workflow Canvas Graph Paper Pattern */
+.bg-graph-pattern {
+    background-image: linear-gradient(to right, #e2e8f0 1px, transparent 1px),
+        linear-gradient(to bottom, #e2e8f0 1px, transparent 1px);
+    background-size: 20px 20px;
+}
