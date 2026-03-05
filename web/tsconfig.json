@@ -14,6 +14,10 @@
             "ESNext",
             "DOM"
         ],
+        "types": [
+            "vite/client",
+            "node"
+        ],
         "skipLibCheck": true
     },
     "include": [

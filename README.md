@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="web/public/logo.svg" alt="BarqFlow Logo" width="120" height="120" />
+  <img src="web/public/logo.png" alt="BarqFlow Logo" width="120" height="120" />
   <h1>BarqFlow</h1>
   <p><strong>A Hyper-Scalable, Production-Ready Agentic Workflow Automation Engine Written in Rust 🦀 & Vue 3 ⚡️</strong></p>
 
@@ -61,6 +61,7 @@ The fastest and most reliable way to experience BarqFlow is via the provided `do
    ```
 
 2. **Spin up the stack (Postgres + Engine + UI):**
+   *(Note: The `docker-compose.yml` and `Dockerfile` are neatly organized under the `docker/` folder rather than cluttering the root directory!)*
    ```bash
    docker-compose -f docker/docker-compose.yml up --build -d
    ```
