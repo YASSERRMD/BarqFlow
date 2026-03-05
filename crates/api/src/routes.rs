@@ -18,6 +18,7 @@ pub struct AppState {
     pub credential_repo: Arc<CredentialRepo>,
     pub exec_repo: Arc<ExecutionRepo>,
     pub user_repo: Arc<UserRepo>,
+    pub node_registry: Arc<barqflow_registry::registry::NodeRegistry>,
 }
 
 pub fn create_router(state: AppState) -> Router {
@@ -30,6 +31,8 @@ pub fn create_router(state: AppState) -> Router {
         }))
         .merge(execution_routes(ExecState {
             execution_repo: Arc::clone(&state.exec_repo),
+            workflow_repo: Arc::clone(&state.workflow_repo),
+            node_registry: Arc::clone(&state.node_registry),
         }))
         .merge(credential_routes(CredState {
             credential_repo: Arc::clone(&state.credential_repo),
