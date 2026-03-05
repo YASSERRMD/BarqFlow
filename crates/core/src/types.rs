@@ -127,7 +127,7 @@ mod tests {
         let deserialized: IDataObject = serde_json::from_str(&serialized).unwrap();
 
         assert_eq!(data_object.0, deserialized.0);
-        assert_eq!(data_object.0, val);
+        assert_eq!(serde_json::Value::Object(data_object.0), val);
     }
 
     #[test]
@@ -195,7 +195,7 @@ mod tests {
 
         // Verify the data integrity after serialization/deserialization
         assert_eq!(data_object.0, deserialized.0);
-        assert_eq!(data_object.0, deeply_nested);
+        assert_eq!(serde_json::Value::Object(data_object.0.clone()), deeply_nested);
 
         // Verify specific nested values can be accessed
         assert_eq!(
