@@ -38,7 +38,7 @@ pub fn verify_password(hash: &str, password: &str) -> Result<bool, AuthError> {
 
 pub fn generate_jwt(user_id: &str, role: &str) -> Result<String, AuthError> {
     let secret = env::var("JWT_SECRET").unwrap_or_else(|_| "SUPER_SECRET_TEMP_KEY".to_string());
-    
+
     let expiration = chrono::Utc::now()
         .checked_add_signed(chrono::Duration::hours(24))
         .expect("valid timestamp")
@@ -71,10 +71,10 @@ where
             .and_then(|value| value.to_str().ok());
 
         if let Some(auth_header) = auth_header {
-            if auth_header.starts_with("Bearer ") {
-                let token = &auth_header[7..];
-                let secret = env::var("JWT_SECRET").unwrap_or_else(|_| "SUPER_SECRET_TEMP_KEY".to_string());
-                
+            if let Some(token) = auth_header.strip_prefix("Bearer ") {
+                let secret =
+                    env::var("JWT_SECRET").unwrap_or_else(|_| "SUPER_SECRET_TEMP_KEY".to_string());
+
                 let token_data = decode::<Claims>(
                     token,
                     &DecodingKey::from_secret(secret.as_bytes()),
@@ -86,6 +86,9 @@ where
             }
         }
 
-        Err((StatusCode::UNAUTHORIZED, "Missing or invalid authorization header"))
+        Err((
+            StatusCode::UNAUTHORIZED,
+            "Missing or invalid authorization header",
+        ))
     }
 }

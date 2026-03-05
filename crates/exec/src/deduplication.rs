@@ -1,5 +1,5 @@
 use barqflow_core::types::IDataObject;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::{HashSet, VecDeque};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -69,7 +69,7 @@ impl DeduplicationManager {
             }
             DeduplicationMode::IncrementedKey => {
                 let mut max_key_seen = 0.0;
-                
+
                 let map = &previous_state.0;
                 if let Some(val) = map.get("max_key") {
                     if let Some(num) = val.as_f64() {
@@ -111,19 +111,24 @@ mod tests {
     #[test]
     fn test_array_of_ids() {
         let mut state = IDataObject::default();
-        
+
         let mut events = Vec::new();
         let mut e1 = IDataObject::default();
         e1.0.insert("id".to_string(), json!("A"));
         let mut e2 = IDataObject::default();
         e2.0.insert("id".to_string(), json!("B"));
-        
+
         events.push(e1.clone());
         events.push(e2.clone());
 
-        let new_evs = DeduplicationManager::filter_new_events(events, DeduplicationMode::ArrayOfIds, "id", &mut state);
+        let new_evs = DeduplicationManager::filter_new_events(
+            events,
+            DeduplicationMode::ArrayOfIds,
+            "id",
+            &mut state,
+        );
         assert_eq!(new_evs.len(), 2);
-        
+
         // Push A, B, C. Should only return C.
         let mut events2 = Vec::new();
         events2.push(e1.clone());
@@ -132,7 +137,12 @@ mod tests {
         e3.0.insert("id".to_string(), json!("C"));
         events2.push(e3.clone());
 
-        let new_evs2 = DeduplicationManager::filter_new_events(events2, DeduplicationMode::ArrayOfIds, "id", &mut state);
+        let new_evs2 = DeduplicationManager::filter_new_events(
+            events2,
+            DeduplicationMode::ArrayOfIds,
+            "id",
+            &mut state,
+        );
         assert_eq!(new_evs2.len(), 1);
         assert_eq!(new_evs2[0].0.get("id").unwrap().as_str().unwrap(), "C");
     }
@@ -140,17 +150,22 @@ mod tests {
     #[test]
     fn test_incremented_key() {
         let mut state = IDataObject::default();
-        
+
         let mut events = Vec::new();
         let mut e1 = IDataObject::default();
         e1.0.insert("ts".to_string(), json!(100));
         let mut e2 = IDataObject::default();
         e2.0.insert("ts".to_string(), json!(200));
-        
+
         events.push(e1.clone());
         events.push(e2.clone());
 
-        let new_evs = DeduplicationManager::filter_new_events(events, DeduplicationMode::IncrementedKey, "ts", &mut state);
+        let new_evs = DeduplicationManager::filter_new_events(
+            events,
+            DeduplicationMode::IncrementedKey,
+            "ts",
+            &mut state,
+        );
         assert_eq!(new_evs.len(), 2);
 
         // Push 150, 200, 250
@@ -159,12 +174,17 @@ mod tests {
         e1_5.0.insert("ts".to_string(), json!(150));
         let mut e3 = IDataObject::default();
         e3.0.insert("ts".to_string(), json!(250));
-        
+
         events2.push(e1_5.clone());
         events2.push(e2.clone());
         events2.push(e3.clone());
 
-        let new_evs2 = DeduplicationManager::filter_new_events(events2, DeduplicationMode::IncrementedKey, "ts", &mut state);
+        let new_evs2 = DeduplicationManager::filter_new_events(
+            events2,
+            DeduplicationMode::IncrementedKey,
+            "ts",
+            &mut state,
+        );
         assert_eq!(new_evs2.len(), 1); // Only 250
         assert_eq!(new_evs2[0].0.get("ts").unwrap().as_u64().unwrap(), 250);
     }

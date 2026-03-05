@@ -48,7 +48,7 @@ impl UserRepo {
     ) -> Result<UserEntity> {
         let id = Uuid::new_v4();
         let now = Utc::now();
-        
+
         sqlx::query_as::<_, UserEntity>(
             r#"
             INSERT INTO users (id, email, password_hash, first_name, last_name, global_role, created_at, updated_at)

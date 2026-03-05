@@ -1,15 +1,13 @@
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::{RwLock, Mutex};
-use async_trait::async_trait;
-use tracing::{debug, error, info, instrument, span, Level};
 use barqflow_core::errors::BarqError;
 use barqflow_core::schema::{INodeExecutionData, WorkflowDef};
-use barqflow_core::traits::{IPollFunctions, INodeType};
+use barqflow_core::traits::INodeType;
 use barqflow_core::types::IDataObject;
 use barqflow_registry::registry::NodeRegistry;
-use chrono::{DateTime, Utc};
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use tokio::time::{interval, Duration, MissedTickBehavior};
+use tracing::{debug, error, info};
 
 use crate::context::PollExecutionContext;
 use crate::deduplication::{DeduplicationManager, DeduplicationMode};
@@ -34,8 +32,8 @@ impl PollingEngine {
         }
     }
 
-    /// Register a node for continuous polling. 
-    /// 
+    /// Register a node for continuous polling.
+    ///
     /// # Arguments
     /// * `workflow` - The parent workflow configuration
     /// * `node_id` - The specific ID of the polling Trigger configuration
@@ -51,8 +49,8 @@ impl PollingEngine {
     where
         F: Fn(Vec<Vec<INodeExecutionData>>) + Send + Sync + 'static,
     {
-        let workflow_id = workflow.id.clone();
-        
+        let workflow_id = workflow.id;
+
         let target_node = workflow
             .nodes
             .iter()
@@ -76,7 +74,7 @@ impl PollingEngine {
 
         let node_impl = node_info.node_impl.clone();
         let static_data = self.static_data.clone();
-        
+
         let mut interval_timer = interval(Duration::from_secs(interval_seconds));
         interval_timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
@@ -96,8 +94,11 @@ impl PollingEngine {
         }
 
         let handle = tokio::spawn(async move {
-            info!("Started polling loop for node {} in workflow {} every {}s", target_node.name, workflow_id, interval_seconds);
-            
+            info!(
+                "Started polling loop for node {} in workflow {} every {}s",
+                target_node.name, workflow_id, interval_seconds
+            );
+
             loop {
                 interval_timer.tick().await;
 
@@ -107,30 +108,41 @@ impl PollingEngine {
                         // Triggers usually return empty 2D arrays if nothing new arrived
                         let has_items = events.iter().any(|arr| !arr.is_empty());
                         if has_items {
-                            if let (Some(mode), Some(key_path)) = (&dedup_mode_opt, &dedup_key_opt) {
+                            if let (Some(mode), Some(key_path)) = (&dedup_mode_opt, &dedup_key_opt)
+                            {
                                 let mut new_branches = Vec::new();
                                 for branch in events {
-                                    let branch_data: Vec<IDataObject> = branch.into_iter().map(|d| d.json).collect();
-                                    
+                                    let branch_data: Vec<IDataObject> =
+                                        branch.into_iter().map(|d| d.json).collect();
+
                                     let mut state_lock = static_data.write().await;
                                     if state_lock.is_none() {
                                         *state_lock = Some(IDataObject::default());
                                     }
                                     let global_state = state_lock.as_mut().unwrap();
 
-                                    let dedup_state_key = format!("{}_dedup", target_node.id.to_string());
+                                    let dedup_state_key = format!("{}_dedup", target_node.id);
                                     let mut dedup_state = IDataObject::default();
-                                    
+
                                     let map = &global_state.0;
                                     if let Some(v) = map.get(&dedup_state_key) {
                                         dedup_state = IDataObject::from(v.clone());
                                     }
 
-                                    let filtered = DeduplicationManager::filter_new_events(branch_data, mode.clone(), key_path, &mut dedup_state);
-                                    
-                                    global_state.0.insert(dedup_state_key, serde_json::Value::Object(dedup_state.0));
+                                    let filtered = DeduplicationManager::filter_new_events(
+                                        branch_data,
+                                        mode.clone(),
+                                        key_path,
+                                        &mut dedup_state,
+                                    );
 
-                                    let new_branch: Vec<INodeExecutionData> = filtered.into_iter().map(|d| INodeExecutionData::new(d)).collect();
+                                    global_state.0.insert(
+                                        dedup_state_key,
+                                        serde_json::Value::Object(dedup_state.0),
+                                    );
+
+                                    let new_branch: Vec<INodeExecutionData> =
+                                        filtered.into_iter().map(INodeExecutionData::new).collect();
                                     new_branches.push(new_branch);
                                 }
                                 events = new_branches;
@@ -138,7 +150,11 @@ impl PollingEngine {
 
                             let has_items_after = events.iter().any(|arr| !arr.is_empty());
                             if has_items_after {
-                                debug!("Poller {} discovered {} new event branches", target_node.name, events.len());
+                                debug!(
+                                    "Poller {} discovered {} new event branches",
+                                    target_node.name,
+                                    events.len()
+                                );
                                 callback(events);
                             }
                         }
@@ -153,7 +169,7 @@ impl PollingEngine {
         let mut lock = self.active_pollers.write().await;
         // Key uniquely identifies this process instance running the poll loop
         let key = format!("{}_{}", workflow.id, node_id);
-        
+
         if let Some(existing) = lock.insert(key.clone(), handle) {
             existing.abort();
             debug!("Aborted prior polling loop instance for {}", key);
@@ -162,11 +178,11 @@ impl PollingEngine {
         Ok(())
     }
 
-    /// Stops polling operations for a specific trigger 
+    /// Stops polling operations for a specific trigger
     pub async fn stop_poller(&self, workflow_id: &str, node_id: &str) {
         let key = format!("{}_{}", workflow_id, node_id);
         let mut lock = self.active_pollers.write().await;
-        
+
         if let Some(handle) = lock.remove(&key) {
             handle.abort();
             info!("Stopped polling loop for {}", key);
@@ -177,13 +193,13 @@ impl PollingEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use barqflow_core::schema::{WorkflowDef, INode, INodeParameters};
-    use barqflow_registry::node_properties::INodeProperties;
+    use barqflow_core::schema::{INode, INodeParameters, WorkflowDef};
     use barqflow_core::types::{NodeId, WorkflowId};
+    use barqflow_registry::node_properties::INodeProperties;
     use barqflow_registry::registry::NodeInfo;
-    use uuid::Uuid;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use serde_json::json;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use uuid::Uuid;
 
     // A mock node for tracking counts
     struct TestPollingTrigger;
@@ -201,7 +217,10 @@ mod tests {
             Ok(vec![vec![]])
         }
 
-        async fn poll(&self, context: &dyn IPollFunctions) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
+        async fn poll(
+            &self,
+            context: &dyn IPollFunctions,
+        ) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
             let poll_data_res = context.get_poll_data().await;
             let mut count = 0;
             if let Ok(data) = poll_data_res {
@@ -209,13 +228,14 @@ mod tests {
                     count = v.as_u64().unwrap_or(0);
                 }
             }
-            
+
             count += 1;
             let mut new_poll_data = IDataObject::default();
             new_poll_data.0.insert("count".to_string(), json!(count));
             context.set_poll_data(new_poll_data).await?;
 
-            let output_item = INodeExecutionData::new(IDataObject::from(json!({ "trigger_count": count })));
+            let output_item =
+                INodeExecutionData::new(IDataObject::from(json!({ "trigger_count": count })));
             Ok(vec![vec![output_item]])
         }
     }
@@ -263,9 +283,12 @@ mod tests {
         let counter = Arc::new(AtomicUsize::new(0));
         let counter_clone = counter.clone();
 
-        engine.register_poller(workflow.clone(), node_id.clone(), 1, move |_events| {
-            counter_clone.fetch_add(1, Ordering::Relaxed);
-        }).await.unwrap();
+        engine
+            .register_poller(workflow.clone(), node_id.clone(), 1, move |_events| {
+                counter_clone.fetch_add(1, Ordering::Relaxed);
+            })
+            .await
+            .unwrap();
 
         // Wait for two ticks (first is immediate upon start, second is after 1 second)
         tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
@@ -276,11 +299,21 @@ mod tests {
         // Verify static memory updated correctly
         let data_lock = static_data.read().await;
         let data = data_lock.as_ref().unwrap();
-        let node_memory = data.0.get(&node_id.to_string()).unwrap().as_object().unwrap();
+        let node_memory = data
+            .0
+            .get(&node_id.to_string())
+            .unwrap()
+            .as_object()
+            .unwrap();
         let count = node_memory.get("count").unwrap().as_u64().unwrap();
-        assert!(count >= 2, "Static data should have been updated deeply across polls");
+        assert!(
+            count >= 2,
+            "Static data should have been updated deeply across polls"
+        );
 
         // Stop poller cleanly
-        engine.stop_poller(&workflow.id.to_string(), &node_id.to_string()).await;
+        engine
+            .stop_poller(&workflow.id.to_string(), &node_id.to_string())
+            .await;
     }
 }

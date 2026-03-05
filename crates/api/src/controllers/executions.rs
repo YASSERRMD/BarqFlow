@@ -1,12 +1,12 @@
 use crate::auth::Claims;
+use axum::http::StatusCode;
 use axum::{
-    extract::{Path, State, Json},
+    extract::{Json, Path, State},
     routing::{get, post},
     Router,
 };
 use barqflow_db::executions::ExecutionRepo;
 use barqflow_db::models::ExecutionEntity;
-use axum::http::StatusCode;
 use serde::Deserialize;
 
 #[derive(Clone)]
@@ -50,11 +50,7 @@ async fn create_execution(
 ) -> Result<Json<ExecutionEntity>, (StatusCode, String)> {
     let new_exec = state
         .execution_repo
-        .create(
-            workflow_id,
-            &payload.status,
-            payload.data,
-        )
+        .create(workflow_id, &payload.status, payload.data)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 

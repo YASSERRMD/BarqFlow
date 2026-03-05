@@ -1,5 +1,5 @@
-use crate::models::CredentialEntity;
 use crate::crypto::CryptoService;
+use crate::models::CredentialEntity;
 use chrono::Utc;
 use sqlx::{PgPool, Result};
 use uuid::Uuid;
@@ -25,7 +25,7 @@ impl CredentialRepo {
             SELECT id, name, cred_type, data, created_at, updated_at
             FROM credentials
             ORDER BY name ASC
-            "#
+            "#,
         )
         .fetch_all(&self.pool)
         .await?;
@@ -49,7 +49,7 @@ impl CredentialRepo {
             SELECT id, name, cred_type, data, created_at, updated_at
             FROM credentials
             WHERE id = $1
-            "#
+            "#,
         )
         .bind(id)
         .fetch_optional(&self.pool)
@@ -76,20 +76,21 @@ impl CredentialRepo {
     ) -> Result<CredentialEntity> {
         let id = Uuid::new_v4();
         let now = Utc::now();
-        
+
         // Encrypt the sensitive JSON data into a base64 string
         let plain_json = data.to_string();
-        let encrypted_base64 = self.crypto.encrypt(&plain_json).map_err(|e| {
-            sqlx::Error::Protocol(format!("Encryption error: {}", e).into())
-        })?;
+        let encrypted_base64 = self
+            .crypto
+            .encrypt(&plain_json)
+            .map_err(|e| sqlx::Error::Protocol(format!("Encryption error: {}", e)))?;
         let encrypted_data = serde_json::json!({ "encrypted": encrypted_base64 });
-        
+
         sqlx::query_as::<_, CredentialEntity>(
             r#"
             INSERT INTO credentials (id, name, cred_type, data, created_at, updated_at)
             VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING id, name, cred_type, data, created_at, updated_at
-            "#
+            "#,
         )
         .bind(id)
         .bind(name)
@@ -101,13 +102,19 @@ impl CredentialRepo {
         .await
     }
 
-    pub async fn update(&self, id: Uuid, name: &str, data: serde_json::Value) -> Result<Option<CredentialEntity>> {
+    pub async fn update(
+        &self,
+        id: Uuid,
+        name: &str,
+        data: serde_json::Value,
+    ) -> Result<Option<CredentialEntity>> {
         let now = Utc::now();
-        
+
         let plain_json = data.to_string();
-        let encrypted_base64 = self.crypto.encrypt(&plain_json).map_err(|e| {
-            sqlx::Error::Protocol(format!("Encryption error: {}", e).into())
-        })?;
+        let encrypted_base64 = self
+            .crypto
+            .encrypt(&plain_json)
+            .map_err(|e| sqlx::Error::Protocol(format!("Encryption error: {}", e)))?;
         let encrypted_data = serde_json::json!({ "encrypted": encrypted_base64 });
 
         sqlx::query_as::<_, CredentialEntity>(
@@ -116,7 +123,7 @@ impl CredentialRepo {
             SET name = $1, data = $2, updated_at = $3
             WHERE id = $4
             RETURNING id, name, cred_type, data, created_at, updated_at
-            "#
+            "#,
         )
         .bind(name)
         .bind(encrypted_data)
@@ -131,7 +138,7 @@ impl CredentialRepo {
             r#"
             DELETE FROM credentials
             WHERE id = $1
-            "#
+            "#,
         )
         .bind(id)
         .execute(&self.pool)

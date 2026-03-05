@@ -1,9 +1,9 @@
 use async_trait::async_trait;
 use barqflow_core::errors::BarqError;
-use barqflow_core::schema::{INodeExecutionData, INode};
+use barqflow_core::schema::INodeExecutionData;
 use barqflow_core::traits::{IExecuteFunctions, INodeType};
 use barqflow_core::types::IDataObject;
-use rhai::{Engine, Scope, Dynamic, Map};
+use rhai::{Dynamic, Engine, Map, Scope};
 use serde_json::{json, Value};
 
 pub struct CodeNode;
@@ -50,7 +50,7 @@ impl INodeType for CodeNode {
         let mut engine = Engine::new();
 
         // Limit maximum operations to prevent infinite loops
-        engine.set_max_operations(100_000); 
+        engine.set_max_operations(100_000);
 
         // We receive the previous items
         let previous_items = match context.get_input_data(0) {
@@ -90,14 +90,14 @@ impl INodeType for CodeNode {
         };
 
         let mut output_items = Vec::new();
-        
+
         // Ensure structured return mapping: force result back to Vec<INodeExecutionData>
         if result.is_array() {
             let arr = result.into_array().unwrap();
             for item in arr {
                 if item.is_map() {
                     let map = item.cast::<Map>();
-                    
+
                     // Allow unwrapping the `.json` structure N8N style, or handle raw map if provided directly.
                     let target_map = match map.get("json") {
                         Some(json_field) => {
@@ -107,7 +107,7 @@ impl INodeType for CodeNode {
                                 map.clone()
                             }
                         }
-                        None => map.clone()
+                        None => map.clone(),
                     };
 
                     match rhai::serde::from_dynamic::<Value>(&target_map.into()) {
@@ -117,7 +117,10 @@ impl INodeType for CodeNode {
                         Err(e) => {
                             return Err(BarqError::NodeOperationError {
                                 node_name: "Code".into(),
-                                message: format!("Failed to parse return item from Rhai Sandbox: {}", e),
+                                message: format!(
+                                    "Failed to parse return item from Rhai Sandbox: {}",
+                                    e
+                                ),
                             });
                         }
                     }
@@ -126,7 +129,8 @@ impl INodeType for CodeNode {
                 } else {
                     return Err(BarqError::NodeOperationError {
                         node_name: "Code".into(),
-                        message: "Rhai output array must contain valid structured objects (maps)".into(),
+                        message: "Rhai output array must contain valid structured objects (maps)"
+                            .into(),
                     });
                 }
             }
@@ -163,12 +167,20 @@ mod tests {
             if parameter_name == "code" {
                 Ok(serde_json::json!(self.code))
             } else {
-                Err(BarqError::NodeOperationError { node_name: "".into(), message: "Param not found".into() })
+                Err(BarqError::NodeOperationError {
+                    node_name: "".into(),
+                    message: "Param not found".into(),
+                })
             }
         }
 
-        fn get_node(&self) -> &INode { unimplemented!() }
-        fn get_input_data(&self, _input_index: usize) -> Result<&Vec<INodeExecutionData>, BarqError> {
+        fn get_node(&self) -> &INode {
+            unimplemented!()
+        }
+        fn get_input_data(
+            &self,
+            _input_index: usize,
+        ) -> Result<&Vec<INodeExecutionData>, BarqError> {
             Ok(&self.inputs)
         }
         fn log(&self, _message: &str) {}
@@ -177,7 +189,7 @@ mod tests {
     #[tokio::test]
     async fn test_rhai_sandbox_execution() {
         let node = CodeNode::new();
-        
+
         let ctx = MockCodeContext {
             code: r#"
                 items[0].json.hello = "sandbox";
@@ -186,18 +198,24 @@ mod tests {
                 items.push(new_item);
                 
                 items
-            "#.to_string(),
-            inputs: vec![INodeExecutionData::new(IDataObject::from(json!({ "test": true })))],
+            "#
+            .to_string(),
+            inputs: vec![INodeExecutionData::new(IDataObject::from(
+                json!({ "test": true }),
+            ))],
         };
 
         let result = node.execute(&ctx).await.unwrap();
         let branch = &result[0];
         assert_eq!(branch.len(), 2);
-        
+
         let first_json = &branch[0].json.0;
         assert_eq!(first_json.get("test").unwrap().as_bool().unwrap(), true);
-        assert_eq!(first_json.get("hello").unwrap().as_str().unwrap(), "sandbox");
-        
+        assert_eq!(
+            first_json.get("hello").unwrap().as_str().unwrap(),
+            "sandbox"
+        );
+
         let second_json = &branch[1].json.0;
         assert_eq!(second_json.get("added").unwrap().as_bool().unwrap(), true);
     }
@@ -205,7 +223,7 @@ mod tests {
     #[tokio::test]
     async fn test_sandbox_infinite_loop_prevention() {
         let node = CodeNode::new();
-        
+
         // This simulates a malicious loop trying to freeze the thread
         let ctx = MockCodeContext {
             code: r#"
@@ -213,7 +231,8 @@ mod tests {
                 loop {
                     i += 1;
                 }
-            "#.to_string(),
+            "#
+            .to_string(),
             inputs: vec![],
         };
 

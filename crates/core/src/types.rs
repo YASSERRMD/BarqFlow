@@ -195,13 +195,13 @@ mod tests {
 
         // Verify the data integrity after serialization/deserialization
         assert_eq!(data_object.0, deserialized.0);
-        assert_eq!(serde_json::Value::Object(data_object.0.clone()), deeply_nested);
+        assert_eq!(
+            serde_json::Value::Object(data_object.0.clone()),
+            deeply_nested
+        );
 
         // Verify specific nested values can be accessed
-        assert_eq!(
-            data_object.0["workflow"]["name"],
-            "Complex Data Pipeline"
-        );
+        assert_eq!(data_object.0["workflow"]["name"], "Complex Data Pipeline");
         assert_eq!(
             data_object.0["workflow"]["nodes"][0]["parameters"]["options"]["depth"],
             5
@@ -226,7 +226,11 @@ impl IDataObject {
         Self(serde_json::Map::new())
     }
 
-    pub fn insert(&mut self, key: impl Into<String>, value: impl Into<serde_json::Value>) -> Option<serde_json::Value> {
+    pub fn insert(
+        &mut self,
+        key: impl Into<String>,
+        value: impl Into<serde_json::Value>,
+    ) -> Option<serde_json::Value> {
         self.0.insert(key.into(), value.into())
     }
 
@@ -270,8 +274,6 @@ impl From<serde_json::Map<String, serde_json::Value>> for IDataObject {
         Self(map)
     }
 }
-
-
 
 /// Category of binary file type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

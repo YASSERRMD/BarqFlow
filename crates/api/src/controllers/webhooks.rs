@@ -1,10 +1,10 @@
 use axum::{
+    body::Bytes,
     extract::{Path, State},
     http::{HeaderMap, Method, StatusCode},
     response::IntoResponse,
     routing::any,
     Router,
-    body::Bytes,
 };
 use barqflow_db::workflows::WorkflowRepo;
 use serde_json::json;
@@ -29,15 +29,18 @@ async fn handle_webhook(
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     // 1. Convert everything to JSON
     let body_str = String::from_utf8(body.to_vec()).unwrap_or_default();
-    
+
     // Attempt parsing as JSON for convenience
-    let parsed_body: serde_json::Value = serde_json::from_str(&body_str)
-        .unwrap_or_else(|_| json!({ "raw": body_str }));
+    let parsed_body: serde_json::Value =
+        serde_json::from_str(&body_str).unwrap_or_else(|_| json!({ "raw": body_str }));
 
     let mut headers_map = serde_json::Map::new();
     for (key, value) in headers.iter() {
         if let Ok(val_str) = value.to_str() {
-            headers_map.insert(key.to_string(), serde_json::Value::String(val_str.to_string()));
+            headers_map.insert(
+                key.to_string(),
+                serde_json::Value::String(val_str.to_string()),
+            );
         }
     }
 
@@ -48,9 +51,9 @@ async fn handle_webhook(
         "body": parsed_body
     });
 
-    // TODO: In Phase 48/49 Global State, we will take `payload` and push it into 
+    // TODO: In Phase 48/49 Global State, we will take `payload` and push it into
     // the ExecutionEngine via an active workflow mapping. For now, just print!
-    
+
     println!("Webhook Triggered! {:?}", payload);
 
     Ok((StatusCode::OK, "Webhook Received"))

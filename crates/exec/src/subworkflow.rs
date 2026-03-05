@@ -2,11 +2,9 @@
 //!
 //! Implements ExecuteWorkflow runtime hook for calling child workflows.
 
-use async_trait::async_trait;
 use barqflow_core::errors::BarqError;
 use barqflow_core::schema::INodeExecutionData;
-use barqflow_core::traits::IExecuteFunctions;
-use barqflow_core::types::{IDataObject, RunId, WorkflowId};
+use barqflow_core::types::{RunId, WorkflowId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -53,15 +51,15 @@ impl SubWorkflowExecutor {
         input_data: Vec<INodeExecutionData>,
     ) -> Result<SubWorkflowResult, BarqError> {
         let execution_id = RunId::new();
-        
+
         let result = SubWorkflowResult {
-            execution_id: execution_id.clone(),
+            execution_id: execution_id,
             outputs: vec![input_data],
             status: SubWorkflowStatus::Success,
         };
-        
+
         self.executions.insert(execution_id, result.clone());
-        
+
         Ok(result)
     }
 
@@ -71,13 +69,13 @@ impl SubWorkflowExecutor {
 
     pub fn aggregate_outputs(&self, results: Vec<SubWorkflowResult>) -> Vec<INodeExecutionData> {
         let mut aggregated = Vec::new();
-        
+
         for result in results {
             for output_array in result.outputs {
                 aggregated.extend(output_array);
             }
         }
-        
+
         aggregated
     }
 }
@@ -101,17 +99,20 @@ mod tests {
     #[tokio::test]
     async fn test_execute_subworkflow() {
         let mut executor = SubWorkflowExecutor::new();
-        
+
         let input_data = vec![];
-        let result = executor.execute_workflow("child-workflow-1", input_data).await.unwrap();
-        
+        let result = executor
+            .execute_workflow("child-workflow-1", input_data)
+            .await
+            .unwrap();
+
         assert_eq!(result.status, SubWorkflowStatus::Success);
     }
 
     #[test]
     fn test_aggregate_outputs() {
         let executor = SubWorkflowExecutor::new();
-        
+
         let results = vec![];
         let aggregated = executor.aggregate_outputs(results);
         assert!(aggregated.is_empty());

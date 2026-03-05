@@ -1,8 +1,8 @@
 use anyhow::Result;
 use barqflow_api::{create_router, AppState};
-use barqflow_db::{CredentialRepo, ExecutionRepo, WorkflowRepo};
-use barqflow_db::users::UserRepo;
 use barqflow_db::pool::init_db_pool;
+use barqflow_db::users::UserRepo;
+use barqflow_db::{CredentialRepo, ExecutionRepo, WorkflowRepo};
 use std::net::SocketAddr;
 use std::sync::Arc;
 

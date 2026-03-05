@@ -1,12 +1,12 @@
 use crate::auth::Claims;
+use axum::http::StatusCode;
 use axum::{
-    extract::{State, Json},
-    routing::{get, post},
+    extract::{Json, State},
+    routing::get,
     Router,
 };
 use barqflow_db::credentials::CredentialRepo;
 use barqflow_db::models::CredentialEntity;
-use axum::http::StatusCode;
 use serde::Deserialize;
 
 #[derive(Clone)]
@@ -47,11 +47,7 @@ async fn create_credential(
 ) -> Result<Json<CredentialEntity>, (StatusCode, String)> {
     let new_cred = state
         .credential_repo
-        .create(
-            &payload.name,
-            &payload.cred_type,
-            payload.data,
-        )
+        .create(&payload.name, &payload.cred_type, payload.data)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 

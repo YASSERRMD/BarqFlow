@@ -1,18 +1,18 @@
-mod state;
 mod boot;
+mod state;
 
-use state::AppState;
 use boot::run_boot_sequence;
+use state::AppState;
 
-use tracing::{info, error};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use sqlx::postgres::PgPoolOptions;
 use dotenvy::dotenv;
+use sqlx::postgres::PgPoolOptions;
+use tracing::{error, info};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
 async fn main() {
     dotenv().ok(); // Load .env
-    
+
     // 1. Initialize Telemetry
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::new(
@@ -51,11 +51,12 @@ async fn main() {
     // 6. Bind to Port
     let port = std::env::var("PORT").unwrap_or_else(|_| "3000".to_string());
     let addr = format!("0.0.0.0:{}", port);
-    
+
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
-    info!("Axum Server listening on {}", listener.local_addr().unwrap());
-    
-    axum::serve(listener, api_router)
-        .await
-        .unwrap();
+    info!(
+        "Axum Server listening on {}",
+        listener.local_addr().unwrap()
+    );
+
+    axum::serve(listener, api_router).await.unwrap();
 }

@@ -3,11 +3,9 @@
 //! Implements branching logic for IF/Switch nodes and merge logic
 //! for combining data from multiple branches.
 
-use barqflow_core::errors::BarqError;
 use barqflow_core::schema::INodeExecutionData;
 use barqflow_core::types::IDataObject;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use std::collections::HashMap;
 
 /// Condition type for branching decisions.
@@ -150,22 +148,29 @@ impl ConditionEvaluator {
     ///
     /// # Returns
     /// true if the condition is met, false otherwise
-    pub fn evaluate_condition(
-        condition: &RoutingCondition,
-        data: &INodeExecutionData,
-    ) -> bool {
+    pub fn evaluate_condition(condition: &RoutingCondition, data: &INodeExecutionData) -> bool {
         // Extract the field value from the data using the field path
         let field_value = Self::extract_field_value(&condition.field, &data.json);
 
         match condition.operator {
             ComparisonOperator::Equals => Self::check_equals(&field_value, &condition.value),
             ComparisonOperator::NotEquals => !Self::check_equals(&field_value, &condition.value),
-            ComparisonOperator::LessThan => Self::check_compare(&field_value, &condition.value, |a, b| a < b),
-            ComparisonOperator::LessThanOrEqual => Self::check_compare(&field_value, &condition.value, |a, b| a <= b),
-            ComparisonOperator::GreaterThan => Self::check_compare(&field_value, &condition.value, |a, b| a > b),
-            ComparisonOperator::GreaterThanOrEqual => Self::check_compare(&field_value, &condition.value, |a, b| a >= b),
+            ComparisonOperator::LessThan => {
+                Self::check_compare(&field_value, &condition.value, |a, b| a < b)
+            }
+            ComparisonOperator::LessThanOrEqual => {
+                Self::check_compare(&field_value, &condition.value, |a, b| a <= b)
+            }
+            ComparisonOperator::GreaterThan => {
+                Self::check_compare(&field_value, &condition.value, |a, b| a > b)
+            }
+            ComparisonOperator::GreaterThanOrEqual => {
+                Self::check_compare(&field_value, &condition.value, |a, b| a >= b)
+            }
             ComparisonOperator::Contains => Self::check_contains(&field_value, &condition.value),
-            ComparisonOperator::StartsWith => Self::check_starts_with(&field_value, &condition.value),
+            ComparisonOperator::StartsWith => {
+                Self::check_starts_with(&field_value, &condition.value)
+            }
             ComparisonOperator::EndsWith => Self::check_ends_with(&field_value, &condition.value),
             ComparisonOperator::IsEmpty => Self::check_is_empty(&field_value),
             ComparisonOperator::IsNull => field_value.is_null(),
@@ -211,7 +216,13 @@ impl ConditionEvaluator {
         let mut current = serde_json::Value::Object(data.0.clone());
 
         // Skip the first part if it's "$json"
-        for part in parts.iter().skip(if parts.first().map(|p| p.starts_with('$')).unwrap_or(false) { 1 } else { 0 }) {
+        for part in parts.iter().skip(
+            if parts.first().map(|p| p.starts_with('$')).unwrap_or(false) {
+                1
+            } else {
+                0
+            },
+        ) {
             current = match current.get(*part) {
                 Some(value) => value.clone(),
                 None => return serde_json::Value::Null,
@@ -295,7 +306,7 @@ impl DataMerger {
     /// Append all items from all inputs.
     fn merge_append(inputs: &HashMap<usize, Vec<INodeExecutionData>>) -> Vec<INodeExecutionData> {
         let mut result = Vec::new();
-        for (_, data) in inputs {
+        for data in inputs.values() {
             result.extend(data.clone());
         }
         result
@@ -319,7 +330,7 @@ impl DataMerger {
                     // Add data from this input to the merged object
                     map.insert(
                         format!("input{}", input_idx),
-                        serde_json::Value::Object(item.json.0.clone())
+                        serde_json::Value::Object(item.json.0.clone()),
                     );
                 }
             }
@@ -331,7 +342,9 @@ impl DataMerger {
     }
 
     /// Keep only the first input that has data.
-    fn merge_first_available(inputs: &HashMap<usize, Vec<INodeExecutionData>>) -> Vec<INodeExecutionData> {
+    fn merge_first_available(
+        inputs: &HashMap<usize, Vec<INodeExecutionData>>,
+    ) -> Vec<INodeExecutionData> {
         for i in 0..inputs.len() {
             if let Some(data) = inputs.get(&i) {
                 if !data.is_empty() {
@@ -343,7 +356,9 @@ impl DataMerger {
     }
 
     /// Keep all inputs as separate outputs (multi-output).
-    fn merge_pass_through(inputs: &HashMap<usize, Vec<INodeExecutionData>>) -> Vec<INodeExecutionData> {
+    fn merge_pass_through(
+        inputs: &HashMap<usize, Vec<INodeExecutionData>>,
+    ) -> Vec<INodeExecutionData> {
         // For pass-through, we return a flattened structure
         // In a real implementation, this would need to handle multiple outputs
         Self::merge_append(inputs)
@@ -505,7 +520,7 @@ mod tests {
     #[test]
     fn test_merge_first_available() {
         let mut inputs = HashMap::new();
-        inputs.insert(0, vec![]);  // Empty input
+        inputs.insert(0, vec![]); // Empty input
         inputs.insert(1, vec![create_test_data(json!({"from": "input1"}))]);
 
         let config = MergeConfig {
