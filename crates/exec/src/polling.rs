@@ -192,6 +192,9 @@ impl PollingEngine {
 
 #[cfg(test)]
 mod tests {
+    use async_trait::async_trait;
+    use barqflow_core::traits::{IPollFunctions, INodeType};
+
     use super::*;
     use barqflow_core::schema::{INode, INodeParameters, WorkflowDef};
     use barqflow_core::types::{NodeId, WorkflowId};

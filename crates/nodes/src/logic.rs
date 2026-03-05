@@ -43,15 +43,22 @@ impl INodeType for IfNode {
                 .cloned()
                 .unwrap_or(serde_json::Value::Null);
             let v1_str = item_value.as_str().unwrap_or("");
+            let v1_num = item_value.as_f64().or_else(|| v1_str.parse::<f64>().ok());
 
             let matches = if let Ok(prop2_result) = context.get_node_parameter("value2", None).await
             {
-                let v2 = prop2_result.as_str().unwrap_or("");
+                let v2_str = prop2_result.as_str().unwrap_or("");
+                let v2_num = prop2_result.as_f64().or_else(|| v2_str.parse::<f64>().ok());
+                
                 match operation.as_str() {
-                    "equals" => v1_str == v2,
-                    "notEquals" => v1_str != v2,
-                    "contains" => v1_str.contains(v2),
-                    _ => v1_str == v2,
+                    "equals" => v1_str == v2_str || (v1_num.is_some() && v1_num == v2_num),
+                    "notEquals" => v1_str != v2_str && (v1_num.is_none() || v1_num != v2_num),
+                    "contains" => v1_str.contains(v2_str),
+                    "larger" => v1_num.is_some() && v2_num.is_some() && v1_num.unwrap() > v2_num.unwrap(),
+                    "largerEqual" => v1_num.is_some() && v2_num.is_some() && v1_num.unwrap() >= v2_num.unwrap(),
+                    "smaller" => v1_num.is_some() && v2_num.is_some() && v1_num.unwrap() < v2_num.unwrap(),
+                    "smallerEqual" => v1_num.is_some() && v2_num.is_some() && v1_num.unwrap() <= v2_num.unwrap(),
+                    _ => v1_str == v2_str,
                 }
             } else {
                 match operation.as_str() {
@@ -156,9 +163,30 @@ impl INodeType for MergeNode {
 
         let mut merged = Vec::new();
 
-        for input_index in 0..2 {
-            if let Ok(input_data) = context.get_input_data(input_index) {
-                merged.extend(input_data.iter().cloned());
+        if mode == "append" {
+            for input_index in 0..2 {
+                if let Ok(input_data) = context.get_input_data(input_index) {
+                    merged.extend(input_data.iter().cloned());
+                }
+            }
+        } else if mode == "keepKeyMatches" {
+            let prop_1 = context.get_node_parameter("property1", None).await.map(|v| v.as_str().unwrap_or("").to_string()).unwrap_or_default();
+            let prop_2 = context.get_node_parameter("property2", None).await.map(|v| v.as_str().unwrap_or("").to_string()).unwrap_or_default();
+            
+            if let (Ok(input1), Ok(input2)) = (context.get_input_data(0), context.get_input_data(1)) {
+                for item1 in input1 {
+                    let v1 = item1.json.0.get(&prop_1);
+                    for item2 in input2 {
+                        let v2 = item2.json.0.get(&prop_2);
+                        if v1.is_some() && v1 == v2 {
+                            let mut combined = item1.json.0.clone();
+                            for (k, v) in &item2.json.0 {
+                                combined.insert(k.clone(), v.clone());
+                            }
+                            merged.push(INodeExecutionData::new(IDataObject(combined)));
+                        }
+                    }
+                }
             }
         }
 

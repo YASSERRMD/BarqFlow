@@ -149,6 +149,7 @@ impl INodeType for CodeNode {
 mod tests {
     use super::*;
     use barqflow_core::types::GenericValue;
+    use barqflow_core::schema::INode;
     use std::collections::HashMap;
 
     // Mock Context for testing
