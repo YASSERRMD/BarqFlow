@@ -103,6 +103,8 @@ impl NodeRegistry {
 
 #[cfg(test)]
 mod tests {
+    use barqflow_core::types::IDataObject;
+
     use super::*;
     use async_trait::async_trait;
     use barqflow_core::errors::BarqError;

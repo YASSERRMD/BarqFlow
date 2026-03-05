@@ -367,6 +367,8 @@ impl DataMerger {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::*;
 
     fn create_test_data(json_value: serde_json::Value) -> INodeExecutionData {

@@ -22,8 +22,19 @@ impl INodeType for SetNode {
         let input_data = context.get_input_data(0)?;
         let mut output_items = Vec::new();
 
+        let keep_only_set = context
+            .get_node_parameter("options", None)
+            .await
+            .ok()
+            .and_then(|v| v.get("keepOnlySet").and_then(|k| k.as_bool()))
+            .unwrap_or(false);
+
         for item in input_data {
-            let mut new_item = item.json.0.clone();
+            let mut new_item = if keep_only_set {
+                serde_json::Map::new()
+            } else {
+                item.json.0.clone()
+            };
 
             if let Ok(options) = context.get_node_parameter("assignments", None).await {
                 if let Some(assignments) = options.as_array() {
@@ -32,7 +43,34 @@ impl INodeType for SetNode {
                             assignment.get("name").and_then(|v| v.as_str()),
                             assignment.get("value"),
                         ) {
-                            new_item.insert(name.to_string(), value.clone());
+                            let mut val = value.clone();
+                            // Type coercion if provided in N8N v1 assignments property
+                            if let Some(target_type) = assignment.get("type").and_then(|t| t.as_str()) {
+                                val = match target_type {
+                                    "string" => serde_json::json!(val.as_str().unwrap_or(&val.to_string())),
+                                    "number" => {
+                                        if let Some(n) = val.as_f64() {
+                                            serde_json::json!(n)
+                                        } else if let Ok(n) = val.as_str().unwrap_or("").parse::<f64>() {
+                                            serde_json::json!(n)
+                                        } else {
+                                            val
+                                        }
+                                    },
+                                    "boolean" => {
+                                        if let Some(b) = val.as_bool() {
+                                            serde_json::json!(b)
+                                        } else if let Some(s) = val.as_str() {
+                                            serde_json::json!(s.to_lowercase() == "true")
+                                        } else {
+                                            val
+                                        }
+                                    },
+                                    _ => val,
+                                };
+                            }
+                            
+                            new_item.insert(name.to_string(), val);
                         }
                     }
                 }
