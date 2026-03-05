@@ -83,7 +83,7 @@ impl PollingEngine {
         let mut dedup_mode_opt = None;
         let mut dedup_key_opt = None;
         if let Some(mode_val) = target_node.parameters.0.get("deduplicationMode") {
-            if let Some(s) = mode_val.0.as_str() {
+            if let Some(s) = mode_val.as_str() {
                 match s {
                     "array_of_ids" => dedup_mode_opt = Some(DeduplicationMode::ArrayOfIds),
                     "incremented_key" => dedup_mode_opt = Some(DeduplicationMode::IncrementedKey),
@@ -92,7 +92,7 @@ impl PollingEngine {
             }
         }
         if let Some(key_val) = target_node.parameters.0.get("deduplicationKey") {
-            dedup_key_opt = key_val.0.as_str().map(|s| s.to_string());
+            dedup_key_opt = key_val.as_str().map(|s| s.to_string());
         }
 
         let handle = tokio::spawn(async move {
@@ -121,17 +121,14 @@ impl PollingEngine {
                                     let dedup_state_key = format!("{}_dedup", target_node.id.to_string());
                                     let mut dedup_state = IDataObject::default();
                                     
-                                    if let serde_json::Value::Object(map) = &global_state.0 {
-                                        if let Some(v) = map.get(&dedup_state_key) {
-                                            dedup_state = IDataObject(v.clone());
-                                        }
+                                    let map = &global_state.0;
+                                    if let Some(v) = map.get(&dedup_state_key) {
+                                        dedup_state = IDataObject::from(v.clone());
                                     }
 
                                     let filtered = DeduplicationManager::filter_new_events(branch_data, mode.clone(), key_path, &mut dedup_state);
                                     
-                                    if let serde_json::Value::Object(ref mut map) = global_state.0 {
-                                        map.insert(dedup_state_key, dedup_state.0);
-                                    }
+                                    global_state.0.insert(dedup_state_key, serde_json::Value::Object(dedup_state.0));
 
                                     let new_branch: Vec<INodeExecutionData> = filtered.into_iter().map(|d| INodeExecutionData::new(d)).collect();
                                     new_branches.push(new_branch);

@@ -46,12 +46,12 @@ impl NodeRegistry {
         let desc = node.get_description();
         
         // Extract required fields from the generic JSON payload
-        let name = desc.0.get("name")
+        let name = desc.get("name")
             .and_then(|v| v.as_str())
             .unwrap_or("UnknownNode")
             .to_string();
             
-        let version = desc.0.get("version")
+        let version = desc.get("version")
             .and_then(|v| v.as_u64())
             .unwrap_or(1) as u32;
         
@@ -155,13 +155,13 @@ mod tests {
         assert!(retrieved_v1.is_ok());
         
         let desc = retrieved_v1.unwrap().get_description();
-        assert_eq!(desc.0.get("name").unwrap().as_str().unwrap(), "testNode");
+        assert_eq!(desc.get("name").unwrap().as_str().unwrap(), "testNode");
 
         // Test alias lookup
         let retrieved_by_name = registry.get_node_by_name("testNode");
         assert!(retrieved_by_name.is_ok());
         let desc2 = retrieved_by_name.unwrap().get_description();
-        assert_eq!(desc2.0.get("version").unwrap().as_u64().unwrap(), 1);
+        assert_eq!(desc2.get("version").unwrap().as_u64().unwrap(), 1);
     }
 
     #[test]
@@ -203,6 +203,6 @@ mod tests {
         let retrieved_alias = registry.get_node_by_name("testNode");
         assert!(retrieved_alias.is_ok());
         let desc = retrieved_alias.unwrap().get_description();
-        assert_eq!(desc.0.get("version").unwrap().as_u64().unwrap(), 2);
+        assert_eq!(desc.get("version").unwrap().as_u64().unwrap(), 2);
     }
 }

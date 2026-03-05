@@ -13,14 +13,14 @@ pub struct ManualTriggerNode;
 #[async_trait]
 impl INodeType for ManualTriggerNode {
     fn get_description(&self) -> IDataObject {
-        IDataObject(serde_json::json!({
+        IDataObject::from(serde_json::json!({
             "name": "Manual Trigger",
             "description": "Triggered manually by user"
         }))
     }
 
     async fn execute(&self, _context: &dyn IExecuteFunctions) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
-        let output_item = INodeExecutionData::new(IDataObject(serde_json::json!({
+        let output_item = INodeExecutionData::new(IDataObject::from(serde_json::json!({
             "triggered": true
         })));
         Ok(vec![vec![output_item]])
@@ -60,7 +60,7 @@ impl Default for WebhookNode {
 #[async_trait]
 impl INodeType for WebhookNode {
     fn get_description(&self) -> IDataObject {
-        IDataObject(serde_json::json!({
+        IDataObject::from(serde_json::json!({
             "name": "Webhook",
             "description": "Triggered via webhook"
         }))
@@ -71,7 +71,7 @@ impl INodeType for WebhookNode {
     }
 
     async fn poll(&self, _context: &dyn IPollFunctions) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
-        let output_item = INodeExecutionData::new(IDataObject(serde_json::json!({
+        let output_item = INodeExecutionData::new(IDataObject::from(serde_json::json!({
             "webhook": true
         })));
         Ok(vec![vec![output_item]])
@@ -93,7 +93,7 @@ impl CronTriggerNode {
 #[async_trait]
 impl INodeType for CronTriggerNode {
     fn get_description(&self) -> IDataObject {
-        IDataObject(serde_json::json!({
+        IDataObject::from(serde_json::json!({
             "name": "Cron Trigger",
             "description": "Triggers on schedule"
         }))
@@ -104,7 +104,7 @@ impl INodeType for CronTriggerNode {
     }
 
     async fn poll(&self, _context: &dyn IPollFunctions) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
-        let output_item = INodeExecutionData::new(IDataObject(serde_json::json!({
+        let output_item = INodeExecutionData::new(IDataObject::from(serde_json::json!({
             "cron": self.cron_expression
         })));
         Ok(vec![vec![output_item]])
