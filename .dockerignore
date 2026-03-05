@@ -1,0 +1,14 @@
+target/
+**/*.rs.bk
+.git/
+.gitignore
+.env
+*.md
+tmp/
+node_modules/
+.claude/
+.gemini/
+docs/
+scripts/
+.github/
+.sqlx/
