@@ -18,7 +18,7 @@ impl ExecutionRepo {
             SELECT id, workflow_id, status, data, started_at, stopped_at
             FROM executions
             ORDER BY started_at DESC
-            "#
+            "#,
         )
         .fetch_all(&self.pool)
         .await
@@ -30,7 +30,7 @@ impl ExecutionRepo {
             SELECT id, workflow_id, status, data, started_at, stopped_at
             FROM executions
             WHERE id = $1
-            "#
+            "#,
         )
         .bind(id)
         .fetch_optional(&self.pool)
@@ -44,7 +44,7 @@ impl ExecutionRepo {
             FROM executions
             WHERE workflow_id = $1
             ORDER BY started_at DESC
-            "#
+            "#,
         )
         .bind(workflow_id)
         .fetch_all(&self.pool)
@@ -59,13 +59,13 @@ impl ExecutionRepo {
     ) -> Result<ExecutionEntity> {
         let id = Uuid::new_v4();
         let now = Utc::now();
-        
+
         sqlx::query_as::<_, ExecutionEntity>(
             r#"
             INSERT INTO executions (id, workflow_id, status, data, started_at)
             VALUES ($1, $2, $3, $4, $5)
             RETURNING id, workflow_id, status, data, started_at, stopped_at
-            "#
+            "#,
         )
         .bind(id)
         .bind(workflow_id)
@@ -83,7 +83,11 @@ impl ExecutionRepo {
         data: serde_json::Value,
     ) -> Result<Option<ExecutionEntity>> {
         let now = Utc::now();
-        let stopped_at = if status == "success" || status == "error" || status == "cancelled" || status == "crashed" {
+        let stopped_at = if status == "success"
+            || status == "error"
+            || status == "cancelled"
+            || status == "crashed"
+        {
             Some(now)
         } else {
             None
@@ -95,7 +99,7 @@ impl ExecutionRepo {
             SET status = $1, data = $2, stopped_at = COALESCE(stopped_at, $3)
             WHERE id = $4
             RETURNING id, workflow_id, status, data, started_at, stopped_at
-            "#
+            "#,
         )
         .bind(status)
         .bind(data)
@@ -110,7 +114,7 @@ impl ExecutionRepo {
             r#"
             DELETE FROM executions
             WHERE started_at < $1
-            "#
+            "#,
         )
         .bind(before)
         .execute(&self.pool)

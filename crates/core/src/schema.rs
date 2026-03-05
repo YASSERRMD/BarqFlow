@@ -91,14 +91,10 @@ mod tests {
 /// Determines if it's the main data flow or a specialized trigger/catch flow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[derive(Default)]
 pub enum NodeConnectionType {
+    #[default]
     Main,
-}
-
-impl Default for NodeConnectionType {
-    fn default() -> Self {
-        Self::Main
-    }
 }
 
 /// Represents an edge in the DAG connecting one node's output to another node's input.
@@ -141,6 +137,7 @@ pub struct INode {
 /// Settings applied to a workflow globally.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[derive(Default)]
 pub struct IWorkflowSettings {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timezone: Option<String>,
@@ -152,18 +149,6 @@ pub struct IWorkflowSettings {
     pub save_manual_executions: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caller_policy: Option<String>,
-}
-
-impl Default for IWorkflowSettings {
-    fn default() -> Self {
-        Self {
-            timezone: None,
-            save_data_error_execution: None,
-            save_execution_progress: None,
-            save_manual_executions: None,
-            caller_policy: None,
-        }
-    }
 }
 
 /// Represents an entire completely defined graph (Workflow).

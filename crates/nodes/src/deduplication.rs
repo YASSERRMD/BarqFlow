@@ -54,9 +54,9 @@ mod tests {
     #[tokio::test]
     async fn test_deduplication() {
         let service = DeduplicationService::new(10);
-        
+
         assert!(!service.is_duplicate("exec-1").await);
-        
+
         service.mark_seen("exec-1".to_string()).await;
         assert!(service.is_duplicate("exec-1").await);
     }

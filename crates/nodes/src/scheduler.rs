@@ -2,9 +2,9 @@
 //!
 //! Implements tokio-cron-scheduler integration for scheduled triggers.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use std::collections::HashMap;
 
 /// Schedule ID mapped to workflow ID
 pub type ScheduleId = String;
@@ -33,7 +33,10 @@ impl Scheduler {
 
     pub async fn list_schedules(&self) -> Vec<(ScheduleId, String)> {
         let schedules = self.active_schedules.read().await;
-        schedules.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+        schedules
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
     }
 
     pub async fn get_workflow_for_schedule(&self, schedule_id: &str) -> Option<String> {
@@ -62,11 +65,11 @@ mod tests {
     #[tokio::test]
     async fn test_add_remove_schedule() {
         let scheduler = Scheduler::new();
-        
+
         scheduler.add_schedule("hourly", "workflow-1").await;
         let schedules = scheduler.list_schedules().await;
         assert_eq!(schedules.len(), 1);
-        
+
         scheduler.remove_schedule("hourly").await;
         let schedules = scheduler.list_schedules().await;
         assert!(schedules.is_empty());

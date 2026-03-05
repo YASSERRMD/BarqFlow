@@ -1,5 +1,4 @@
 use barqflow_core::traits::INodeType;
-use barqflow_core::types::IDataObject;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
@@ -40,21 +39,20 @@ impl NodeRegistry {
         format!("{}:{}", name, version)
     }
 
-    /// Registers a given `INodeType` implementation. 
+    /// Registers a given `INodeType` implementation.
     /// If the node with the same name and version already exists, returns an error.
     pub fn register_node(&self, node: Arc<dyn INodeType>) -> Result<(), NodeRegistryError> {
         let desc = node.get_description();
-        
+
         // Extract required fields from the generic JSON payload
-        let name = desc.get("name")
+        let name = desc
+            .get("name")
             .and_then(|v| v.as_str())
             .unwrap_or("UnknownNode")
             .to_string();
-            
-        let version = desc.get("version")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(1) as u32;
-        
+
+        let version = desc.get("version").and_then(|v| v.as_u64()).unwrap_or(1) as u32;
+
         let target_key = Self::make_key(&name, version);
 
         let mut nodes_write = self.nodes.write().unwrap();
@@ -72,10 +70,14 @@ impl NodeRegistry {
     }
 
     /// Retrieves an `INodeType` implementation by its base name and explicit version.
-    pub fn get_node(&self, name: &str, version: u32) -> Result<Arc<dyn INodeType>, NodeRegistryError> {
+    pub fn get_node(
+        &self,
+        name: &str,
+        version: u32,
+    ) -> Result<Arc<dyn INodeType>, NodeRegistryError> {
         let target_key = Self::make_key(name, version);
         let nodes_read = self.nodes.read().unwrap();
-        
+
         if let Some(node) = nodes_read.get(&target_key) {
             Ok(node.clone())
         } else {
@@ -87,14 +89,14 @@ impl NodeRegistry {
     /// it looks up the alias map to find the registered version keys.
     pub fn get_node_by_name(&self, name: &str) -> Result<Arc<dyn INodeType>, NodeRegistryError> {
         let alias_read = self.alias_map.read().unwrap();
-        
+
         if let Some(target_key) = alias_read.get(name) {
             let nodes_read = self.nodes.read().unwrap();
             if let Some(node) = nodes_read.get(target_key) {
                 return Ok(node.clone());
             }
         }
-        
+
         Err(NodeRegistryError::NotFound(name.to_string()))
     }
 }
@@ -103,9 +105,9 @@ impl NodeRegistry {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use barqflow_core::traits::IExecuteFunctions;
-    use barqflow_core::schema::INodeExecutionData;
     use barqflow_core::errors::BarqError;
+    use barqflow_core::schema::INodeExecutionData;
+    use barqflow_core::traits::IExecuteFunctions;
     use serde_json::json;
 
     struct DummyNode {
@@ -130,8 +132,11 @@ mod tests {
                 "version": self.version,
                 "displayName": self.name,
                 "description": "Dummy Node for Testing"
-            }).as_object().unwrap().clone();
-            
+            })
+            .as_object()
+            .unwrap()
+            .clone();
+
             IDataObject::from(serde_json::Value::Object(map))
         }
 
@@ -153,7 +158,7 @@ mod tests {
         // Test explicit version lookup
         let retrieved_v1 = registry.get_node("testNode", 1);
         assert!(retrieved_v1.is_ok());
-        
+
         let desc = retrieved_v1.unwrap().get_description();
         assert_eq!(desc.get("name").unwrap().as_str().unwrap(), "testNode");
 
@@ -172,11 +177,11 @@ mod tests {
         let node_v1_duplicate = Arc::new(DummyNode::new("testNode", 1));
 
         assert!(registry.register_node(node_v1).is_ok());
-        
+
         // This should fail
         let duplicate_result = registry.register_node(node_v1_duplicate);
         assert!(duplicate_result.is_err());
-        
+
         if let Err(NodeRegistryError::AlreadyExists(name, version)) = duplicate_result {
             assert_eq!(name, "testNode");
             assert_eq!(version, 1);

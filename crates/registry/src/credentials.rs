@@ -303,17 +303,15 @@ mod tests {
                 scope: Some("openid profile email".to_string()),
                 client_auth_method: Some("basic".to_string()),
             },
-            properties: vec![
-                ICredentialProperty {
-                    display_name: "Client ID".to_string(),
-                    name: "clientId".to_string(),
-                    r#type: CredentialPropertyType::String,
-                    default: None,
-                    description: None,
-                    required: true,
-                    password: false,
-                },
-            ],
+            properties: vec![ICredentialProperty {
+                display_name: "Client ID".to_string(),
+                name: "clientId".to_string(),
+                r#type: CredentialPropertyType::String,
+                default: None,
+                description: None,
+                required: true,
+                password: false,
+            }],
         };
 
         let serialized = serde_json::to_string(&provider).unwrap();

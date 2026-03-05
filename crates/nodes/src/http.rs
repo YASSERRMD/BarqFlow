@@ -38,8 +38,12 @@ impl INodeType for HttpRequestNode {
         }))
     }
 
-    async fn execute(&self, context: &dyn barqflow_core::traits::IExecuteFunctions) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
-        let url = context.get_node_parameter("url", None)
+    async fn execute(
+        &self,
+        context: &dyn barqflow_core::traits::IExecuteFunctions,
+    ) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
+        let url = context
+            .get_node_parameter("url", None)
             .await
             .map(|v| v.as_str().unwrap_or("").to_string())
             .unwrap_or_default();
@@ -51,12 +55,14 @@ impl INodeType for HttpRequestNode {
             });
         }
 
-        let method = context.get_node_parameter("method", None)
+        let method = context
+            .get_node_parameter("method", None)
             .await
             .map(|v| v.as_str().unwrap_or("GET").to_string())
             .unwrap_or_else(|_| "GET".to_string());
 
-        let body = context.get_node_parameter("body", None)
+        let body = context
+            .get_node_parameter("body", None)
             .await
             .ok()
             .and_then(|v| v.as_str().map(|s| s.to_string()));
@@ -75,10 +81,13 @@ impl INodeType for HttpRequestNode {
             request
         };
 
-        let result = response.send().await.map_err(|e| BarqError::NodeOperationError {
-            node_name: "HttpRequest".to_string(),
-            message: e.to_string(),
-        })?;
+        let result = response
+            .send()
+            .await
+            .map_err(|e| BarqError::NodeOperationError {
+                node_name: "HttpRequest".to_string(),
+                message: e.to_string(),
+            })?;
 
         let status = result.status().as_u16();
         let body_text = result.text().await.unwrap_or_default();

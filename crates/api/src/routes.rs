@@ -1,8 +1,8 @@
 use axum::Router;
-use tower_http::services::{ServeDir, ServeFile};
-use barqflow_db::{CredentialRepo, ExecutionRepo, WorkflowRepo};
 use barqflow_db::users::UserRepo;
+use barqflow_db::{CredentialRepo, ExecutionRepo, WorkflowRepo};
 use std::sync::Arc;
+use tower_http::services::{ServeDir, ServeFile};
 
 use crate::controllers::{
     credentials::{credential_routes, AppState as CredState},
@@ -22,20 +22,27 @@ pub struct AppState {
 
 pub fn create_router(state: AppState) -> Router {
     let rest_routes = Router::new()
-        .merge(user_routes(UserState { user_repo: Arc::clone(&state.user_repo) }))
-        .merge(workflow_routes(WfState { workflow_repo: Arc::clone(&state.workflow_repo) }))
-        .merge(execution_routes(ExecState { execution_repo: Arc::clone(&state.exec_repo) }))
-        .merge(credential_routes(CredState { credential_repo: Arc::clone(&state.credential_repo) }));
+        .merge(user_routes(UserState {
+            user_repo: Arc::clone(&state.user_repo),
+        }))
+        .merge(workflow_routes(WfState {
+            workflow_repo: Arc::clone(&state.workflow_repo),
+        }))
+        .merge(execution_routes(ExecState {
+            execution_repo: Arc::clone(&state.exec_repo),
+        }))
+        .merge(credential_routes(CredState {
+            credential_repo: Arc::clone(&state.credential_repo),
+        }));
 
-    let webh_routes = webhook_routes(WebhookState { 
-        workflow_repo: Arc::clone(&state.workflow_repo) 
+    let webh_routes = webhook_routes(WebhookState {
+        workflow_repo: Arc::clone(&state.workflow_repo),
     });
 
     Router::new()
         .nest("/rest", rest_routes)
         .nest("/webhook", webh_routes)
         .fallback_service(
-            ServeDir::new("web/dist")
-                .not_found_service(ServeFile::new("web/dist/index.html")),
+            ServeDir::new("web/dist").not_found_service(ServeFile::new("web/dist/index.html")),
         )
 }
