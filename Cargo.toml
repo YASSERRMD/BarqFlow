@@ -18,7 +18,7 @@ edition      = "2021"
 authors      = ["Permus Software House <dev@permus.io>"]
 license      = "BUSL-1.1"
 repository   = "https://github.com/permus/barqflow"
-rust-version = "1.80"
+rust-version = "1.88"
 
 [workspace.dependencies]
 barqflow-core = { path = "crates/core" }
