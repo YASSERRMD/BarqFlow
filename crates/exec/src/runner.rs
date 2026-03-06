@@ -145,8 +145,21 @@ impl WorkflowRunner {
                 .gather_input_data(&parsed, node_index, &data_cache)
                 .await?;
 
+            // Build workflow_cache for this node execution
+            let mut workflow_cache_map = HashMap::new();
+            for (_, res) in &data_cache {
+                if let Some(first_output) = res.outputs.first() {
+                    let json_items: Vec<serde_json::Value> = first_output
+                        .iter()
+                        .map(|item| serde_json::Value::Object(item.json.0.clone()))
+                        .collect();
+                    workflow_cache_map.insert(res.node_name.clone(), json_items);
+                }
+            }
+            let workflow_cache = Arc::new(workflow_cache_map);
+
             // Execute the node
-            let result = self.run_node(&context, node, input_data, &parsed).await?;
+            let result = self.run_node(&context, node, input_data, &parsed, workflow_cache).await?;
 
             let node_id = node.id.clone();
             let node_name = node.name.clone();
@@ -228,6 +241,7 @@ impl WorkflowRunner {
         node: &WorkflowNode,
         input_data: ITaskDataConnections,
         _parsed: &ParsedGraph,
+        workflow_cache: Arc<HashMap<String, Vec<serde_json::Value>>>,
     ) -> Result<NodeExecutionResult, BarqError> {
         debug!("Executing node: {} (type: {})", node.name, node.type_);
 
@@ -260,6 +274,7 @@ impl WorkflowRunner {
             input_data,
             context.static_data.clone(),
             context.run_id.0,
+            workflow_cache,
         );
 
         // Execute the node
