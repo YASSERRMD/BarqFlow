@@ -29,14 +29,14 @@ impl INodeType for SetNode {
             .and_then(|v| v.get("keepOnlySet").and_then(|k| k.as_bool()))
             .unwrap_or(false);
 
-        for item in input_data {
+        for (item_index, item) in input_data.iter().enumerate() {
             let mut new_item = if keep_only_set {
                 serde_json::Map::new()
             } else {
                 item.json.0.clone()
             };
 
-            if let Ok(options) = context.get_node_parameter("assignments", None).await {
+            if let Ok(options) = context.get_node_parameter_at_item("assignments", item_index, None).await {
                 if let Some(assignments) = options.as_array() {
                     for assignment in assignments {
                         if let (Some(name), Some(value)) = (
@@ -106,33 +106,29 @@ impl INodeType for FilterNode {
             .map(|v| v.as_str().unwrap_or("equals").to_string())
             .unwrap_or_else(|_| "equals".to_string());
 
-        let property1 = context
-            .get_node_parameter("property1", None)
-            .await
-            .map(|v| v.as_str().unwrap_or("").to_string())
-            .unwrap_or_else(|_| "".to_string());
-
         let mut output_items = Vec::new();
 
-        for item in input_data {
-            let value1 = item.json.0.get(&property1).cloned();
+        for (item_index, item) in input_data.iter().enumerate() {
+            let v1 = context
+                .get_node_parameter_at_item("value1", item_index, None)
+                .await
+                .unwrap_or(serde_json::Value::Null);
+
             let mut keep = true;
 
-            if let Some(v1) = value1 {
-                if operation == "exists" {
-                    keep = !v1.is_null();
-                } else if operation == "notExists" {
-                    keep = v1.is_null();
-                } else if let Ok(v2) = context.get_node_parameter("property2", None).await {
-                    let v1_str = v1.as_str().unwrap_or("");
-                    let v2_str = v2.as_str().unwrap_or("");
-                    if operation == "equals" {
-                        keep = v1_str == v2_str;
-                    } else if operation == "notEquals" {
-                        keep = v1_str != v2_str;
-                    } else if operation == "contains" {
-                        keep = v1_str.contains(v2_str);
-                    }
+            if operation == "exists" {
+                keep = !v1.is_null();
+            } else if operation == "notExists" {
+                keep = v1.is_null();
+            } else if let Ok(v2) = context.get_node_parameter_at_item("value2", item_index, None).await {
+                let v1_str = v1.as_str().unwrap_or("");
+                let v2_str = v2.as_str().unwrap_or("");
+                if operation == "equals" {
+                    keep = v1 == v2;
+                } else if operation == "notEquals" {
+                    keep = v1 != v2;
+                } else if operation == "contains" {
+                    keep = v1_str.contains(v2_str);
                 }
             }
 

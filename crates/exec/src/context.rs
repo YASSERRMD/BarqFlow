@@ -63,6 +63,7 @@ impl NodeExecutionContext {
     async fn evaluate_parameter(
         &self,
         parameter_name: &str,
+        item_index: usize,
         fallback_value: Option<GenericValue>,
     ) -> Result<GenericValue, BarqError> {
         // Get the raw parameter value
@@ -87,11 +88,11 @@ impl NodeExecutionContext {
                 // Get data we need across await boundary FIRST
                 let json_data = {
                     let input = self.input_data.read().await;
-                    // Default to first item of first input branch for evaluation, prioritizing main
+                    // Evaluate against specific item index or first item if not found
                     input
                         .0
                         .get(&0)
-                        .and_then(|items| items.first())
+                        .and_then(|items| items.get(item_index).or_else(|| items.first()))
                         .map(|item| serde_json::Value::Object(item.json.0.clone()))
                         .unwrap_or_else(|| serde_json::json!({}))
                 };
@@ -171,7 +172,18 @@ impl IExecuteFunctions for NodeExecutionContext {
         parameter_name: &str,
         fallback_value: Option<GenericValue>,
     ) -> Result<GenericValue, BarqError> {
-        self.evaluate_parameter(parameter_name, fallback_value)
+        self.evaluate_parameter(parameter_name, 0, fallback_value)
+            .await
+    }
+
+    /// Retrieve a parameter value evaluated against a specific item index.
+    async fn get_node_parameter_at_item(
+        &self,
+        parameter_name: &str,
+        item_index: usize,
+        fallback_value: Option<GenericValue>,
+    ) -> Result<GenericValue, BarqError> {
+        self.evaluate_parameter(parameter_name, item_index, fallback_value)
             .await
     }
 
