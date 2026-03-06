@@ -29,6 +29,13 @@ pub enum BarqError {
 
     #[error("Internal System Error: {0}")]
     InternalError(String),
+
+    /// Special control-flow variant to indicate the execution should be suspended and checkpointed.
+    #[error("Execution suspended for Wait node")]
+    SuspendExecution {
+        node_name: String,
+        wait_config: serde_json::Value,
+    },
 }
 
 #[cfg(test)]
