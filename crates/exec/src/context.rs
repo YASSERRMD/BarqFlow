@@ -26,6 +26,8 @@ pub struct NodeExecutionContext {
     static_data: Option<IDataObject>,
     /// Run ID for tracing
     run_id: uuid::Uuid,
+    /// Execution output cache from previous nodes
+    workflow_cache: Arc<HashMap<String, Vec<serde_json::Value>>>,
 }
 
 impl NodeExecutionContext {
@@ -41,12 +43,14 @@ impl NodeExecutionContext {
         input_data: ITaskDataConnections,
         static_data: Option<IDataObject>,
         run_id: uuid::Uuid,
+        workflow_cache: Arc<HashMap<String, Vec<serde_json::Value>>>,
     ) -> Self {
         Self {
             node,
             input_data: Arc::new(RwLock::new(input_data)),
             static_data,
             run_id,
+            workflow_cache,
         }
     }
 
@@ -115,6 +119,7 @@ impl NodeExecutionContext {
                         json_data,
                         binary_keys: vec![], // Binary streams mapping skipped for simplified phase 21
                         parameters: params_map,
+                        workflow_cache: (*self.workflow_cache).clone(),
                     };
 
                     engine.eval_with_context(&stripped_expr, &expr_ctx)
@@ -276,6 +281,7 @@ pub struct NodeExecutionContextBuilder {
     input_data: Option<ITaskDataConnections>,
     static_data: Option<IDataObject>,
     run_id: Option<uuid::Uuid>,
+    workflow_cache: Option<Arc<HashMap<String, Vec<serde_json::Value>>>>,
 }
 
 impl Default for NodeExecutionContextBuilder {
@@ -291,6 +297,7 @@ impl NodeExecutionContextBuilder {
             input_data: None,
             static_data: None,
             run_id: None,
+            workflow_cache: None,
         }
     }
 
@@ -314,12 +321,22 @@ impl NodeExecutionContextBuilder {
         self
     }
 
+    pub fn with_workflow_cache(
+        mut self,
+        workflow_cache: Arc<HashMap<String, Vec<serde_json::Value>>>,
+    ) -> Self {
+        self.workflow_cache = Some(workflow_cache);
+        self
+    }
+
     pub fn build(self) -> Result<NodeExecutionContext, String> {
         Ok(NodeExecutionContext::new(
             self.node.ok_or("node is required")?,
             self.input_data.unwrap_or_default(),
             self.static_data,
             self.run_id.unwrap_or_else(uuid::Uuid::new_v4),
+            self.workflow_cache
+                .unwrap_or_else(|| Arc::new(HashMap::new())),
         ))
     }
 }
@@ -353,6 +370,7 @@ mod tests {
             ITaskDataConnections::default(),
             None,
             uuid::Uuid::new_v4(),
+            Arc::new(HashMap::new()),
         );
 
         assert_eq!(context.node.name, "TestNode");
@@ -366,6 +384,7 @@ mod tests {
             ITaskDataConnections::default(),
             None,
             uuid::Uuid::new_v4(),
+            Arc::new(HashMap::new()),
         );
 
         let result = context.get_node_parameter("testParam", None).await.unwrap();
@@ -381,6 +400,7 @@ mod tests {
             ITaskDataConnections::default(),
             None,
             uuid::Uuid::new_v4(),
+            Arc::new(HashMap::new()),
         );
 
         let fallback = json!("fallbackValue");
@@ -400,6 +420,7 @@ mod tests {
             ITaskDataConnections::default(),
             None,
             uuid::Uuid::new_v4(),
+            Arc::new(HashMap::new()),
         );
 
         let result = context.get_node_parameter("nonExistentParam", None).await;
@@ -415,6 +436,7 @@ mod tests {
             ITaskDataConnections::default(),
             None,
             uuid::Uuid::new_v4(),
+            Arc::new(HashMap::new()),
         );
 
         let retrieved_node = context.get_node();
@@ -467,6 +489,7 @@ mod tests {
             ITaskDataConnections::default(),
             None,
             uuid::Uuid::new_v4(),
+            Arc::new(HashMap::new()),
         );
         let mut new_data = ITaskDataConnections::new();
         new_data.push(
@@ -490,6 +513,7 @@ mod tests {
             ITaskDataConnections::default(),
             None,
             uuid::Uuid::new_v4(),
+            Arc::new(HashMap::new()),
         );
 
         let mut new_data = ITaskDataConnections::new();

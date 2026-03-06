@@ -8,7 +8,9 @@ pub struct ExpressionContext {
     pub json_data: serde_json::Value,
     pub binary_keys: Vec<String>,
     pub parameters: HashMap<String, serde_json::Value>,
+    pub workflow_cache: HashMap<String, Vec<serde_json::Value>>,
 }
+
 
 pub struct ExpressionEngine {
     engine: Engine,
@@ -80,7 +82,7 @@ impl ExpressionEngine {
     }
 
     pub fn eval_with_context(
-        &self,
+        mut self,
         script: &str,
         context: &ExpressionContext,
     ) -> Result<Dynamic, String> {
@@ -88,6 +90,31 @@ impl ExpressionEngine {
             .replace("$json", "json")
             .replace("$env", "env")
             .replace("$input", "input");
+
+        let cache = context.workflow_cache.clone();
+        self.engine.register_fn("$item", move |node_name: &str| -> rhai::Map {
+            let mut map = rhai::Map::new();
+            if let Some(items) = cache.get(node_name) {
+                if let Some(first) = items.first() {
+                    map.insert("json".into(), Self::json_to_dynamic(first));
+                }
+            }
+            map
+        });
+
+        let cache_items = context.workflow_cache.clone();
+        self.engine.register_fn("$items", move |node_name: &str| -> rhai::Array {
+            let mut array = rhai::Array::new();
+            if let Some(items) = cache_items.get(node_name) {
+                for item in items {
+                    let mut map = rhai::Map::new();
+                    map.insert("json".into(), Self::json_to_dynamic(item));
+                    array.push(Dynamic::from(map));
+                }
+            }
+            array
+        });
+
         let mut scope = self.create_scope(context);
 
         self.engine
@@ -308,6 +335,7 @@ mod tests {
                 json_data: serde_json::json!({}),
                 binary_keys: vec![],
                 parameters: HashMap::new(),
+                workflow_cache: HashMap::new(),
             },
         );
 
@@ -334,6 +362,7 @@ mod tests {
             }),
             binary_keys: vec![],
             parameters: HashMap::new(),
+            workflow_cache: HashMap::new(),
         };
 
         let result = engine.eval_with_context("1 + 1", &context);
@@ -351,6 +380,7 @@ mod tests {
                 ("a".to_string(), serde_json::json!(10)),
                 ("b".to_string(), serde_json::json!(5)),
             ]),
+            workflow_cache: HashMap::new(),
         };
 
         let result = engine.eval_with_context("a + b * 2", &context);
@@ -388,6 +418,7 @@ mod tests {
                 json_data: serde_json::json!({}),
                 binary_keys: vec![],
                 parameters: HashMap::new(),
+                workflow_cache: HashMap::new(),
             },
         );
 
