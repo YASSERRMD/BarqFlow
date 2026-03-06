@@ -5,7 +5,7 @@
 use async_trait::async_trait;
 use barqflow_core::errors::BarqError;
 use barqflow_core::schema::INodeExecutionData;
-use barqflow_core::traits::{INodeType, IPollFunctions, IExecuteFunctions};
+use barqflow_core::traits::{IExecuteFunctions, INodeType, IPollFunctions};
 use barqflow_core::types::IDataObject;
 
 pub struct ManualTriggerNode;
@@ -13,14 +13,17 @@ pub struct ManualTriggerNode;
 #[async_trait]
 impl INodeType for ManualTriggerNode {
     fn get_description(&self) -> IDataObject {
-        IDataObject(serde_json::json!({
+        IDataObject::from(serde_json::json!({
             "name": "Manual Trigger",
             "description": "Triggered manually by user"
         }))
     }
 
-    async fn execute(&self, _context: &dyn IExecuteFunctions) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
-        let output_item = INodeExecutionData::new(IDataObject(serde_json::json!({
+    async fn execute(
+        &self,
+        _context: &dyn IExecuteFunctions,
+    ) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
+        let output_item = INodeExecutionData::new(IDataObject::from(serde_json::json!({
             "triggered": true
         })));
         Ok(vec![vec![output_item]])
@@ -60,18 +63,24 @@ impl Default for WebhookNode {
 #[async_trait]
 impl INodeType for WebhookNode {
     fn get_description(&self) -> IDataObject {
-        IDataObject(serde_json::json!({
+        IDataObject::from(serde_json::json!({
             "name": "Webhook",
             "description": "Triggered via webhook"
         }))
     }
 
-    async fn execute(&self, _context: &dyn IExecuteFunctions) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
+    async fn execute(
+        &self,
+        _context: &dyn IExecuteFunctions,
+    ) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
         Ok(vec![])
     }
 
-    async fn poll(&self, _context: &dyn IPollFunctions) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
-        let output_item = INodeExecutionData::new(IDataObject(serde_json::json!({
+    async fn poll(
+        &self,
+        _context: &dyn IPollFunctions,
+    ) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
+        let output_item = INodeExecutionData::new(IDataObject::from(serde_json::json!({
             "webhook": true
         })));
         Ok(vec![vec![output_item]])
@@ -93,18 +102,24 @@ impl CronTriggerNode {
 #[async_trait]
 impl INodeType for CronTriggerNode {
     fn get_description(&self) -> IDataObject {
-        IDataObject(serde_json::json!({
+        IDataObject::from(serde_json::json!({
             "name": "Cron Trigger",
             "description": "Triggers on schedule"
         }))
     }
 
-    async fn execute(&self, _context: &dyn IExecuteFunctions) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
+    async fn execute(
+        &self,
+        _context: &dyn IExecuteFunctions,
+    ) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
         Ok(vec![])
     }
 
-    async fn poll(&self, _context: &dyn IPollFunctions) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
-        let output_item = INodeExecutionData::new(IDataObject(serde_json::json!({
+    async fn poll(
+        &self,
+        _context: &dyn IPollFunctions,
+    ) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
+        let output_item = INodeExecutionData::new(IDataObject::from(serde_json::json!({
             "cron": self.cron_expression
         })));
         Ok(vec![vec![output_item]])

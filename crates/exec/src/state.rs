@@ -39,13 +39,8 @@ pub struct ITaskData {
 /// The key is the node name.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
+#[derive(Default)]
 pub struct IRunExecutionData(pub HashMap<String, Vec<ITaskData>>);
-
-impl Default for IRunExecutionData {
-    fn default() -> Self {
-        Self(HashMap::new())
-    }
-}
 
 /// Core Model persisting the full state of a workflow execution run
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -111,8 +106,8 @@ impl ExecutionStateManager {
 
     pub async fn create(&self, workflow_id: &str, manual: bool) -> ExecutionState {
         let state = ExecutionState::new(workflow_id, manual);
-        let id = state.id.clone();
-        self.states.write().await.insert(id.clone(), state.clone());
+        let id = state.id;
+        self.states.write().await.insert(id, state.clone());
         state
     }
 
@@ -121,7 +116,7 @@ impl ExecutionStateManager {
     }
 
     pub async fn update(&self, run_id: &RunId, state: ExecutionState) {
-        self.states.write().await.insert(run_id.clone(), state);
+        self.states.write().await.insert(*run_id, state);
     }
 
     pub async fn remove(&self, run_id: &RunId) -> Option<ExecutionState> {
@@ -178,16 +173,16 @@ mod tests {
     #[tokio::test]
     async fn test_execution_state_manager() {
         let manager = ExecutionStateManager::new();
-        
+
         let state = manager.create("test-wf", true).await;
         assert_eq!(state.workflow_id, "test-wf");
-        
+
         let retrieved = manager.get(&state.id).await.unwrap();
         assert_eq!(retrieved.id, state.id);
-        
+
         manager.increment_nodes_executed().await;
         manager.add_data_processed(100).await;
-        
+
         let metrics = manager.get_metrics().await;
         assert_eq!(metrics.nodes_executed, 1);
         assert_eq!(metrics.data_processed_bytes, 100);
@@ -196,10 +191,10 @@ mod tests {
     #[tokio::test]
     async fn test_list_active() {
         let manager = ExecutionStateManager::new();
-        
+
         manager.create("wf1", false).await;
         manager.create("wf2", true).await;
-        
+
         let active = manager.list_active().await;
         assert_eq!(active.len(), 2);
     }

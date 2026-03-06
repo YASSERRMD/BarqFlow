@@ -3,9 +3,9 @@
 //! This module handles storing and retrieving binary data on the filesystem,
 //! used for large files that shouldn't be kept in memory.
 
-use std::path::{Path, PathBuf};
-use std::io;
 use std::fs;
+use std::io;
+use std::path::{Path, PathBuf};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use uuid::Uuid;
 
@@ -81,10 +81,7 @@ pub async fn store_binary_to_fs(
 ///
 /// # Returns
 /// * The binary data as a vector of bytes
-pub async fn read_binary_from_fs(
-    config: &BinaryStorageConfig,
-    id: &str,
-) -> io::Result<Vec<u8>> {
+pub async fn read_binary_from_fs(config: &BinaryStorageConfig, id: &str) -> io::Result<Vec<u8>> {
     let file_path = config.get_file_path(id);
 
     let mut file = tokio::fs::File::open(&file_path).await?;
@@ -139,10 +136,7 @@ pub async fn read_binary_from_fs_chunked(
 /// # Arguments
 /// * `config` - The storage configuration
 /// * `id` - The ID of the file to delete
-pub async fn delete_binary_from_fs(
-    config: &BinaryStorageConfig,
-    id: &str,
-) -> io::Result<()> {
+pub async fn delete_binary_from_fs(config: &BinaryStorageConfig, id: &str) -> io::Result<()> {
     let file_path = config.get_file_path(id);
     tokio::fs::remove_file(&file_path).await?;
     Ok(())
@@ -199,7 +193,8 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = BinaryStorageConfig::new(temp_dir.path());
 
-        let data = bytes::Bytes::from("This is a longer piece of data that will be split into chunks");
+        let data =
+            bytes::Bytes::from("This is a longer piece of data that will be split into chunks");
         let id = store_binary_to_fs(&config, data.clone()).await.unwrap();
 
         let chunks = read_binary_from_fs_chunked(&config, &id, 10).await.unwrap();

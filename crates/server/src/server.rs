@@ -1,8 +1,8 @@
 use anyhow::Result;
 use barqflow_api::{create_router, AppState};
-use barqflow_db::{CredentialRepo, ExecutionRepo, WorkflowRepo};
-use barqflow_db::users::UserRepo;
 use barqflow_db::pool::init_db_pool;
+use barqflow_db::users::UserRepo;
+use barqflow_db::{CredentialRepo, ExecutionRepo, WorkflowRepo};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -18,12 +18,17 @@ pub async fn run_server(db_url: &str, port: u16) -> Result<()> {
     // Create database connection pool
     let pool = init_db_pool(db_url, 10).await?;
 
+    // Initialize the Node Registry and populate standard core nodes
+    let node_registry = Arc::new(barqflow_registry::registry::NodeRegistry::new());
+    barqflow_nodes::register_all_nodes(&node_registry);
+
     // Create application state
     let state = AppState {
         workflow_repo: Arc::new(WorkflowRepo::new(pool.clone())),
         credential_repo: Arc::new(CredentialRepo::new(pool.clone())),
         exec_repo: Arc::new(ExecutionRepo::new(pool.clone())),
         user_repo: Arc::new(UserRepo::new(pool)),
+        node_registry,
     };
 
     // Create router

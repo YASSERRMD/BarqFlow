@@ -32,64 +32,115 @@ impl Default for HttpRequestNode {
 #[async_trait]
 impl INodeType for HttpRequestNode {
     fn get_description(&self) -> IDataObject {
-        IDataObject(serde_json::json!({
+        IDataObject::from(serde_json::json!({
             "name": "HTTP Request",
             "description": "Send HTTP request to external service"
         }))
     }
 
-    async fn execute(&self, context: &dyn barqflow_core::traits::IExecuteFunctions) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
-        let url = context.get_node_parameter("url", None)
-            .await
-            .map(|v| v.0.as_str().unwrap_or("").to_string())
-            .unwrap_or_default();
+    async fn execute(
+        &self,
+        context: &dyn barqflow_core::traits::IExecuteFunctions,
+    ) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
+        let input_data = context.get_input_data(0)?;
+        let mut output_items = Vec::new();
 
-        if url.is_empty() {
-            return Err(BarqError::NodeOperationError {
-                node_name: "HttpRequest".to_string(),
-                message: "URL is required".to_string(),
-            });
+        for (item_index, _item) in input_data.iter().enumerate() {
+            let url = context
+                .get_node_parameter_at_item("url", item_index, None)
+                .await
+                .map(|v| v.as_str().unwrap_or("").to_string())
+                .unwrap_or_default();
+
+            if url.is_empty() {
+                return Err(BarqError::NodeOperationError {
+                    node_name: "HttpRequest".to_string(),
+                    message: format!("URL is required for item {}", item_index),
+                });
+            }
+
+            let method = context
+                .get_node_parameter_at_item("method", item_index, None)
+                .await
+                .map(|v| v.as_str().unwrap_or("GET").to_string())
+                .unwrap_or_else(|_| "GET".to_string());
+
+            let body = context
+                .get_node_parameter_at_item("body", item_index, None)
+                .await
+                .ok()
+                .and_then(|v| {
+                    if v.is_object() || v.is_array() {
+                        Some(v.to_string())
+                    } else {
+                        v.as_str().map(|s| s.to_string())
+                    }
+                });
+
+            let mut request = match method.to_uppercase().as_str() {
+                "POST" => self.client.post(&url),
+                "PUT" => self.client.put(&url),
+                "PATCH" => self.client.patch(&url),
+                "DELETE" => self.client.delete(&url),
+                _ => self.client.get(&url),
+            };
+
+            // Query parameters
+            if let Ok(queries) = context.get_node_parameter_at_item("queryParameters", item_index, None).await {
+                if let Some(q_array) = queries.as_array() {
+                    for q in q_array {
+                        if let (Some(name), Some(value)) = (q.get("name").and_then(|n| n.as_str()), q.get("value").and_then(|v| v.as_str())) {
+                            request = request.query(&[(name, value)]);
+                        }
+                    }
+                }
+            }
+
+            // Headers
+            if let Ok(headers) = context.get_node_parameter_at_item("headers", item_index, None).await {
+                if let Some(h_array) = headers.as_array() {
+                    for h in h_array {
+                        if let (Some(name), Some(value)) = (h.get("name").and_then(|n| n.as_str()), h.get("value").and_then(|v| v.as_str())) {
+                            request = request.header(name, value);
+                        }
+                    }
+                }
+            }
+
+            if let Some(b) = body {
+                request = request.body(b);
+            }
+
+            let result = request
+                .send()
+                .await
+                .map_err(|e| BarqError::NodeOperationError {
+                    node_name: "HttpRequest".to_string(),
+                    message: format!("Item {}: {}", item_index, e),
+                })?;
+
+            let status = result.status().as_u16();
+            
+            // Handle JSON response automatically if possible
+            let content_type = result.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("");
+            let output = if content_type.contains("application/json") {
+                let json_body: serde_json::Value = result.json().await.unwrap_or(serde_json::json!({}));
+                serde_json::json!({
+                    "status": status,
+                    "body": json_body
+                })
+            } else {
+                let body_text = result.text().await.unwrap_or_default();
+                serde_json::json!({
+                    "status": status,
+                    "body": body_text
+                })
+            };
+
+            output_items.push(INodeExecutionData::new(IDataObject::from(output)));
         }
 
-        let method = context.get_node_parameter("method", None)
-            .await
-            .map(|v| v.0.as_str().unwrap_or("GET").to_string())
-            .unwrap_or_else(|_| "GET".to_string());
-
-        let body = context.get_node_parameter("body", None)
-            .await
-            .ok()
-            .and_then(|v| v.0.as_str().map(|s| s.to_string()));
-
-        let request = match method.to_uppercase().as_str() {
-            "POST" => self.client.post(&url),
-            "PUT" => self.client.put(&url),
-            "PATCH" => self.client.patch(&url),
-            "DELETE" => self.client.delete(&url),
-            _ => self.client.get(&url),
-        };
-
-        let response = if let Some(b) = body {
-            request.body(b)
-        } else {
-            request
-        };
-
-        let result = response.send().await.map_err(|e| BarqError::NodeOperationError {
-            node_name: "HttpRequest".to_string(),
-            message: e.to_string(),
-        })?;
-
-        let status = result.status().as_u16();
-        let body_text = result.text().await.unwrap_or_default();
-
-        let output = serde_json::json!({
-            "status": status,
-            "body": body_text
-        });
-
-        let output_item = INodeExecutionData::new(IDataObject(output));
-        Ok(vec![vec![output_item]])
+        Ok(vec![output_items])
     }
 }
 

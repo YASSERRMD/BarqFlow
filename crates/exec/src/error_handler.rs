@@ -33,21 +33,26 @@ pub struct ErrorTriggerNode;
 #[async_trait]
 impl barqflow_core::traits::INodeType for ErrorTriggerNode {
     fn get_description(&self) -> IDataObject {
-        IDataObject(serde_json::json!({
+        IDataObject::from(serde_json::json!({
             "name": "Error Trigger",
             "description": "Triggers error workflow on failure"
         }))
     }
 
-    async fn execute(&self, context: &dyn IExecuteFunctions) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
-        let error_msg = context.get_node_parameter("errorMessage", None)
+    async fn execute(
+        &self,
+        context: &dyn IExecuteFunctions,
+    ) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
+        let error_msg = context
+            .get_node_parameter("errorMessage", None)
             .await
-            .map(|v| v.0.as_str().unwrap_or("").to_string())
+            .map(|v| v.as_str().unwrap_or("").to_string())
             .unwrap_or_default();
 
-        let continue_on_fail = context.get_node_parameter("continueOnFail", None)
+        let continue_on_fail = context
+            .get_node_parameter("continueOnFail", None)
             .await
-            .map(|v| v.0.as_bool().unwrap_or(false))
+            .map(|v| v.as_bool().unwrap_or(false))
             .unwrap_or(false);
 
         if !continue_on_fail && !error_msg.is_empty() {
@@ -90,20 +95,23 @@ impl ErrorHandler {
         E: std::fmt::Debug,
     {
         let mut last_error = None;
-        
+
         for attempt in 0..=self.max_retries {
             match operation() {
                 Ok(result) => return Ok(result),
                 Err(e) if attempt < self.max_retries => {
                     last_error = Some(e);
                     if self.retry_interval_ms > 0 {
-                        tokio::time::sleep(tokio::time::Duration::from_millis(self.retry_interval_ms)).await;
+                        tokio::time::sleep(tokio::time::Duration::from_millis(
+                            self.retry_interval_ms,
+                        ))
+                        .await;
                     }
                 }
                 Err(e) => return Err(e),
             }
         }
-        
+
         Err(last_error.unwrap())
     }
 }

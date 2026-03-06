@@ -95,7 +95,7 @@ impl WorkflowToGraphParser {
         for (source_node_name, node_connections) in &workflow.connections {
             if let Some(&source_index) = name_to_index.get(source_node_name) {
                 // node_connections is INodeConnections(HashMap<NodeConnectionType, Vec<Vec<IConnection>>>)
-                for (_, output_arrays) in &node_connections.0 {
+                for output_arrays in node_connections.0.values() {
                     for (output_index, connections) in output_arrays.iter().enumerate() {
                         for connection in connections {
                             if let Some(&target_index) = name_to_index.get(&connection.node) {

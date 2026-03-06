@@ -1,9 +1,9 @@
 use crate::auth::{generate_jwt, hash_password, verify_password, Claims};
 use axum::{
-    extract::{State, Json},
+    extract::{Json, State},
+    http::StatusCode,
     routing::{get, post},
     Router,
-    http::StatusCode,
 };
 use barqflow_db::users::UserRepo;
 use serde::{Deserialize, Serialize};
@@ -80,15 +80,18 @@ async fn login_user(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Invalid credentials".into()))?;
 
-    let is_valid = verify_password(&user.password_hash, &payload.password)
-        .unwrap_or(false);
+    let is_valid = verify_password(&user.password_hash, &payload.password).unwrap_or(false);
 
     if !is_valid {
         return Err((StatusCode::UNAUTHORIZED, "Invalid credentials".into()));
     }
 
-    let token = generate_jwt(&user.id.to_string(), &user.global_role)
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "JWT generation failed".into()))?;
+    let token = generate_jwt(&user.id.to_string(), &user.global_role).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "JWT generation failed".into(),
+        )
+    })?;
 
     Ok(Json(AuthResponse {
         token,

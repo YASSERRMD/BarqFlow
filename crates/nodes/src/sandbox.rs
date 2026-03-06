@@ -9,6 +9,12 @@ pub struct SandboxExecutor {
     engine: Engine,
 }
 
+impl Default for SandboxExecutor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SandboxExecutor {
     pub fn new() -> Self {
         let mut engine = Engine::new_raw();

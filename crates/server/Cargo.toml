@@ -13,6 +13,7 @@ axum.workspace = true
 tracing.workspace = true
 anyhow.workspace = true
 barqflow-registry.workspace = true
+barqflow-nodes.workspace = true
 reqwest.workspace = true
 tokio-cron-scheduler.workspace = true
 dotenvy.workspace = true
