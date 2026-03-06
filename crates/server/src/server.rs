@@ -24,6 +24,9 @@ pub async fn run_server(db_url: &str, port: u16) -> Result<()> {
     let node_registry = Arc::new(barqflow_registry::registry::NodeRegistry::new());
     barqflow_nodes::register_all_nodes(&node_registry);
 
+    // Initialize Credential Registry
+    let credential_registry = Arc::new(barqflow_registry::registry::CredentialRegistry::new());
+
     // Create application state
     let state = AppState {
         workflow_repo: Arc::new(WorkflowRepository::new(pool.clone())),
@@ -31,6 +34,7 @@ pub async fn run_server(db_url: &str, port: u16) -> Result<()> {
         exec_repo: Arc::new(ExecutionRepository::new(pool.clone())),
         user_repo: Arc::new(UserRepo::new(pool)),
         node_registry,
+        credential_registry,
     };
 
     // Create router

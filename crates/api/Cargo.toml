@@ -26,3 +26,7 @@ chrono.workspace = true
 aes-gcm.workspace = true
 base64 = "0.22.1"
 async-trait.workspace = true
+reqwest.workspace = true
+
+[dev-dependencies]
+wiremock.workspace = true

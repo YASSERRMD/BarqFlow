@@ -7,6 +7,7 @@ use barqflow_api::repositories::{
 use sqlx::PgPool;
 use std::sync::Arc;
 use barqflow_registry::registry::NodeRegistry;
+use barqflow_registry::registry::CredentialRegistry;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -17,12 +18,16 @@ pub struct AppState {
     pub static_data_repo: Arc<StaticDataRepository>,
     pub user_repo: Arc<UserRepo>,
     pub node_registry: Arc<NodeRegistry>,
+    pub credential_registry: Arc<CredentialRegistry>,
 }
 
 impl AppState {
     pub fn new(pool: PgPool) -> Self {
         let node_registry = Arc::new(NodeRegistry::new());
         barqflow_nodes::register_all_nodes(&node_registry);
+        
+        // Setup Credential Registry
+        let credential_registry = Arc::new(CredentialRegistry::new());
 
         Self {
             db_pool: pool.clone(),
@@ -32,6 +37,7 @@ impl AppState {
             static_data_repo: Arc::new(StaticDataRepository::new(pool.clone())),
             user_repo: Arc::new(UserRepo::new(pool)),
             node_registry,
+            credential_registry,
         }
     }
 
@@ -42,6 +48,7 @@ impl AppState {
             exec_repo: Arc::clone(&self.execution_repo),
             user_repo: Arc::clone(&self.user_repo),
             node_registry: Arc::clone(&self.node_registry),
+            credential_registry: Arc::clone(&self.credential_registry),
         }
     }
 }

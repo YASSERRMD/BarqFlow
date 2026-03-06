@@ -17,6 +17,7 @@ pub struct Claims {
     pub exp: usize,
 }
 
+#[derive(Debug)]
 pub struct AuthError;
 
 pub fn hash_password(password: &str) -> Result<String, AuthError> {

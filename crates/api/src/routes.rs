@@ -21,6 +21,7 @@ pub struct AppState {
     pub exec_repo: Arc<ExecutionRepository>,
     pub user_repo: Arc<UserRepo>,
     pub node_registry: Arc<barqflow_registry::registry::NodeRegistry>,
+    pub credential_registry: Arc<barqflow_registry::registry::CredentialRegistry>,
 }
 
 pub fn create_router(state: AppState) -> Router {
@@ -38,6 +39,7 @@ pub fn create_router(state: AppState) -> Router {
         }))
         .merge(credential_routes(CredState {
             credential_repo: Arc::clone(&state.credential_repo),
+            credential_registry: Arc::clone(&state.credential_registry),
         }));
 
     let webh_routes = webhook_routes(WebhookState {
