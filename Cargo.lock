@@ -351,6 +351,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "barqflow-polling"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "barqflow-core",
+ "tokio",
+ "tokio-cron-scheduler",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "barqflow-registry"
 version = "0.1.0"
 dependencies = [

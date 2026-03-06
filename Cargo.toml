@@ -9,7 +9,7 @@ members = [
     "crates/db",
     "crates/api",
     "crates/server",
-    "bin/barqflow",
+    "bin/barqflow", "crates/polling",
 ]
 
 [workspace.package]

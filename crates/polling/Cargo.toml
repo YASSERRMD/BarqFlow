@@ -1,0 +1,12 @@
+[package]
+name = "barqflow-polling"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+barqflow-core = { path = "../core" }
+tokio.workspace = true
+tokio-cron-scheduler.workspace = true
+tracing.workspace = true
+async-trait.workspace = true
+uuid.workspace = true

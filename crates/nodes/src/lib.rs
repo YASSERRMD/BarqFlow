@@ -109,6 +109,28 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
     });
 
     let _ = registry.register_node(NodeInfo {
+        name: "barqflow-nodes.webhook".into(),
+        display_name: "Webhook".into(),
+        version: 1.0,
+        description: "Triggered via webhook".into(),
+        properties: empty_props.clone(),
+        is_trigger: true,
+        max_inputs: 0,
+        node_impl: Arc::new(trigger::WebhookNode::new()),
+    });
+
+    let _ = registry.register_node(NodeInfo {
+        name: "barqflow-nodes.cronTrigger".into(),
+        display_name: "Cron Trigger".into(),
+        version: 1.0,
+        description: "Triggers on schedule".into(),
+        properties: empty_props.clone(),
+        is_trigger: true,
+        max_inputs: 0,
+        node_impl: Arc::new(trigger::CronTriggerNode::new("0 * * * *")),
+    });
+
+    let _ = registry.register_node(NodeInfo {
         name: "barqflow-nodes.executeWorkflow".into(),
         display_name: "Execute Workflow".into(),
         version: 1.0,
