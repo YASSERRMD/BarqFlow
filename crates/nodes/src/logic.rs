@@ -211,9 +211,13 @@ mod tests {
                     name: "Test Node".into(),
                     r#type: "test".into(),
                     type_version: 1.0,
-                    position: [0.0, 0.0],
-                    parameters: INodeParameters(std::collections::HashMap::new()),
+                    position: vec![0.0, 0.0],
+                    parameters: INodeParameters(serde_json::Map::new()),
+                    credentials: None,
                     disabled: false,
+                    notes: None,
+                    notes_in_flow: None,
+                    webhook_id: None,
                 },
             }
         }
