@@ -277,8 +277,32 @@ impl WorkflowRunner {
             workflow_cache,
         );
 
-        // Execute the node
-        let execute_result = node_info.node_impl.execute(&exec_context).await;
+        // Execute the node safely, catching any unexpected panics
+        use std::panic::AssertUnwindSafe;
+        use futures::FutureExt;
+        
+        // We use AssertUnwindSafe because we are just discarding the panic payload 
+        // and returning an error, so unwind safety is not strictly a concern for data structures here.
+        let execute_future = AssertUnwindSafe(node_info.node_impl.execute(&exec_context)).catch_unwind();
+        
+        let execute_result = match execute_future.await {
+            Ok(Ok(outputs)) => Ok(outputs),
+            Ok(Err(e)) => Err(e),
+            Err(panic_err) => {
+                let panic_msg = if let Some(s) = panic_err.downcast_ref::<&str>() {
+                    s.to_string()
+                } else if let Some(s) = panic_err.downcast_ref::<String>() {
+                    s.clone()
+                } else {
+                    "Unknown panic".to_string()
+                };
+                
+                Err(BarqError::NodeOperationError {
+                    node_name: node.name.clone(),
+                    message: format!("Node execution panicked: {}", panic_msg),
+                })
+            }
+        };
 
         match execute_result {
             Ok(outputs) => {

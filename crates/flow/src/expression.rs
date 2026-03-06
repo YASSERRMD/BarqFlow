@@ -428,4 +428,30 @@ mod tests {
             .unwrap()
             .contains("hello%20world"));
     }
+
+    #[test]
+    fn test_item_backward_traversal() {
+        let engine = ExpressionEngine::new().with_custom_functions();
+        
+        // Mock the global execution workflow cache with historical data
+        let mut workflow_cache = HashMap::new();
+        workflow_cache.insert(
+            "SetNode".to_string(),
+            vec![
+                serde_json::json!({"json": {"count": 99}}),
+            ]
+        );
+
+        let context = ExpressionContext {
+            json_data: serde_json::json!({}),
+            binary_keys: vec![],
+            parameters: HashMap::new(),
+            workflow_cache,
+        };
+
+        let result = engine.eval_with_context("$item(\"SetNode\").$json.count", &context);
+        
+        assert!(result.is_ok(), "Failed to evaluate expression: {:?}", result.err());
+        assert_eq!(result.unwrap().as_int().unwrap(), 99);
+    }
 }
