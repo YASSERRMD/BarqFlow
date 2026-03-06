@@ -30,3 +30,4 @@ reqwest.workspace = true
 
 [dev-dependencies]
 wiremock.workspace = true
+urlencoding = "2"
