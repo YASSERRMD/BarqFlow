@@ -43,6 +43,13 @@ pub enum BarqError {
         error_workflow_id: String,
         original_error: String,
     },
+
+    /// Special control-flow variant to indicate the Engine should pause the current node, execute a sub-workflow, and map the outputs back.
+    #[error("Calling sub-workflow '{workflow_id}'")]
+    ExecuteSubWorkflow {
+        workflow_id: String,
+        input_data: serde_json::Value,
+    },
 }
 
 #[cfg(test)]

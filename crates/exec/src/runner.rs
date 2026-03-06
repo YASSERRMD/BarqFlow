@@ -228,7 +228,7 @@ impl WorkflowRunner {
                 },
                 Err(e) => {
                     // Check if there's an error workflow defined for this workflow
-                    if let Some(error_workflow_id) = context.workflow.settings.as_ref().and_then(|s| s.error_workflow.clone()) {
+                    if let Some(error_workflow_id) = context.workflow.settings.error_workflow.clone() {
                         error!("Workflow failed, should trigger error workflow: {}", error_workflow_id);
                         return Err(BarqError::TriggerErrorWorkflow {
                             error_workflow_id,
@@ -370,9 +370,39 @@ impl WorkflowRunner {
                     }
                     return Ok(results);
                 },
+                Err(BarqError::ExecuteSubWorkflow { workflow_id, input_data }) => {
+                    info!("Execution suspended to call sub-workflow '{}'", workflow_id);
+                    
+                    let config = crate::checkpoint::WaitConfig {
+                        wait_type: crate::checkpoint::WaitType::SubWorkflow,
+                        duration_ms: None,
+                        webhook_path: None,
+                        external_id: Some(workflow_id.clone()),
+                    };
+                        
+                    let mut manager = crate::checkpoint::CheckpointManager::with_filesystem(
+                        std::env::temp_dir().join("barqflow_checkpoints")
+                    );
+                    
+                    use crate::checkpoint::ExecutionCheckpointBuilder;
+                    let checkpoint = ExecutionCheckpointBuilder::new()
+                        .with_run_id(context.run_id)
+                        .with_workflow_id(context.workflow.id.0.to_string())
+                        .with_node_index(node_index.index())
+                        .with_node_data(input_data)
+                        .with_wait_config(config)
+                        .build();
+                        
+                    if let Ok(cp) = checkpoint {
+                        let _ = manager.save_checkpoint(cp).await;
+                    }
+
+                    // Return the sub-workflow trigger so the host can process it
+                    return Err(BarqError::ExecuteSubWorkflow { workflow_id, input_data: serde_json::Value::Null });
+                },
                 Err(e) => {
                     // Check if there's an error workflow defined for this workflow
-                    if let Some(error_workflow_id) = context.workflow.settings.as_ref().and_then(|s| s.error_workflow.clone()) {
+                    if let Some(error_workflow_id) = context.workflow.settings.error_workflow.clone() {
                         error!("Workflow failed, should trigger error workflow: {}", error_workflow_id);
                         return Err(BarqError::TriggerErrorWorkflow {
                             error_workflow_id,

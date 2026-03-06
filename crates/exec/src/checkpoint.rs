@@ -58,6 +58,8 @@ pub enum WaitType {
     Webhook,
     /// Wait for external system callback
     External,
+    /// Wait for sub-workflow execution to complete
+    SubWorkflow,
 }
 
 /// Checkpoint storage backend.

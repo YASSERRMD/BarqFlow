@@ -5,6 +5,7 @@ pub mod logic;
 pub mod manipulation;
 pub mod sandbox;
 pub mod scheduler;
+pub mod subworkflow;
 pub mod trigger;
 pub mod wait;
 
@@ -105,5 +106,16 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
         is_trigger: true,
         max_inputs: 0,
         node_impl: Arc::new(trigger::ErrorTriggerNode),
+    });
+
+    let _ = registry.register_node(NodeInfo {
+        name: "barqflow-nodes.executeWorkflow".into(),
+        display_name: "Execute Workflow".into(),
+        version: 1.0,
+        description: "Execute another workflow".into(),
+        properties: empty_props.clone(),
+        is_trigger: false,
+        max_inputs: 1,
+        node_impl: Arc::new(subworkflow::ExecuteWorkflowNode),
     });
 }
