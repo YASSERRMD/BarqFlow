@@ -147,6 +147,8 @@ pub struct IWorkflowSettings {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub save_data_error_execution: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_workflow: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub save_execution_progress: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub save_manual_executions: Option<bool>,

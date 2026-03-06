@@ -226,7 +226,17 @@ impl WorkflowRunner {
                     // For now, break the loop and return what we have computed so far.
                     return Ok(results);
                 },
-                Err(e) => return Err(e),
+                Err(e) => {
+                    // Check if there's an error workflow defined for this workflow
+                    if let Some(error_workflow_id) = context.workflow.settings.as_ref().and_then(|s| s.error_workflow.clone()) {
+                        error!("Workflow failed, should trigger error workflow: {}", error_workflow_id);
+                        return Err(BarqError::TriggerErrorWorkflow {
+                            error_workflow_id,
+                            original_error: e.to_string(),
+                        });
+                    }
+                    return Err(e);
+                },
             };
 
             let node_id = node.id.clone();
@@ -360,7 +370,17 @@ impl WorkflowRunner {
                     }
                     return Ok(results);
                 },
-                Err(e) => return Err(e),
+                Err(e) => {
+                    // Check if there's an error workflow defined for this workflow
+                    if let Some(error_workflow_id) = context.workflow.settings.as_ref().and_then(|s| s.error_workflow.clone()) {
+                        error!("Workflow failed, should trigger error workflow: {}", error_workflow_id);
+                        return Err(BarqError::TriggerErrorWorkflow {
+                            error_workflow_id,
+                            original_error: e.to_string(),
+                        });
+                    }
+                    return Err(e);
+                },
             };
 
             data_cache.insert(node.id.clone(), result.clone());
@@ -520,7 +540,12 @@ impl WorkflowRunner {
             }
             Err(e) => {
                 error!("Node {} failed: {}", node.name, e);
-                if self.config.continue_on_fail {
+                
+                let node_continue_on_fail = inode.parameters.0.get("continueOnFail")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                    
+                if self.config.continue_on_fail || node_continue_on_fail {
                     Ok(NodeExecutionResult {
                         node_name: node.name.clone(),
                         outputs: vec![],

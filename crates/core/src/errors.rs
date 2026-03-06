@@ -36,6 +36,13 @@ pub enum BarqError {
         node_name: String,
         wait_config: serde_json::Value,
     },
+
+    /// Special control-flow variant to indicate the Engine should run an error workflow because this workflow failed.
+    #[error("Execution failed and triggered error workflow '{error_workflow_id}': {original_error}")]
+    TriggerErrorWorkflow {
+        error_workflow_id: String,
+        original_error: String,
+    },
 }
 
 #[cfg(test)]

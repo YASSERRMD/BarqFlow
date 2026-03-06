@@ -60,6 +60,43 @@ impl Default for WebhookNode {
     }
 }
 
+pub struct ErrorTriggerNode;#[async_trait]
+impl INodeType for ErrorTriggerNode {
+    fn get_description(&self) -> IDataObject {
+        IDataObject::from(serde_json::json!({
+            "name": "errorTrigger",
+            "displayName": "Error Trigger",
+            "description": "Triggers error workflow on failure"
+        }))
+    }
+
+    async fn execute(
+        &self,
+        context: &dyn IExecuteFunctions,
+    ) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
+        let error_msg = context
+            .get_node_parameter("errorMessage", None)
+            .await
+            .map(|v| v.as_str().unwrap_or("").to_string())
+            .unwrap_or_default();
+
+        let continue_on_fail = context
+            .get_node_parameter("continueOnFail", None)
+            .await
+            .map(|v| v.as_bool().unwrap_or(false))
+            .unwrap_or(false);
+
+        if !continue_on_fail && !error_msg.is_empty() {
+            return Err(BarqError::NodeOperationError {
+                node_name: "ErrorTrigger".to_string(),
+                message: error_msg,
+            });
+        }
+
+        Ok(vec![vec![]])
+    }
+}
+
 #[async_trait]
 impl INodeType for WebhookNode {
     fn get_description(&self) -> IDataObject {
