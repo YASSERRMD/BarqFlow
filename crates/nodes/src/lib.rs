@@ -6,6 +6,7 @@ pub mod manipulation;
 pub mod sandbox;
 pub mod scheduler;
 pub mod trigger;
+pub mod wait;
 
 pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) {
     use barqflow_registry::registry::NodeInfo;
@@ -82,5 +83,16 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
         is_trigger: true,
         max_inputs: 0,
         node_impl: Arc::new(crate::trigger::ManualTriggerNode),
+    });
+
+    let _ = registry.register_node(NodeInfo {
+        name: "barqflow-nodes.wait".into(),
+        display_name: "Wait".into(),
+        version: 1.0,
+        description: "Suspend execution for a time or webhook".into(),
+        properties: empty_props.clone(),
+        is_trigger: false,
+        max_inputs: 1,
+        node_impl: Arc::new(wait::WaitNode),
     });
 }
