@@ -396,6 +396,7 @@ mod tests {
         let props = ICredentialProperties {
             name: "githubOAuth2Api".to_string(),
             display_name: "GitHub OAuth2 API".to_string(),
+            notice: None,
             properties: CredentialStandardForms::oauth2_properties(),
             documentation_url: Some("https://docs.github.com/en/rest".to_string()),
             authenticate: Some(auth),

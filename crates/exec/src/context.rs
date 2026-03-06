@@ -227,15 +227,15 @@ impl IExecuteFunctions for NodeExecutionContext {
         let mut creds = HashMap::new();
         creds.insert(
             "apiKey".to_string(),
-            GenericValue(serde_json::json!("mock-api-key-12345")),
+            GenericValue::from(serde_json::json!("mock-api-key-12345")),
         );
         creds.insert(
             "username".to_string(),
-            GenericValue(serde_json::json!("mock_user")),
+            GenericValue::from(serde_json::json!("mock_user")),
         );
         creds.insert(
             "password".to_string(),
-            GenericValue(serde_json::json!("mock_password")),
+            GenericValue::from(serde_json::json!("mock_password")),
         );
         
         self.log(&format!("Retrieved mock credential lookup for: {}", name));
