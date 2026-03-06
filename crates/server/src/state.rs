@@ -9,6 +9,8 @@ use std::sync::Arc;
 use barqflow_registry::registry::NodeRegistry;
 use barqflow_registry::registry::CredentialRegistry;
 use barqflow_api::controllers::webhooks::{WebhookRegistry, new_webhook_registry};
+use tokio_cron_scheduler::JobScheduler;
+use barqflow_api::routes::ActiveExecutionManager;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -21,17 +23,23 @@ pub struct AppState {
     pub node_registry: Arc<NodeRegistry>,
     pub credential_registry: Arc<CredentialRegistry>,
     pub webhook_registry: WebhookRegistry,
+    pub job_scheduler: JobScheduler,
+    pub active_executions: ActiveExecutionManager,
 }
 
 impl AppState {
-    pub fn new(pool: PgPool) -> Self {
+    pub async fn new(pool: PgPool) -> anyhow::Result<Self> {
         let node_registry = Arc::new(NodeRegistry::new());
         barqflow_nodes::register_all_nodes(&node_registry);
         
         // Setup Credential Registry
         let credential_registry = Arc::new(CredentialRegistry::new());
 
-        Self {
+        // Setup Scheduler and active execution map
+        let job_scheduler = JobScheduler::new().await?;
+        let active_executions = Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+
+        Ok(Self {
             db_pool: pool.clone(),
             workflow_repo: Arc::new(WorkflowRepository::new(pool.clone())),
             execution_repo: Arc::new(ExecutionRepository::new(pool.clone())),
@@ -41,7 +49,9 @@ impl AppState {
             node_registry,
             credential_registry,
             webhook_registry: new_webhook_registry(),
-        }
+            job_scheduler,
+            active_executions,
+        })
     }
 
     pub fn into_api_state(&self) -> ApiState {
@@ -53,6 +63,8 @@ impl AppState {
             node_registry: Arc::clone(&self.node_registry),
             credential_registry: Arc::clone(&self.credential_registry),
             webhook_registry: Arc::clone(&self.webhook_registry),
+            job_scheduler: self.job_scheduler.clone(),
+            active_executions: Arc::clone(&self.active_executions),
         }
     }
 }

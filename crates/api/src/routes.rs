@@ -4,6 +4,10 @@ use crate::repositories::{
     credential::CredentialRepository, execution::ExecutionRepository, workflow::WorkflowRepository,
 };
 use std::sync::Arc;
+use tokio_cron_scheduler::JobScheduler;
+use std::collections::HashMap;
+
+pub type ActiveExecutionManager = Arc<std::sync::RwLock<HashMap<String, String>>>;
 use tower_http::services::{ServeDir, ServeFile};
 
 use crate::controllers::{
@@ -24,6 +28,8 @@ pub struct AppState {
     pub node_registry: Arc<barqflow_registry::registry::NodeRegistry>,
     pub credential_registry: Arc<barqflow_registry::registry::CredentialRegistry>,
     pub webhook_registry: WebhookRegistry,
+    pub job_scheduler: JobScheduler,
+    pub active_executions: ActiveExecutionManager,
 }
 
 pub fn create_router(state: AppState) -> Router {

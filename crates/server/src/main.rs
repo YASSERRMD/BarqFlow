@@ -39,7 +39,7 @@ async fn main() {
     info!("Database Migrations successfully completed.");
 
     // 3. Construct Global State
-    let app_state = AppState::new(pool);
+    let app_state = AppState::new(pool).await.expect("Failed to create AppState");
 
     // 4. Run Active Boot Sequence
     if let Err(e) = run_boot_sequence(&app_state).await {

@@ -8,6 +8,7 @@ barqflow-core.workspace = true
 barqflow-db.workspace = true
 barqflow-exec.workspace = true
 barqflow-registry.workspace = true
+tokio-cron-scheduler.workspace = true
 barqflow-nodes.workspace = true
 axum.workspace = true
 tokio.workspace = true
