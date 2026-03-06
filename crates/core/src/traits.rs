@@ -14,6 +14,14 @@ pub trait IExecuteFunctions: Send + Sync {
         fallback_value: Option<crate::types::GenericValue>,
     ) -> Result<crate::types::GenericValue, BarqError>;
 
+    /// Retrieve a parameter value evaluated against a specific item index.
+    async fn get_node_parameter_at_item(
+        &self,
+        parameter_name: &str,
+        item_index: usize,
+        fallback_value: Option<crate::types::GenericValue>,
+    ) -> Result<crate::types::GenericValue, BarqError>;
+
     /// Get references to the Node itself
     fn get_node(&self) -> &INode;
 

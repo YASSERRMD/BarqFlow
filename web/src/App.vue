@@ -22,12 +22,17 @@ const navItems = [
 <template>
   <div class="flex h-screen w-full bg-canvas text-slate-800 font-sans overflow-hidden">
     
-    <!-- Sidebar -->
-    <aside class="w-16 md:w-64 bg-white border-r border-slate-200 flex flex-col justify-between transition-all duration-300 z-50 shadow-sm relative">
+    <!-- Sidebar (Hidden on Login) -->
+    <aside 
+      v-if="route.path !== '/login'"
+      class="w-16 md:w-64 bg-white border-r border-slate-200 flex flex-col justify-between transition-all duration-300 z-50 shadow-sm relative"
+    >
       <div>
-        <div class="h-16 flex items-center justify-center md:justify-start px-0 md:px-6 border-b border-slate-100 mb-4">
-          <img src="/logo.png" alt="Logo" class="w-8 h-8 md:w-10 md:h-10" />
-          <span class="hidden md:ml-3 md:block text-xl font-bold bg-gradient-to-r from-brand-600 to-purple-600 bg-clip-text text-transparent tracking-tight">BarqFlow</span>
+        <div class="h-20 flex items-center justify-center md:justify-start px-0 md:px-7 border-b border-slate-100 mb-4">
+          <div class="w-10 h-10 bg-brand-50 rounded-xl flex items-center justify-center">
+            <img src="/logo.png" alt="Logo" class="w-7 h-7" />
+          </div>
+          <span class="hidden md:ml-3 md:block text-2xl font-black text-slate-900 tracking-tighter uppercase italic">Barq<span class="text-brand-500">Flow</span></span>
         </div>
 
         <nav class="flex-1 px-2 space-y-1 mt-4">
@@ -59,11 +64,16 @@ const navItems = [
 
     <!-- Main Content -->
     <main class="flex-1 flex flex-col min-w-0 bg-canvas overflow-hidden">
-      <!-- Top header for mobile / responsive -->
-      <header class="h-14 bg-white border-b border-slate-200 flex items-center justify-between px-4 md:hidden shadow-sm z-40">
+      <!-- Top header for mobile / responsive (Hidden on Login) -->
+      <header 
+        v-if="route.path !== '/login'"
+        class="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 md:hidden shadow-sm z-40"
+      >
+        <div class="flex items-center gap-3">
+          <img src="/logo.png" alt="Logo" class="w-7 h-7" />
+          <span class="font-black text-slate-900 tracking-tighter uppercase italic text-sm">Barq<span class="text-brand-500">Flow</span></span>
+        </div>
         <Menu class="w-6 h-6 text-slate-600" />
-        <span class="font-bold text-slate-800">BarqFlow</span>
-        <div class="w-6"></div>
       </header>
 
       <!-- Router View Container -->
