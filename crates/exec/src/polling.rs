@@ -198,7 +198,7 @@ mod tests {
     use super::*;
     use barqflow_core::schema::{INode, INodeParameters, WorkflowDef};
     use barqflow_core::types::{NodeId, WorkflowId};
-    use barqflow_registry::node_properties::INodeProperties;
+    use barqflow_core::properties::INodeProperties;
     use barqflow_registry::registry::NodeInfo;
     use serde_json::json;
     use std::sync::atomic::{AtomicUsize, Ordering};
