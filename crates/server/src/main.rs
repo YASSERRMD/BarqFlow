@@ -5,7 +5,7 @@ use boot::run_boot_sequence;
 use state::AppState;
 
 use dotenvy::dotenv;
-use sqlx::postgres::PgPoolOptions;
+
 use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -25,15 +25,17 @@ async fn main() {
 
     // 2. Initialize Database Pool
     let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-    let pool = PgPoolOptions::new()
-        .max_connections(50) // Scale as needed
-        .connect(&db_url)
+    let pool = barqflow_api::db::init_pool(&db_url)
         .await
         .expect("Failed to connect to PostgreSQL");
 
     info!("Connected to PostgreSQL Database.");
 
-    // Run Migrations (Optional Phase 35 behavior implicitly)
+    // Run Migrations
+    barqflow_api::db::run_migrations(&pool)
+        .await
+        .expect("Database Migrations failed");
+    
     info!("Database Migrations successfully completed.");
 
     // 3. Construct Global State
