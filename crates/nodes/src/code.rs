@@ -263,4 +263,27 @@ mod tests {
             _ => panic!("Expected NodeOperationError"),
         }
     }
+
+    #[tokio::test]
+    async fn test_sandbox_os_prevention() {
+        let node = CodeNode::new();
+
+        // Attempt to execute an OS command or access File system through typical Rhai/Rust bindings when not registered
+        let ctx = MockCodeContext {
+            code: r#"
+                let f = open("test.txt");
+            "#.to_string(),
+            inputs: vec![],
+        };
+
+        let err = node.execute(&ctx).await.unwrap_err();
+        match err {
+            BarqError::NodeOperationError { message, .. } => {
+                assert!(message.contains("Rhai execution error"));
+                // Must complain about 'open' being an unknown function since no OS package is mounted
+                assert!(message.contains("Function not found: open"));
+            }
+            _ => panic!("Expected NodeOperationError"),
+        }
+    }
 }
