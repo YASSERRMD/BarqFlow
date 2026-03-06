@@ -1,5 +1,6 @@
 use anyhow::Result;
 use barqflow_api::{create_router, AppState};
+use barqflow_api::controllers::webhooks::new_webhook_registry;
 use barqflow_db::pool::init_db_pool;
 use barqflow_db::users::UserRepo;
 use barqflow_api::repositories::{
@@ -35,6 +36,7 @@ pub async fn run_server(db_url: &str, port: u16) -> Result<()> {
         user_repo: Arc::new(UserRepo::new(pool)),
         node_registry,
         credential_registry,
+        webhook_registry: new_webhook_registry(),
     };
 
     // Create router
