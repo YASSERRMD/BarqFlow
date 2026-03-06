@@ -297,6 +297,42 @@ impl barqflow_core::traits::IPollFunctions for PollExecutionContext {
 
         Ok(())
     }
+
+    async fn get_node_parameter(
+        &self,
+        parameter_name: &str,
+        fallback_value: Option<GenericValue>,
+    ) -> Result<GenericValue, BarqError> {
+        let raw_value = self
+            .node
+            .parameters
+            .0
+            .get(parameter_name)
+            .or(fallback_value.as_ref())
+            .ok_or_else(|| BarqError::NodeOperationError {
+                node_name: self.node.name.clone(),
+                message: format!("Required parameter '{}' not found", parameter_name),
+            })?;
+        Ok(raw_value.clone())
+    }
+
+    fn get_node(&self) -> &INode {
+        &self.node
+    }
+
+    async fn get_credentials(&self, _name: &str) -> Result<HashMap<String, GenericValue>, BarqError> {
+        Ok(HashMap::new())
+    }
+
+    fn log(&self, message: &str) {
+        let _span_guard = span!(
+            Level::DEBUG,
+            "poll_execution",
+            node_id = %self.node.id,
+            node_name = %self.node.name
+        );
+        debug!("{}", message);
+    }
 }
 
 /// Builder for creating NodeExecutionContext instances.

@@ -42,6 +42,22 @@ pub trait IPollFunctions: Send + Sync {
 
     /// Write static data to persist to the next poll interval
     async fn set_poll_data(&self, data: crate::types::IDataObject) -> Result<(), BarqError>;
+
+    /// Retrieve a parameter value configured physically on the node instance
+    async fn get_node_parameter(
+        &self,
+        parameter_name: &str,
+        fallback_value: Option<crate::types::GenericValue>,
+    ) -> Result<crate::types::GenericValue, BarqError>;
+
+    /// Get references to the Node itself
+    fn get_node(&self) -> &INode;
+
+    /// Extract decrypted credentials supplied by the user configuration for this node
+    async fn get_credentials(&self, name: &str) -> Result<HashMap<String, crate::types::GenericValue>, BarqError>;
+
+    /// Logs a debug message scoped strictly to this node execution span
+    fn log(&self, message: &str);
 }
 
 /// The core trait defining a Node's logic, mirroring INodeType in n8n.
