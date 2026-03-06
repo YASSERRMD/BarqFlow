@@ -1,19 +1,23 @@
 use crate::auth::Claims;
 use axum::http::StatusCode;
 use axum::{
-    extract::{Json, Path, State},
+    extract::{Path, State},
+    response::IntoResponse,
     routing::{get, post},
+    Json,
     Router,
 };
-use barqflow_db::executions::ExecutionRepo;
+use crate::repositories::execution::ExecutionRepository;
+use crate::repositories::workflow::WorkflowRepository;
 use barqflow_db::models::ExecutionEntity;
 use serde::Deserialize;
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub execution_repo: std::sync::Arc<ExecutionRepo>,
-    pub workflow_repo: std::sync::Arc<barqflow_db::workflows::WorkflowRepo>,
-    pub node_registry: std::sync::Arc<barqflow_registry::registry::NodeRegistry>,
+    pub execution_repo: Arc<ExecutionRepository>,
+    pub workflow_repo: Arc<WorkflowRepository>,
+    pub node_registry: Arc<barqflow_registry::registry::NodeRegistry>,
 }
 
 pub fn execution_routes(state: AppState) -> Router {
@@ -35,7 +39,7 @@ async fn get_execution(
 ) -> Result<Json<ExecutionEntity>, (StatusCode, String)> {
     let exec = state
         .execution_repo
-        .get_by_id(id)
+        .find_by_id(id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Execution not found".into()))?;
@@ -55,7 +59,7 @@ async fn execute_workflow(
     // 1. Fetch workflow
     let wf_entity = state
         .workflow_repo
-        .get_by_id(workflow_id)
+        .find_by_id(workflow_id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Workflow not found".into()))?;

@@ -6,12 +6,12 @@ use axum::{
     routing::any,
     Router,
 };
-use barqflow_db::workflows::WorkflowRepo;
+use crate::repositories::workflow::WorkflowRepository;
 use serde_json::json;
 
 #[derive(Clone)]
 pub struct WebhookState {
-    pub workflow_repo: std::sync::Arc<WorkflowRepo>,
+    pub workflow_repo: std::sync::Arc<WorkflowRepository>,
 }
 
 pub fn webhook_routes(state: WebhookState) -> Router {

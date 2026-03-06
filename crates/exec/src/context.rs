@@ -259,43 +259,26 @@ impl IExecuteFunctions for NodeExecutionContext {
 pub struct PollExecutionContext {
     /// The trigger node being polled
     node: INode,
+    workflow_id: uuid::Uuid,
     /// Shared static data map for the workflow
-    static_data: Arc<RwLock<Option<IDataObject>>>,
+    static_repo: Arc<dyn barqflow_core::traits::IStaticDataStorage>,
 }
 
 impl PollExecutionContext {
-    pub fn new(node: INode, static_data: Arc<RwLock<Option<IDataObject>>>) -> Self {
-        Self { node, static_data }
+    pub fn new(node: INode, workflow_id: uuid::Uuid, static_repo: Arc<dyn barqflow_core::traits::IStaticDataStorage>) -> Self {
+        Self { node, workflow_id, static_repo }
     }
 }
 
 #[async_trait]
 impl barqflow_core::traits::IPollFunctions for PollExecutionContext {
     async fn get_poll_data(&self) -> Result<IDataObject, BarqError> {
-        let guard = self.static_data.read().await;
-        if let Some(data) = &*guard {
-            if let Some(poll_data) = data.0.get(&self.node.id.to_string()) {
-                if let Some(obj) = poll_data.as_object() {
-                    return Ok(IDataObject(obj.clone()));
-                }
-            }
-        }
-        Ok(IDataObject::default())
+        let opt = self.static_repo.get(self.node.id.to_string(), self.workflow_id).await?;
+        Ok(opt.unwrap_or_default())
     }
 
     async fn set_poll_data(&self, data: IDataObject) -> Result<(), BarqError> {
-        let mut guard = self.static_data.write().await;
-        if guard.is_none() {
-            *guard = Some(IDataObject::default());
-        }
-
-        if let Some(static_map) = guard.as_mut() {
-            static_map
-                .0
-                .insert(self.node.id.to_string(), serde_json::Value::Object(data.0));
-        }
-
-        Ok(())
+        self.static_repo.upsert(self.node.id.to_string(), self.workflow_id, data).await
     }
 }
 

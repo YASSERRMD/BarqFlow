@@ -25,3 +25,4 @@ tower-http = { workspace = true, features = ["fs"] }
 chrono.workspace = true
 aes-gcm.workspace = true
 base64 = "0.22.1"
+async-trait.workspace = true
