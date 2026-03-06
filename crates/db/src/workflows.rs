@@ -18,7 +18,7 @@ impl WorkflowRepo {
             SELECT id, name, active, nodes, connections, settings, created_at, updated_at
             FROM workflows
             ORDER BY created_at DESC
-            "#
+            "#,
         )
         .fetch_all(&self.pool)
         .await
@@ -30,7 +30,7 @@ impl WorkflowRepo {
             SELECT id, name, active, nodes, connections, settings, created_at, updated_at
             FROM workflows
             WHERE id = $1
-            "#
+            "#,
         )
         .bind(id)
         .fetch_optional(&self.pool)
@@ -46,7 +46,7 @@ impl WorkflowRepo {
     ) -> Result<WorkflowEntity> {
         let id = Uuid::new_v4();
         let now = Utc::now();
-        
+
         sqlx::query_as::<_, WorkflowEntity>(
             r#"
             INSERT INTO workflows (id, name, active, nodes, connections, settings, created_at, updated_at)
@@ -74,7 +74,7 @@ impl WorkflowRepo {
             SET active = $1, updated_at = $2
             WHERE id = $3
             RETURNING id, name, active, nodes, connections, settings, created_at, updated_at
-            "#
+            "#,
         )
         .bind(active)
         .bind(now)
@@ -88,7 +88,7 @@ impl WorkflowRepo {
             r#"
             DELETE FROM workflows
             WHERE id = $1
-            "#
+            "#,
         )
         .bind(id)
         .execute(&self.pool)

@@ -3,13 +3,10 @@
 //! Thread-safe registry for managing node types with versioning support.
 
 use barqflow_core::properties::INodeProperties;
+use barqflow_core::traits::ICredentialType;
 use barqflow_core::traits::INodeType;
-use barqflow_core::types::IDataObject;
-use barqflow_core::errors::BarqError;
-use serde_json::json;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use barqflow_core::traits::ICredentialType;
 
 /// Information about a registered Credential type
 #[derive(Clone)]
@@ -44,6 +41,19 @@ impl CredentialRegistry {
     pub fn get_credential(&self, name: &str) -> Option<CredentialInfo> {
         let creds = self.credentials.read().ok()?;
         creds.get(name).cloned()
+    }
+
+    /// Retrieves the test rules for a given credential type if available
+    pub fn test_credential_rules(
+        &self,
+        name: &str,
+    ) -> Result<Option<barqflow_core::traits::ICredentialTestRequest>, String> {
+        let creds = self.credentials.read().map_err(|e| e.to_string())?;
+        if let Some(info) = creds.get(name) {
+            Ok(info.cred_impl.test_request())
+        } else {
+            Err(format!("Credential '{}' not found", name))
+        }
     }
 }
 
@@ -132,7 +142,10 @@ impl NodeRegistry {
                 .or_insert_with(Vec::new);
 
             // Check for duplicate version
-            if entries.iter().any(|e| (e.version - info.version).abs() < f32::EPSILON) {
+            if entries
+                .iter()
+                .any(|e| (e.version - info.version).abs() < f32::EPSILON)
+            {
                 return Err(format!(
                     "Node '{}' version {} is already registered",
                     info.name, info.version
@@ -210,9 +223,11 @@ impl NodeRegistry {
         let entries = version_index.get(name)?;
 
         // Find the highest version
-        let latest_entry = entries
-            .iter()
-            .max_by(|a, b| a.version.partial_cmp(&b.version).unwrap_or(std::cmp::Ordering::Equal))?;
+        let latest_entry = entries.iter().max_by(|a, b| {
+            a.version
+                .partial_cmp(&b.version)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })?;
 
         let nodes = self.nodes.read().ok()?;
         nodes.get(&latest_entry.key).cloned()
@@ -262,8 +277,11 @@ impl Default for NodeRegistry {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use barqflow_core::traits::IExecuteFunctions;
+    use barqflow_core::errors::BarqError;
     use barqflow_core::properties::{INodeProperty, NodePropertyType};
+    use barqflow_core::traits::IExecuteFunctions;
+    use barqflow_core::types::IDataObject;
+    use serde_json::json;
 
     // Mock node implementation for testing
     struct MockNode;
@@ -282,7 +300,9 @@ mod tests {
             &self,
             _context: &dyn IExecuteFunctions,
         ) -> Result<Vec<Vec<barqflow_core::schema::INodeExecutionData>>, BarqError> {
-            Ok(vec![vec![barqflow_core::schema::INodeExecutionData::new(IDataObject::new())]])
+            Ok(vec![vec![barqflow_core::schema::INodeExecutionData::new(
+                IDataObject::new(),
+            )]])
         }
     }
 
@@ -423,5 +443,47 @@ mod tests {
         assert!(names.contains(&"httpRequest".to_string()));
         assert!(names.contains(&"webhook".to_string()));
         assert!(names.contains(&"code".to_string()));
+    }
+
+    struct MockCredential {
+        name: String,
+    }
+
+    #[async_trait]
+    impl ICredentialType for MockCredential {
+        fn get_description(&self) -> IDataObject {
+            IDataObject::from(json!({ "name": self.name }))
+        }
+
+        fn test_request(&self) -> Option<barqflow_core::traits::ICredentialTestRequest> {
+            Some(barqflow_core::traits::ICredentialTestRequest {
+                method: "GET".to_string(),
+                url: "https://api.example.com/me".to_string(),
+                expected_status: vec![200],
+            })
+        }
+    }
+
+    #[test]
+    fn test_credential_validation_rules() {
+        let registry = CredentialRegistry::new();
+        let cred_impl = Arc::new(MockCredential {
+            name: "testAuth".to_string(),
+        });
+
+        registry
+            .register_credential(CredentialInfo {
+                name: "testAuth".to_string(),
+                cred_impl,
+            })
+            .unwrap();
+
+        let rules = registry.test_credential_rules("testAuth").unwrap().unwrap();
+        assert_eq!(rules.method, "GET");
+        assert_eq!(rules.url, "https://api.example.com/me");
+        assert_eq!(rules.expected_status, vec![200]);
+
+        let missing = registry.test_credential_rules("doesNotExist");
+        assert!(missing.is_err());
     }
 }

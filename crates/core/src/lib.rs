@@ -1,6 +1,6 @@
-pub mod types;
-pub mod schema;
-pub mod errors;
-pub mod traits;
 pub mod credentials;
+pub mod errors;
 pub mod properties;
+pub mod schema;
+pub mod traits;
+pub mod types;

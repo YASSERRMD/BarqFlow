@@ -38,7 +38,7 @@ pub struct WorkflowDef {
     pub id: String,
     pub name: String,
     pub nodes: Vec<WorkflowNode>,
-    pub connections: INodeConnections,
+    pub connections: HashMap<String, INodeConnections>,
     pub settings: Option<IWorkflowSettings>,
     pub static_data: Option<serde_json::Value>,
     pub pin_data: Option<bool>,
@@ -51,7 +51,7 @@ impl Default for WorkflowDef {
             id: String::new(),
             name: String::new(),
             nodes: Vec::new(),
-            connections: INodeConnections(HashMap::new()),
+            connections: HashMap::new(),
             settings: Some(IWorkflowSettings::default()),
             static_data: None,
             pin_data: None,
@@ -64,12 +64,16 @@ impl Default for WorkflowDef {
 pub struct GraphEdge {
     pub source: NodeIndex,
     pub target: NodeIndex,
+    pub source_output_index: usize,
+    pub target_input_index: usize,
 }
 
 #[derive(Debug)]
 pub struct ParsedGraph {
     pub graph: DiGraph<WorkflowNode, GraphEdge>,
     pub node_indices: HashMap<NodeId, NodeIndex>,
+    pub reverse_indices: HashMap<NodeIndex, NodeId>,
+    pub name_to_index: HashMap<String, NodeIndex>,
 }
 
 pub struct WorkflowToGraphParser;
@@ -78,27 +82,30 @@ impl WorkflowToGraphParser {
     pub fn parse(workflow: &WorkflowDef) -> Result<ParsedGraph, String> {
         let mut graph = DiGraph::new();
         let mut node_indices = HashMap::new();
+        let mut reverse_indices = HashMap::new();
+        let mut name_to_index = HashMap::new();
 
         for node in &workflow.nodes {
             let index = graph.add_node(node.clone());
             node_indices.insert(node.id.clone(), index);
+            reverse_indices.insert(index, node.id.clone());
+            name_to_index.insert(node.name.clone(), index);
         }
 
-        for (_, output_indices) in &workflow.connections.0 {
-            for outputs in output_indices {
-                for output in outputs {
-                    let target_node_id = NodeId::new(output.node.clone());
-                    if let Some(&target_index) = node_indices.get(&target_node_id) {
-                        for (_, source_index) in &node_indices {
-                            let has_edge = graph
-                                .edges(*source_index)
-                                .any(|e| e.target() == target_index);
-                            if !has_edge {
+        for (source_node_name, node_connections) in &workflow.connections {
+            if let Some(&source_index) = name_to_index.get(source_node_name) {
+                // node_connections is INodeConnections(HashMap<NodeConnectionType, Vec<Vec<IConnection>>>)
+                for output_arrays in node_connections.0.values() {
+                    for (output_index, connections) in output_arrays.iter().enumerate() {
+                        for connection in connections {
+                            if let Some(&target_index) = name_to_index.get(&connection.node) {
                                 let edge = GraphEdge {
-                                    source: *source_index,
+                                    source: source_index,
                                     target: target_index,
+                                    source_output_index: output_index,
+                                    target_input_index: connection.index,
                                 };
-                                graph.add_edge(*source_index, target_index, edge);
+                                graph.add_edge(source_index, target_index, edge);
                             }
                         }
                     }
@@ -109,6 +116,8 @@ impl WorkflowToGraphParser {
         Ok(ParsedGraph {
             graph,
             node_indices,
+            reverse_indices,
+            name_to_index,
         })
     }
 
@@ -200,6 +209,52 @@ impl GraphTraversal {
 
         descendants
     }
+
+    pub fn find_all_paths(
+        graph: &DiGraph<WorkflowNode, GraphEdge>,
+        from: NodeIndex,
+        to: NodeIndex,
+    ) -> Vec<Vec<NodeIndex>> {
+        let mut all_paths = Vec::new();
+        let mut current_path = vec![from];
+        let mut visited = HashSet::new();
+        visited.insert(from);
+
+        Self::dfs_find_paths(
+            graph,
+            from,
+            to,
+            &mut current_path,
+            &mut visited,
+            &mut all_paths,
+        );
+
+        all_paths
+    }
+
+    fn dfs_find_paths(
+        graph: &DiGraph<WorkflowNode, GraphEdge>,
+        current: NodeIndex,
+        target: NodeIndex,
+        path: &mut Vec<NodeIndex>,
+        visited: &mut HashSet<NodeIndex>,
+        all_paths: &mut Vec<Vec<NodeIndex>>,
+    ) {
+        if current == target {
+            all_paths.push(path.clone());
+            return;
+        }
+
+        for child in Self::get_children(graph, current) {
+            if !visited.contains(&child) {
+                visited.insert(child);
+                path.push(child);
+                Self::dfs_find_paths(graph, child, target, path, visited, all_paths);
+                path.pop();
+                visited.remove(&child);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -228,7 +283,7 @@ mod tests {
                 create_test_node("Process", "Process", "set"),
                 create_test_node("End", "End", "noop"),
             ],
-            connections: INodeConnections(HashMap::new()),
+            connections: HashMap::new(),
             settings: None,
             static_data: None,
             pin_data: None,
@@ -271,7 +326,7 @@ mod tests {
                 create_test_node("B", "B", "set"),
                 create_test_node("C", "C", "set"),
             ],
-            connections: INodeConnections(HashMap::new()),
+            connections: HashMap::new(),
             settings: None,
             static_data: None,
             pin_data: None,
@@ -292,7 +347,7 @@ mod tests {
                 create_test_node("Process", "Process", "set"),
                 create_test_node("End", "End", "noop"),
             ],
-            connections: INodeConnections(HashMap::new()),
+            connections: HashMap::new(),
             settings: None,
             static_data: None,
             pin_data: None,
@@ -314,7 +369,7 @@ mod tests {
                 create_test_node("Webhook", "Webhook", "webhookTrigger"),
                 create_test_node("Process", "Process", "set"),
             ],
-            connections: INodeConnections(HashMap::new()),
+            connections: HashMap::new(),
             settings: None,
             static_data: None,
             pin_data: None,
@@ -324,5 +379,31 @@ mod tests {
         let parsed = WorkflowToGraphParser::parse(&workflow).unwrap();
         let triggers = GraphTraversal::get_trigger_nodes(&parsed.graph);
         assert_eq!(triggers.len(), 2);
+    }
+
+    #[test]
+    fn test_get_parents_and_children() {
+        let workflow = WorkflowDef {
+            id: "test-parents".to_string(),
+            name: "Parents Test".to_string(),
+            nodes: vec![
+                create_test_node("A", "A", "manualTrigger"),
+                create_test_node("B", "B", "set"),
+                create_test_node("C", "C", "set"),
+            ],
+            connections: HashMap::new(),
+            settings: None,
+            static_data: None,
+            pin_data: None,
+            version_id: None,
+        };
+
+        let parsed = WorkflowToGraphParser::parse(&workflow).unwrap();
+
+        if let Some(b_idx) = parsed.node_indices.get(&NodeId::new("B")) {
+            let parents = GraphTraversal::get_parents(&parsed.graph, *b_idx);
+            let children = GraphTraversal::get_children(&parsed.graph, *b_idx);
+            println!("Parents of B: {:?}, Children of B: {:?}", parents, children);
+        }
     }
 }

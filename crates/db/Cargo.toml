@@ -11,3 +11,6 @@ serde_json.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 thiserror.workspace = true
+aes-gcm.workspace = true
+rand = "0.10.0"
+base64 = "0.22.1"

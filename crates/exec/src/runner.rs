@@ -3,18 +3,17 @@
 //! Implements the core execution engine that walks the workflow graph
 //! and executes nodes in topological order.
 
-use async_trait::async_trait;
 use barqflow_core::errors::BarqError;
-use barqflow_core::schema::{INode, INodeExecutionData, ITaskDataConnections, WorkflowDef as CoreWorkflowDef};
-use barqflow_core::traits::IExecuteFunctions;
-use barqflow_core::types::{GenericValue, IDataObject, NodeId, RunId, WorkflowId};
+use barqflow_core::schema::{
+    INodeExecutionData, ITaskDataConnections, WorkflowDef as CoreWorkflowDef,
+};
+use barqflow_core::types::{IDataObject, NodeId, RunId};
 use barqflow_flow::graph::{GraphTraversal, ParsedGraph, WorkflowDef, WorkflowNode};
 use barqflow_registry::registry::NodeRegistry;
 use petgraph::graph::NodeIndex;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, error, info, instrument};
 
 /// Configuration for workflow execution.
 #[derive(Debug, Clone)]
@@ -146,10 +145,21 @@ impl WorkflowRunner {
                 .gather_input_data(&parsed, node_index, &data_cache)
                 .await?;
 
+            // Build workflow_cache for this node execution
+            let mut workflow_cache_map = HashMap::new();
+            for (_, res) in &data_cache {
+                if let Some(first_output) = res.outputs.first() {
+                    let json_items: Vec<serde_json::Value> = first_output
+                        .iter()
+                        .map(|item| serde_json::Value::Object(item.json.0.clone()))
+                        .collect();
+                    workflow_cache_map.insert(res.node_name.clone(), json_items);
+                }
+            }
+            let workflow_cache = Arc::new(workflow_cache_map);
+
             // Execute the node
-            let result = self
-                .run_node(&context, node, input_data, &parsed)
-                .await?;
+            let result = self.run_node(&context, node, input_data, &parsed, workflow_cache).await?;
 
             let node_id = node.id.clone();
             let node_name = node.name.clone();
@@ -169,14 +179,10 @@ impl WorkflowRunner {
             .map(|n| WorkflowNode::from(n.clone()))
             .collect();
 
-        let connections = workflow
-            .connections
-            .values()
-            .next()
-            .cloned()
-            .unwrap_or_else(|| barqflow_core::schema::INodeConnections(
-                std::collections::HashMap::new()
-            ));
+        let connections: std::collections::HashMap<
+            String,
+            barqflow_core::schema::INodeConnections,
+        > = std::collections::HashMap::new();
 
         WorkflowDef {
             id: workflow.id.0.to_string(),
@@ -197,19 +203,23 @@ impl WorkflowRunner {
         node_index: NodeIndex,
         data_cache: &HashMap<NodeId, NodeExecutionResult>,
     ) -> Result<ITaskDataConnections, BarqError> {
+        use petgraph::visit::EdgeRef;
         let mut input_data = ITaskDataConnections::new();
 
-        // Get all parent nodes (predecessors)
-        let parents = GraphTraversal::get_parents(&parsed.graph, node_index);
+        // Get all incoming edges to this node
+        let edges = parsed
+            .graph
+            .edges_directed(node_index, petgraph::Direction::Incoming);
 
-        for (input_index, parent_idx) in parents.iter().enumerate() {
-            let parent_node = &parsed.graph[*parent_idx];
+        for edge in edges {
+            let parent_node = &parsed.graph[edge.source()];
+            let out_idx = edge.weight().source_output_index;
+            let in_idx = edge.weight().target_input_index;
 
             if let Some(parent_result) = data_cache.get(&parent_node.id) {
-                // For now, we take output index 0 and map to sequential input indices
-                // A real implementation would need to handle connection routing properly
-                if let Some(output_data) = parent_result.outputs.get(0) {
-                    input_data.push(input_index, output_data.clone());
+                if let Some(output_data) = parent_result.outputs.get(out_idx) {
+                    // Push will append if multiple connections map to the same input index
+                    input_data.push(in_idx, output_data.clone());
                 }
             }
         }
@@ -231,6 +241,7 @@ impl WorkflowRunner {
         node: &WorkflowNode,
         input_data: ITaskDataConnections,
         _parsed: &ParsedGraph,
+        workflow_cache: Arc<HashMap<String, Vec<serde_json::Value>>>,
     ) -> Result<NodeExecutionResult, BarqError> {
         debug!("Executing node: {} (type: {})", node.name, node.type_);
 
@@ -263,6 +274,7 @@ impl WorkflowRunner {
             input_data,
             context.static_data.clone(),
             context.run_id.0,
+            workflow_cache,
         );
 
         // Execute the node
@@ -304,6 +316,10 @@ pub use barqflow_flow::graph::WorkflowToGraphParser;
 
 #[cfg(test)]
 mod tests {
+    use async_trait::async_trait;
+    use barqflow_core::traits::IExecuteFunctions;
+    use barqflow_core::types::WorkflowId;
+
     use super::*;
     use barqflow_core::schema::{INode, INodeParameters, IWorkflowSettings};
     use barqflow_core::properties::INodeProperties;

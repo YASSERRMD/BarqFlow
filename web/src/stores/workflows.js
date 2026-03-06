@@ -1,0 +1,68 @@
+import { defineStore } from 'pinia';
+import api from '../api';
+export const useWorkflowStore = defineStore('workflows', {
+    state: () => ({
+        workflows: [],
+        activeWorkflow: null,
+        executions: [],
+        loading: false,
+        error: null,
+    }),
+    actions: {
+        async fetchWorkflows() {
+            this.loading = true;
+            try {
+                const response = await api.get('/workflows');
+                this.workflows = response.data;
+            }
+            catch (err) {
+                this.error = err.message;
+            }
+            finally {
+                this.loading = false;
+            }
+        },
+        async fetchWorkflow(id) {
+            this.loading = true;
+            try {
+                const response = await api.get(`/workflows/${id}`);
+                this.activeWorkflow = response.data;
+            }
+            catch (err) {
+                this.error = err.message;
+            }
+            finally {
+                this.loading = false;
+            }
+        },
+        async saveWorkflow(workflow) {
+            try {
+                if (workflow.id) {
+                    await api.put(`/workflows/${workflow.id}`, workflow);
+                }
+                else {
+                    const response = await api.post('/workflows', workflow);
+                    this.workflows.push(response.data);
+                }
+            }
+            catch (err) {
+                this.error = err.message;
+            }
+        },
+        async executeWorkflow(workflowId, payload = {}) {
+            this.loading = true;
+            try {
+                const response = await api.post(`/executions/workflow/${workflowId}`, payload);
+                return response.data;
+            }
+            catch (err) {
+                this.error = err.message;
+                throw err;
+            }
+            finally {
+                this.loading = false;
+            }
+        }
+    },
+});
+//# sourceMappingURL=workflows.js.map

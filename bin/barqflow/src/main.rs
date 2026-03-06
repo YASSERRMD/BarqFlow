@@ -1,8 +1,8 @@
 use anyhow::Result;
 use dotenvy::dotenv;
+use std::env;
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
-use std::env;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -25,7 +25,7 @@ async fn main() -> Result<()> {
         .expect("PORT must be a valid number");
 
     // Start server
-    barqflow_server::run_server(&db_url, port).await?;
+    barqflow_server::server::run_server(&db_url, port).await?;
 
     Ok(())
 }

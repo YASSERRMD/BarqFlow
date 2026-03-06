@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info};
 
 /// Checkpoint data for a suspended execution.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -142,9 +142,7 @@ impl CheckpointManager {
             CheckpointStorage::Filesystem { base_path } => {
                 self.load_from_filesystem(base_path, run_id).await
             }
-            CheckpointStorage::Memory => {
-                self.cache.get(run_id).cloned()
-            }
+            CheckpointStorage::Memory => self.cache.get(run_id).cloned(),
         }
     }
 
@@ -183,9 +181,7 @@ impl CheckpointManager {
             CheckpointStorage::Filesystem { base_path } => {
                 self.list_from_filesystem(base_path).await
             }
-            CheckpointStorage::Memory => {
-                self.cache.keys().copied().collect()
-            }
+            CheckpointStorage::Memory => self.cache.keys().copied().collect(),
         }
     }
 
