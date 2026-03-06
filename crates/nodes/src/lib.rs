@@ -95,4 +95,15 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
         max_inputs: 1,
         node_impl: Arc::new(wait::WaitNode),
     });
+
+    let _ = registry.register_node(NodeInfo {
+        name: "barqflow-nodes.errorTrigger".into(),
+        display_name: "Error Trigger".into(),
+        version: 1.0,
+        description: "Triggers error workflow on failure".into(),
+        properties: empty_props.clone(),
+        is_trigger: true,
+        max_inputs: 0,
+        node_impl: Arc::new(trigger::ErrorTriggerNode),
+    });
 }
