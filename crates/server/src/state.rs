@@ -8,6 +8,7 @@ use sqlx::PgPool;
 use std::sync::Arc;
 use barqflow_registry::registry::NodeRegistry;
 use barqflow_registry::registry::CredentialRegistry;
+use barqflow_api::controllers::webhooks::{WebhookRegistry, new_webhook_registry};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -19,6 +20,7 @@ pub struct AppState {
     pub user_repo: Arc<UserRepo>,
     pub node_registry: Arc<NodeRegistry>,
     pub credential_registry: Arc<CredentialRegistry>,
+    pub webhook_registry: WebhookRegistry,
 }
 
 impl AppState {
@@ -38,6 +40,7 @@ impl AppState {
             user_repo: Arc::new(UserRepo::new(pool)),
             node_registry,
             credential_registry,
+            webhook_registry: new_webhook_registry(),
         }
     }
 
@@ -49,6 +52,7 @@ impl AppState {
             user_repo: Arc::clone(&self.user_repo),
             node_registry: Arc::clone(&self.node_registry),
             credential_registry: Arc::clone(&self.credential_registry),
+            webhook_registry: Arc::clone(&self.webhook_registry),
         }
     }
 }

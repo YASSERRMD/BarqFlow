@@ -405,6 +405,7 @@ dependencies = [
  "barqflow-registry",
  "dotenvy",
  "reqwest",
+ "serde_json",
  "sqlx",
  "tokio",
  "tokio-cron-scheduler",

@@ -165,7 +165,7 @@ mod tests {
     use wiremock::matchers::{body_string_contains, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    #[sqlx::test(migrations = "../../migrations")]
+    #[sqlx::test(migrations = "./migrations")]
     async fn test_oauth2_token_exchange(pool: PgPool) {
         std::env::set_var("BARQFLOW_ENCRYPTION_KEY", "12345678901234567890123456789012");
 

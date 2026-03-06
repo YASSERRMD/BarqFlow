@@ -11,7 +11,7 @@ use crate::controllers::{
     executions::{execution_routes, AppState as ExecState},
     oauth2::{oauth2_routes, OAuth2State},
     users::{user_routes, AppState as UserState},
-    webhooks::{webhook_routes, WebhookState},
+    webhooks::{new_webhook_registry, webhook_routes, WebhookRegistry, WebhookState},
     workflows::{workflow_routes, AppState as WfState},
 };
 
@@ -23,6 +23,7 @@ pub struct AppState {
     pub user_repo: Arc<UserRepo>,
     pub node_registry: Arc<barqflow_registry::registry::NodeRegistry>,
     pub credential_registry: Arc<barqflow_registry::registry::CredentialRegistry>,
+    pub webhook_registry: WebhookRegistry,
 }
 
 pub fn create_router(state: AppState) -> Router {
@@ -48,6 +49,8 @@ pub fn create_router(state: AppState) -> Router {
 
     let webh_routes = webhook_routes(WebhookState {
         workflow_repo: Arc::clone(&state.workflow_repo),
+        webhook_registry: Arc::clone(&state.webhook_registry),
+        node_registry: Arc::clone(&state.node_registry),
     });
 
     Router::new()
