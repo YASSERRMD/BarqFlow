@@ -50,6 +50,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 async-trait  = "0.1"
 # testing
 tempfile     = "3"
+wiremock     = "0.6"
 # http
 axum         = { version = "0.8", features = ["ws", "multipart", "macros"] }
 tower        = "0.5"

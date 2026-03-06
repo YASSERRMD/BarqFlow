@@ -60,6 +60,23 @@ pub trait IPollFunctions: Send + Sync {
     fn log(&self, message: &str);
 }
 
+/// Abstract storage provider for persisting node-specific static data across server boundaries
+#[async_trait]
+pub trait IStaticDataStorage: Send + Sync {
+    async fn get(
+        &self,
+        node_id: String,
+        workflow_id: uuid::Uuid,
+    ) -> std::result::Result<Option<crate::types::IDataObject>, BarqError>;
+
+    async fn upsert(
+        &self,
+        node_id: String,
+        workflow_id: uuid::Uuid,
+        data: crate::types::IDataObject,
+    ) -> std::result::Result<(), BarqError>;
+}
+
 /// The core trait defining a Node's logic, mirroring INodeType in n8n.
 #[async_trait]
 pub trait INodeType: Send + Sync {

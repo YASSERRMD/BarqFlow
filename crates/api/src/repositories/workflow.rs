@@ -100,6 +100,23 @@ impl WorkflowRepository {
         .await
     }
 
+    pub async fn toggle_active(&self, id: Uuid, active: bool) -> Result<Option<WorkflowEntity>> {
+        let now = Utc::now();
+        sqlx::query_as::<_, WorkflowEntity>(
+            r#"
+            UPDATE workflows
+            SET active = $1, updated_at = $2
+            WHERE id = $3
+            RETURNING id, name, active, nodes, connections, settings, created_at, updated_at
+            "#,
+        )
+        .bind(active)
+        .bind(now)
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
     pub async fn delete(&self, id: Uuid) -> Result<bool> {
         let result = sqlx::query(
             r#"

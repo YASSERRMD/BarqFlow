@@ -4,14 +4,16 @@ use axum::{
     extract::{Json, Path, State},
     routing::{get, put},
     Router,
+    response::IntoResponse,
 };
 use barqflow_db::models::WorkflowEntity;
-use barqflow_db::workflows::WorkflowRepo;
+use crate::repositories::workflow::WorkflowRepository;
 use serde::Deserialize;
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub workflow_repo: std::sync::Arc<WorkflowRepo>,
+    pub workflow_repo: Arc<WorkflowRepository>,
 }
 
 pub fn workflow_routes(state: AppState) -> Router {
@@ -40,7 +42,7 @@ async fn get_workflows(
 ) -> Result<Json<Vec<WorkflowEntity>>, (StatusCode, String)> {
     let workflows = state
         .workflow_repo
-        .get_all()
+        .find_all()
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 

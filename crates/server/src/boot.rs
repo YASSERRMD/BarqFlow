@@ -7,7 +7,7 @@ pub async fn run_boot_sequence(
     info!("Starting BarqFlow production boot sequence...");
 
     // 1. Fetch all active workflows
-    let active_workflows = state.workflow_repo.get_all().await?;
+    let active_workflows = state.workflow_repo.find_all().await?;
     let active_count = active_workflows.iter().filter(|w| w.active).count();
 
     info!(

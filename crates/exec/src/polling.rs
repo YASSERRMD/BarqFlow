@@ -20,15 +20,15 @@ pub struct ActivePoller {
 pub struct PollingEngine {
     registry: Arc<NodeRegistry>,
     active_pollers: Arc<RwLock<HashMap<String, tokio::task::JoinHandle<()>>>>,
-    static_data: Arc<RwLock<Option<IDataObject>>>,
+    static_repo: Arc<dyn barqflow_core::traits::IStaticDataStorage>,
 }
 
 impl PollingEngine {
-    pub fn new(registry: Arc<NodeRegistry>, static_data: Arc<RwLock<Option<IDataObject>>>) -> Self {
+    pub fn new(registry: Arc<NodeRegistry>, static_repo: Arc<dyn barqflow_core::traits::IStaticDataStorage>) -> Self {
         Self {
             registry,
             active_pollers: Arc::new(RwLock::new(HashMap::new())),
-            static_data,
+            static_repo,
         }
     }
 
@@ -73,7 +73,7 @@ impl PollingEngine {
             })?;
 
         let node_impl = node_info.node_impl.clone();
-        let static_data = self.static_data.clone();
+        let static_repo = self.static_repo.clone();
 
         let mut interval_timer = interval(Duration::from_secs(interval_seconds));
         interval_timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -102,7 +102,7 @@ impl PollingEngine {
             loop {
                 interval_timer.tick().await;
 
-                let ctx = PollExecutionContext::new(target_node.clone(), static_data.clone());
+                let ctx = PollExecutionContext::new(target_node.clone(), workflow_id.0, static_repo.clone());
                 match node_impl.poll(&ctx).await {
                     Ok(mut events) => {
                         // Triggers usually return empty 2D arrays if nothing new arrived
@@ -115,19 +115,9 @@ impl PollingEngine {
                                     let branch_data: Vec<IDataObject> =
                                         branch.into_iter().map(|d| d.json).collect();
 
-                                    let mut state_lock = static_data.write().await;
-                                    if state_lock.is_none() {
-                                        *state_lock = Some(IDataObject::default());
-                                    }
-                                    let global_state = state_lock.as_mut().unwrap();
-
                                     let dedup_state_key = format!("{}_dedup", target_node.id);
-                                    let mut dedup_state = IDataObject::default();
-
-                                    let map = &global_state.0;
-                                    if let Some(v) = map.get(&dedup_state_key) {
-                                        dedup_state = IDataObject::from(v.clone());
-                                    }
+                                    let dedup_opt = static_repo.get(dedup_state_key.clone(), workflow_id.0).await.unwrap_or(None);
+                                    let mut dedup_state = dedup_opt.unwrap_or_default();
 
                                     let filtered = DeduplicationManager::filter_new_events(
                                         branch_data,
@@ -136,10 +126,7 @@ impl PollingEngine {
                                         &mut dedup_state,
                                     );
 
-                                    global_state.0.insert(
-                                        dedup_state_key,
-                                        serde_json::Value::Object(dedup_state.0),
-                                    );
+                                    let _ = static_repo.upsert(dedup_state_key, workflow_id.0, dedup_state).await;
 
                                     let new_branch: Vec<INodeExecutionData> =
                                         filtered.into_iter().map(INodeExecutionData::new).collect();
@@ -249,6 +236,34 @@ mod tests {
         }
     }
 
+    #[derive(Clone, Default)]
+    struct MockStaticDataStorage {
+        data: Arc<RwLock<HashMap<String, IDataObject>>>,
+    }
+
+    #[async_trait]
+    impl barqflow_core::traits::IStaticDataStorage for MockStaticDataStorage {
+        async fn get(
+            &self,
+            node_id: String,
+            _workflow_id: Uuid,
+        ) -> std::result::Result<Option<IDataObject>, BarqError> {
+            let guard = self.data.read().await;
+            Ok(guard.get(&node_id).cloned())
+        }
+
+        async fn upsert(
+            &self,
+            node_id: String,
+            _workflow_id: Uuid,
+            data: IDataObject,
+        ) -> std::result::Result<(), BarqError> {
+            let mut guard = self.data.write().await;
+            guard.insert(node_id, data);
+            Ok(())
+        }
+    }
+
     #[tokio::test]
     async fn test_polling_engine() {
         let registry = Arc::new(NodeRegistry::new());
@@ -268,8 +283,8 @@ mod tests {
         };
         registry.register_node(node_info).unwrap();
 
-        let static_data = Arc::new(RwLock::new(Some(IDataObject::default())));
-        let engine = PollingEngine::new(registry.clone(), static_data.clone());
+        let mock_repo = Arc::new(MockStaticDataStorage::default());
+        let engine = PollingEngine::new(registry.clone(), mock_repo.clone());
 
         let node_id = NodeId("test-node-123".to_string());
         let workflow = WorkflowDef {
@@ -306,15 +321,9 @@ mod tests {
         assert!(total_hits >= 2, "Poller should have fired at least 2 times");
 
         // Verify static memory updated correctly
-        let data_lock = static_data.read().await;
-        let data = data_lock.as_ref().unwrap();
-        let node_memory = data
-            .0
-            .get(&node_id.to_string())
-            .unwrap()
-            .as_object()
-            .unwrap();
-        let count = node_memory.get("count").unwrap().as_u64().unwrap();
+        let data_lock = mock_repo.data.read().await;
+        let node_memory = data_lock.get(&node_id.to_string()).unwrap();
+        let count = node_memory.0.get("count").unwrap().as_u64().unwrap();
         assert!(
             count >= 2,
             "Static data should have been updated deeply across polls"

@@ -451,8 +451,15 @@ mod tests {
 
     #[async_trait]
     impl ICredentialType for MockCredential {
-        fn get_description(&self) -> IDataObject {
-            IDataObject::from(json!({ "name": self.name }))
+        fn get_description(&self) -> barqflow_core::properties::ICredentialProperties {
+            barqflow_core::properties::ICredentialProperties {
+                name: self.name.clone(),
+                display_name: format!("{} Credential", self.name),
+                properties: vec![],
+                authenticate: None,
+                documentation_url: None,
+                notice: None,
+            }
         }
 
         fn test_request(&self) -> Option<barqflow_core::traits::ICredentialTestRequest> {

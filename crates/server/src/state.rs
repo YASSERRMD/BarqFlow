@@ -1,34 +1,43 @@
 use barqflow_api::AppState as ApiState;
 use barqflow_db::users::UserRepo;
-use barqflow_db::{CredentialRepo, ExecutionRepo, StaticDataRepo, WorkflowRepo};
+use barqflow_api::repositories::{
+    credential::CredentialRepository, execution::ExecutionRepository,
+    static_data::StaticDataRepository, workflow::WorkflowRepository,
+};
 use sqlx::PgPool;
 use std::sync::Arc;
 use barqflow_registry::registry::NodeRegistry;
+use barqflow_registry::registry::CredentialRegistry;
 
 #[derive(Clone)]
 pub struct AppState {
     pub db_pool: PgPool,
-    pub workflow_repo: Arc<WorkflowRepo>,
-    pub execution_repo: Arc<ExecutionRepo>,
-    pub credential_repo: Arc<CredentialRepo>,
-    pub static_data_repo: Arc<StaticDataRepo>,
+    pub workflow_repo: Arc<WorkflowRepository>,
+    pub execution_repo: Arc<ExecutionRepository>,
+    pub credential_repo: Arc<CredentialRepository>,
+    pub static_data_repo: Arc<StaticDataRepository>,
     pub user_repo: Arc<UserRepo>,
     pub node_registry: Arc<NodeRegistry>,
+    pub credential_registry: Arc<CredentialRegistry>,
 }
 
 impl AppState {
     pub fn new(pool: PgPool) -> Self {
         let node_registry = Arc::new(NodeRegistry::new());
         barqflow_nodes::register_all_nodes(&node_registry);
+        
+        // Setup Credential Registry
+        let credential_registry = Arc::new(CredentialRegistry::new());
 
         Self {
             db_pool: pool.clone(),
-            workflow_repo: Arc::new(WorkflowRepo::new(pool.clone())),
-            execution_repo: Arc::new(ExecutionRepo::new(pool.clone())),
-            credential_repo: Arc::new(CredentialRepo::new(pool.clone())),
-            static_data_repo: Arc::new(StaticDataRepo::new(pool.clone())),
+            workflow_repo: Arc::new(WorkflowRepository::new(pool.clone())),
+            execution_repo: Arc::new(ExecutionRepository::new(pool.clone())),
+            credential_repo: Arc::new(CredentialRepository::new(pool.clone())),
+            static_data_repo: Arc::new(StaticDataRepository::new(pool.clone())),
             user_repo: Arc::new(UserRepo::new(pool)),
             node_registry,
+            credential_registry,
         }
     }
 
@@ -39,6 +48,7 @@ impl AppState {
             exec_repo: Arc::clone(&self.execution_repo),
             user_repo: Arc::clone(&self.user_repo),
             node_registry: Arc::clone(&self.node_registry),
+            credential_registry: Arc::clone(&self.credential_registry),
         }
     }
 }
