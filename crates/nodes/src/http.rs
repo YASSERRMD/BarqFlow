@@ -120,24 +120,64 @@ impl INodeType for HttpRequestNode {
                 })?;
 
             let status = result.status().as_u16();
+            let content_type = result.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
             
-            // Handle JSON response automatically if possible
-            let content_type = result.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("");
-            let output = if content_type.contains("application/json") {
-                let json_body: serde_json::Value = result.json().await.unwrap_or(serde_json::json!({}));
-                serde_json::json!({
-                    "status": status,
-                    "body": json_body
-                })
-            } else {
-                let body_text = result.text().await.unwrap_or_default();
-                serde_json::json!({
-                    "status": status,
-                    "body": body_text
-                })
-            };
+            // Check if response should be treated as binary based on parameters or auto-detect
+            let response_format = context
+                .get_node_parameter("responseFormat", None)
+                .await
+                .map(|v| v.as_str().unwrap_or("autodetect").to_string())
+                .unwrap_or_else(|_| "autodetect".to_string());
 
-            output_items.push(INodeExecutionData::new(IDataObject::from(output)));
+            let mut is_binary = response_format == "file";
+            if response_format == "autodetect" {
+                if !content_type.starts_with("application/json") && !content_type.starts_with("text/") {
+                    is_binary = true;
+                }
+            }
+
+            if is_binary {
+                use base64::{Engine as _, engine::general_purpose::STANDARD};
+                let bytes = result.bytes().await.unwrap_or_default();
+                let b64 = STANDARD.encode(&bytes);
+                
+                use barqflow_core::types::{IBinaryData, BinaryDataContent};
+                let bin_data = IBinaryData {
+                    content: BinaryDataContent::Memory { data: b64 },
+                    mime_type: content_type.clone(),
+                    file_type: None,
+                    file_name: None,
+                    directory: None,
+                    file_extension: None,
+                    file_size: Some(bytes.len().to_string()),
+                };
+                
+                let output = serde_json::json!({
+                    "status": status,
+                    "body": "[Binary Data]"
+                });
+                
+                let execution_data = INodeExecutionData::new(IDataObject::from(output))
+                    .with_binary("data".to_string(), bin_data);
+                
+                output_items.push(execution_data);
+            } else {
+                let output = if content_type.contains("application/json") {
+                    let json_body: serde_json::Value = result.json().await.unwrap_or(serde_json::json!({}));
+                    serde_json::json!({
+                        "status": status,
+                        "body": json_body
+                    })
+                } else {
+                    let body_text = result.text().await.unwrap_or_default();
+                    serde_json::json!({
+                        "status": status,
+                        "body": body_text
+                    })
+                };
+
+                output_items.push(INodeExecutionData::new(IDataObject::from(output)));
+            }
         }
 
         Ok(vec![output_items])
@@ -148,10 +188,153 @@ impl INodeType for HttpRequestNode {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_http_node_creation() {
+    use barqflow_core::schema::{INode, INodeParameters};
+    use barqflow_core::types::{GenericValue, NodeId};
+    use async_trait::async_trait;
+    use std::sync::Arc;
+    use mockito::Server;
+
+    struct MockContext {
+        input_data: Vec<Vec<INodeExecutionData>>,
+        params: std::collections::HashMap<String, GenericValue>,
+        node: INode,
+    }
+
+    impl MockContext {
+        fn new() -> Self {
+            let input = vec![INodeExecutionData::new(IDataObject::from(serde_json::json!({})))];
+            Self {
+                input_data: vec![input],
+                params: std::collections::HashMap::new(),
+                node: INode {
+                    id: NodeId("test_http".into()),
+                    name: "HTTP Request".into(),
+                    r#type: "http".into(),
+                    type_version: 1.0,
+                    position: [0.0, 0.0],
+                    parameters: INodeParameters(std::collections::HashMap::new()),
+                    disabled: false,
+                },
+            }
+        }
+        
+        fn add_param(&mut self, key: &str, value: serde_json::Value) {
+            self.params.insert(key.to_string(), value);
+        }
+    }
+
+    #[async_trait]
+    impl barqflow_core::traits::IExecuteFunctions for MockContext {
+        async fn get_node_parameter(
+            &self,
+            parameter_name: &str,
+            fallback_value: Option<GenericValue>,
+        ) -> Result<GenericValue, BarqError> {
+            if let Some(val) = self.params.get(parameter_name) {
+                Ok(val.clone())
+            } else if let Some(fallback) = fallback_value {
+                Ok(fallback)
+            } else {
+                Err(BarqError::NodeOperationError {
+                    node_name: self.node.name.clone(),
+                    message: format!("Parameter '{}' not found", parameter_name),
+                })
+            }
+        }
+
+        async fn get_node_parameter_at_item(
+            &self,
+            parameter_name: &str,
+            _item_index: usize,
+            fallback_value: Option<GenericValue>,
+        ) -> Result<GenericValue, BarqError> {
+            self.get_node_parameter(parameter_name, fallback_value).await
+        }
+
+        fn get_node(&self) -> &INode {
+            &self.node
+        }
+
+        fn get_input_data(&self, input_index: usize) -> Result<&Vec<INodeExecutionData>, BarqError> {
+            self.input_data.get(input_index).ok_or(BarqError::NodeOperationError {
+                node_name: self.node.name.clone(),
+                message: format!("No input data at index {}", input_index),
+            })
+        }
+
+        async fn get_credentials(&self, _name: &str) -> Result<std::collections::HashMap<String, GenericValue>, BarqError> {
+            Ok(std::collections::HashMap::new())
+        }
+
+        fn log(&self, _message: &str) {}
+    }
+
+    #[tokio::test]
+    async fn test_http_node_json_request() {
+        let mut server = Server::new_async().await;
+        let mock = server.mock("POST", "/data")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"success": true}"#)
+            .create_async().await;
+
+        let url = format!("{}/data", server.url());
+        
+        let mut context = MockContext::new();
+        context.add_param("url", serde_json::json!(url));
+        context.add_param("method", serde_json::json!("POST"));
+        context.add_param("body", serde_json::json!({"test": "payload"}));
+        
         let node = HttpRequestNode::new();
-        let desc = node.get_description();
-        assert_eq!(desc.0.get("name").unwrap(), "HTTP Request");
+        let result = node.execute(&context).await.unwrap();
+        
+        mock.assert_async().await;
+        
+        assert_eq!(result.len(), 1);
+        let output = &result[0][0].json.0;
+        assert_eq!(output.get("status").unwrap().as_u64().unwrap(), 200);
+        let body = output.get("body").unwrap();
+        assert_eq!(body.get("success").unwrap().as_bool().unwrap(), true);
+    }
+    
+    #[tokio::test]
+    async fn test_http_node_binary_request() {
+        let mut server = Server::new_async().await;
+        let mock = server.mock("GET", "/image.png")
+            .with_status(200)
+            .with_header("content-type", "image/png")
+            .with_body(vec![137, 80, 78, 71, 13, 10, 26, 10]) // PNG signature
+            .create_async().await;
+
+        let url = format!("{}/image.png", server.url());
+        
+        let mut context = MockContext::new();
+        context.add_param("url", serde_json::json!(url));
+        context.add_param("method", serde_json::json!("GET"));
+        context.add_param("responseFormat", serde_json::json!("autodetect"));
+        
+        let node = HttpRequestNode::new();
+        let result = node.execute(&context).await.unwrap();
+        
+        mock.assert_async().await;
+        
+        assert_eq!(result.len(), 1);
+        let exec_data = &result[0][0];
+        
+        // Assert we got a binary payload map
+        let binary_map = exec_data.binary.as_ref().unwrap();
+        let bin_payload = binary_map.get("data").unwrap();
+        
+        assert_eq!(bin_payload.mime_type, "image/png");
+        
+        use barqflow_core::types::BinaryDataContent;
+        match &bin_payload.content {
+            BinaryDataContent::Memory { data } => {
+                use base64::{Engine as _, engine::general_purpose::STANDARD};
+                let bytes = STANDARD.decode(data).unwrap();
+                assert_eq!(bytes, vec![137, 80, 78, 71, 13, 10, 26, 10]);
+            },
+            _ => panic!("Expected Memory binary content"),
+        }
     }
 }
