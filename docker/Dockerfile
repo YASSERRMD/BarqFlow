@@ -7,7 +7,7 @@ COPY web/ ./
 RUN npm run build
 
 # Build the Rust Backend
-FROM rust:1.80-slim-bookworm AS rust-builder
+FROM rust:1.88-slim-bookworm AS rust-builder
 WORKDIR /app
 # Install build dependencies
 RUN apt-get update && apt-get install -y pkg-config libssl-dev ca-certificates && rm -rf /var/lib/apt/lists/*
