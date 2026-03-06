@@ -191,24 +191,142 @@ impl INodeType for MergeNode {
 mod tests {
     use super::*;
 
+    use barqflow_core::schema::{INode, INodeParameters};
+    use barqflow_core::types::{GenericValue, NodeId};
+    use std::sync::Arc;
+
+    struct MockContext {
+        input_data: Vec<Vec<INodeExecutionData>>,
+        params: std::collections::HashMap<String, GenericValue>,
+        node: INode,
+    }
+
+    impl MockContext {
+        fn new(inputs: Vec<Vec<INodeExecutionData>>) -> Self {
+            Self {
+                input_data: inputs,
+                params: std::collections::HashMap::new(),
+                node: INode {
+                    id: NodeId("test_node".into()),
+                    name: "Test Node".into(),
+                    r#type: "test".into(),
+                    type_version: 1.0,
+                    position: vec![0.0, 0.0],
+                    parameters: INodeParameters(serde_json::Map::new()),
+                    credentials: None,
+                    disabled: false,
+                    notes: None,
+                    notes_in_flow: None,
+                    webhook_id: None,
+                },
+            }
+        }
+        
+        fn add_param(&mut self, key: &str, value: serde_json::Value) {
+            self.params.insert(key.to_string(), value);
+        }
+    }
+
+    #[async_trait]
+    impl IExecuteFunctions for MockContext {
+        async fn get_node_parameter(
+            &self,
+            parameter_name: &str,
+            fallback_value: Option<GenericValue>,
+        ) -> Result<GenericValue, BarqError> {
+            if let Some(val) = self.params.get(parameter_name) {
+                Ok(val.clone())
+            } else if let Some(fallback) = fallback_value {
+                Ok(fallback)
+            } else {
+                Err(BarqError::NodeOperationError {
+                    node_name: self.node.name.clone(),
+                    message: format!("Parameter '{}' not found", parameter_name),
+                })
+            }
+        }
+
+        async fn get_node_parameter_at_item(
+            &self,
+            parameter_name: &str,
+            _item_index: usize,
+            fallback_value: Option<GenericValue>,
+        ) -> Result<GenericValue, BarqError> {
+            self.get_node_parameter(parameter_name, fallback_value).await
+        }
+
+        fn get_node(&self) -> &INode {
+            &self.node
+        }
+
+        fn get_input_data(&self, input_index: usize) -> Result<&Vec<INodeExecutionData>, BarqError> {
+            self.input_data.get(input_index).ok_or(BarqError::NodeOperationError {
+                node_name: self.node.name.clone(),
+                message: format!("No input data at index {}", input_index),
+            })
+        }
+
+        async fn get_credentials(&self, _name: &str) -> Result<std::collections::HashMap<String, GenericValue>, BarqError> {
+            Ok(std::collections::HashMap::new())
+        }
+
+        fn log(&self, _message: &str) {}
+    }
+
     #[tokio::test]
-    async fn test_if_node_description() {
+    async fn test_if_node_operation() {
+        let input = vec![
+            INodeExecutionData::new(IDataObject::from(serde_json::json!({"val": 10}))),
+            INodeExecutionData::new(IDataObject::from(serde_json::json!({"val": 5}))),
+        ];
+        
+        let mut context = MockContext::new(vec![input]);
+        context.add_param("operation", serde_json::json!("larger"));
+        context.add_param("value1", serde_json::json!(10));
+        context.add_param("value2", serde_json::json!(8));
+        
         let node = IfNode;
-        let desc = node.get_description();
-        assert_eq!(desc.0.get("name").unwrap(), "IF");
+        let result = node.execute(&context).await.unwrap();
+        
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].len(), 2); // Both items pass because value1(10) > value2(8)
     }
 
     #[tokio::test]
-    async fn test_switch_node_description() {
+    async fn test_switch_node_routing() {
+        let input = vec![
+            INodeExecutionData::new(IDataObject::from(serde_json::json!({"route": "A"}))),
+            INodeExecutionData::new(IDataObject::from(serde_json::json!({"route": "B"}))),
+            INodeExecutionData::new(IDataObject::from(serde_json::json!({"route": "C"}))),
+        ];
+        
+        let mut context = MockContext::new(vec![input]);
+        context.add_param("dataProperty", serde_json::json!("route"));
+        context.add_param("case0", serde_json::json!("A"));
+        context.add_param("case1", serde_json::json!("B"));
+        context.add_param("fallbackOutput", serde_json::json!(2));
+        
         let node = SwitchNode;
-        let desc = node.get_description();
-        assert_eq!(desc.0.get("name").unwrap(), "Switch");
+        let result = node.execute(&context).await.unwrap();
+        
+        assert_eq!(result.len(), 10);
+        assert_eq!(result[0].len(), 1); // "A" routed to case0
+        assert_eq!(result[1].len(), 1); // "B" routed to case1
+        assert_eq!(result[2].len(), 1); // "C" routed to fallback (index 2)
     }
 
     #[tokio::test]
-    async fn test_merge_node_description() {
+    async fn test_merge_node_append() {
+        let input1 = vec![INodeExecutionData::new(IDataObject::from(serde_json::json!({"id": 1})))];
+        let input2 = vec![INodeExecutionData::new(IDataObject::from(serde_json::json!({"id": 2})))];
+        
+        let mut context = MockContext::new(vec![input1, input2]);
+        context.add_param("mode", serde_json::json!("append"));
+        
         let node = MergeNode;
-        let desc = node.get_description();
-        assert_eq!(desc.0.get("name").unwrap(), "Merge");
+        let result = node.execute(&context).await.unwrap();
+        
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].len(), 2);
     }
 }

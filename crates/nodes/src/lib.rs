@@ -43,6 +43,17 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
     });
 
     let _ = registry.register_node(NodeInfo {
+        name: "n8n-nodes-base.switch".into(),
+        display_name: "Switch".into(),
+        version: 1.0,
+        description: "Route items based on matching values".into(),
+        properties: empty_props.clone(),
+        is_trigger: false,
+        max_inputs: 1,
+        node_impl: Arc::new(crate::logic::SwitchNode),
+    });
+
+    let _ = registry.register_node(NodeInfo {
         name: "n8n-nodes-base.merge".into(),
         display_name: "Merge".into(),
         version: 1.0,
