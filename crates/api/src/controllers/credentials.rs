@@ -5,13 +5,13 @@ use axum::{
     routing::get,
     Router,
 };
-use barqflow_db::credentials::CredentialRepo;
+use crate::repositories::credential::CredentialRepository;
 use barqflow_db::models::CredentialEntity;
 use serde::Deserialize;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub credential_repo: std::sync::Arc<CredentialRepo>,
+    pub credential_repo: std::sync::Arc<CredentialRepository>,
 }
 
 pub fn credential_routes(state: AppState) -> Router {
@@ -33,7 +33,7 @@ async fn get_credentials(
 ) -> Result<Json<Vec<CredentialEntity>>, (StatusCode, String)> {
     let creds = state
         .credential_repo
-        .get_all()
+        .find_all()
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 

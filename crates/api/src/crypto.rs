@@ -3,6 +3,7 @@ use aes_gcm::{
     Aes256Gcm, Key, Nonce,
 };
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use serde_json::Value;
 use std::env;
 use thiserror::Error;
 
@@ -16,9 +17,12 @@ pub enum CryptoError {
     InvalidKey(String),
     #[error("Missing encryption key in environment: {0}")]
     MissingKey(String),
+    #[error("Serialization error: {0}")]
+    SerializeError(#[from] serde_json::Error),
 }
 
 /// A wrapper around AES-256-GCM for encrypting string data
+#[derive(Clone)]
 pub struct CryptoService {
     cipher: Aes256Gcm,
 }
@@ -89,11 +93,24 @@ impl CryptoService {
         String::from_utf8(plaintext_bytes)
             .map_err(|e| CryptoError::DecryptError(format!("Invalid UTF-8 plaintext: {}", e)))
     }
+
+    /// Serializes a JSON Value and encrypts it
+    pub fn encrypt_value(&self, value: &Value) -> Result<String, CryptoError> {
+        let plaintext = serde_json::to_string(value)?;
+        self.encrypt(&plaintext)
+    }
+
+    /// Decrypts a string and deserializes it back to a JSON Value
+    pub fn decrypt_value(&self, encrypted_data: &str) -> Result<Value, CryptoError> {
+        let plaintext = self.decrypt(encrypted_data)?;
+        serde_json::from_str(&plaintext).map_err(CryptoError::SerializeError)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn test_encryption_decryption() {
@@ -112,5 +129,27 @@ mod tests {
 
         let decrypted = crypto.decrypt(&encrypted).unwrap();
         assert_eq!(decrypted, secret);
+    }
+
+    #[test]
+    fn test_encrypt_decrypt_value() {
+        env::set_var(
+            "BARQFLOW_ENCRYPTION_KEY",
+            "test_key_must_be_exactly_32_byte",
+        );
+        let crypto = CryptoService::new().unwrap();
+
+        let secret_obj = json!({
+            "api_key": "sk-1234567890",
+            "domain": "api.example.com",
+            "port": 443
+        });
+
+        let encrypted = crypto.encrypt_value(&secret_obj).unwrap();
+        assert!(!encrypted.contains("api_key"));
+        assert!(!encrypted.contains("sk-123"));
+
+        let decrypted = crypto.decrypt_value(&encrypted).unwrap();
+        assert_eq!(decrypted, secret_obj);
     }
 }
