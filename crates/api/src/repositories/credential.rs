@@ -1,15 +1,15 @@
-use crate::crypto::CryptoService;
-use crate::models::CredentialEntity;
+use crate::crypto::{CryptoError, CryptoService};
+use barqflow_db::models::CredentialEntity;
 use chrono::Utc;
 use sqlx::{PgPool, Result};
 use uuid::Uuid;
 
-pub struct CredentialRepo {
+pub struct CredentialRepository {
     pool: PgPool,
     crypto: CryptoService,
 }
 
-impl CredentialRepo {
+impl CredentialRepository {
     pub fn new(pool: PgPool) -> Self {
         let crypto = CryptoService::new().unwrap_or_else(|e| {
             // Panic if crypto fails to load in production, or handle properly.
@@ -19,7 +19,7 @@ impl CredentialRepo {
         Self { pool, crypto }
     }
 
-    pub async fn get_all(&self) -> Result<Vec<CredentialEntity>> {
+    pub async fn find_all(&self) -> Result<Vec<CredentialEntity>> {
         let mut entities = sqlx::query_as::<_, CredentialEntity>(
             r#"
             SELECT id, name, cred_type, data, created_at, updated_at
@@ -32,10 +32,8 @@ impl CredentialRepo {
 
         for e in &mut entities {
             if let Some(enc) = e.data.get("encrypted").and_then(|v| v.as_str()) {
-                if let Ok(dec) = self.crypto.decrypt(enc) {
-                    if let Ok(json_val) = serde_json::from_str(&dec) {
-                        e.data = json_val;
-                    }
+                if let Ok(dec) = self.crypto.decrypt_value(enc) {
+                    e.data = dec;
                 }
             }
         }
@@ -43,7 +41,7 @@ impl CredentialRepo {
         Ok(entities)
     }
 
-    pub async fn get_by_id(&self, id: Uuid) -> Result<Option<CredentialEntity>> {
+    pub async fn find_by_id(&self, id: Uuid) -> Result<Option<CredentialEntity>> {
         let mut entity_opt = sqlx::query_as::<_, CredentialEntity>(
             r#"
             SELECT id, name, cred_type, data, created_at, updated_at
@@ -57,10 +55,8 @@ impl CredentialRepo {
 
         if let Some(ref mut e) = entity_opt {
             if let Some(enc) = e.data.get("encrypted").and_then(|v| v.as_str()) {
-                if let Ok(dec) = self.crypto.decrypt(enc) {
-                    if let Ok(json_val) = serde_json::from_str(&dec) {
-                        e.data = json_val;
-                    }
+                if let Ok(dec) = self.crypto.decrypt_value(enc) {
+                    e.data = dec;
                 }
             }
         }
@@ -78,10 +74,9 @@ impl CredentialRepo {
         let now = Utc::now();
 
         // Encrypt the sensitive JSON data into a base64 string
-        let plain_json = data.to_string();
         let encrypted_base64 = self
             .crypto
-            .encrypt(&plain_json)
+            .encrypt_value(&data)
             .map_err(|e| sqlx::Error::Protocol(format!("Encryption error: {}", e)))?;
         let encrypted_data = serde_json::json!({ "encrypted": encrypted_base64 });
 
@@ -110,10 +105,9 @@ impl CredentialRepo {
     ) -> Result<Option<CredentialEntity>> {
         let now = Utc::now();
 
-        let plain_json = data.to_string();
         let encrypted_base64 = self
             .crypto
-            .encrypt(&plain_json)
+            .encrypt_value(&data)
             .map_err(|e| sqlx::Error::Protocol(format!("Encryption error: {}", e)))?;
         let encrypted_data = serde_json::json!({ "encrypted": encrypted_base64 });
 
@@ -145,5 +139,48 @@ impl CredentialRepo {
         .await?;
 
         Ok(result.rows_affected() > 0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::env;
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn test_credential_lifecycle(pool: PgPool) {
+        env::set_var("BARQFLOW_ENCRYPTION_KEY", "test_key_must_be_exactly_32_byte");
+        let repo = CredentialRepository::new(pool.clone());
+
+        let secret_payload = json!({ "api_token" : "super-secret-123", "domain" : "api.acme.com" });
+
+        // CREATE
+        let created = repo.create("My ACME Creds", "acmeApi", secret_payload.clone()).await.unwrap();
+        assert_eq!(created.name, "My ACME Creds");
+        assert_eq!(created.cred_type, "acmeApi");
+
+        // The returned entity from create/update might still be encrypted because we didn't explicitly decrypt returning clauses,
+        // Wait, the `create` method returns the RAW inserted entity! So created.data has `{"encrypted":"..."}`.
+        let is_encrypted = created.data.get("encrypted").is_some();
+        assert!(is_encrypted);
+        assert!(created.data.get("api_token").is_none());
+
+        // READ (which decrypts automatically)
+        let found = repo.find_by_id(created.id).await.unwrap().unwrap();
+        assert_eq!(found.data, secret_payload);
+
+        // UPDATE
+        let updated_payload = json!({ "api_token" : "new-token-456" });
+        repo.update(created.id, "Renamed ACME Creds", updated_payload.clone()).await.unwrap();
+
+        let refound = repo.find_by_id(created.id).await.unwrap().unwrap();
+        assert_eq!(refound.name, "Renamed ACME Creds");
+        assert_eq!(refound.data, updated_payload);
+
+        // DELETE
+        repo.delete(created.id).await.unwrap();
+        let deleted = repo.find_by_id(created.id).await.unwrap();
+        assert!(deleted.is_none());
     }
 }

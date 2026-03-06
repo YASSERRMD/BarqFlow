@@ -258,6 +258,7 @@ dependencies = [
 name = "barqflow-api"
 version = "0.1.0"
 dependencies = [
+ "aes-gcm",
  "argon2",
  "axum",
  "axum-extra",
@@ -266,6 +267,7 @@ dependencies = [
  "barqflow-exec",
  "barqflow-nodes",
  "barqflow-registry",
+ "base64",
  "chrono",
  "jsonwebtoken",
  "serde",

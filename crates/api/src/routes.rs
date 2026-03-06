@@ -1,6 +1,7 @@
 use axum::Router;
 use barqflow_db::users::UserRepo;
-use barqflow_db::{CredentialRepo, ExecutionRepo, WorkflowRepo};
+use crate::repositories::credential::CredentialRepository;
+use barqflow_db::{ExecutionRepo, WorkflowRepo};
 use std::sync::Arc;
 use tower_http::services::{ServeDir, ServeFile};
 
@@ -15,7 +16,7 @@ use crate::controllers::{
 #[derive(Clone)]
 pub struct AppState {
     pub workflow_repo: Arc<WorkflowRepo>,
-    pub credential_repo: Arc<CredentialRepo>,
+    pub credential_repo: Arc<CredentialRepository>,
     pub exec_repo: Arc<ExecutionRepo>,
     pub user_repo: Arc<UserRepo>,
     pub node_registry: Arc<barqflow_registry::registry::NodeRegistry>,
