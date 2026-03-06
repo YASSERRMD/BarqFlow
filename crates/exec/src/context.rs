@@ -218,6 +218,30 @@ impl IExecuteFunctions for NodeExecutionContext {
         Ok(slice)
     }
 
+    async fn get_credentials(
+        &self,
+        name: &str,
+    ) -> Result<HashMap<String, GenericValue>, BarqError> {
+        // Mocked database retrieval for phase 21. Real implementation would look up 
+        // decrypted credentials from the DB using the active user's encryption key.
+        let mut creds = HashMap::new();
+        creds.insert(
+            "apiKey".to_string(),
+            GenericValue::from(serde_json::json!("mock-api-key-12345")),
+        );
+        creds.insert(
+            "username".to_string(),
+            GenericValue::from(serde_json::json!("mock_user")),
+        );
+        creds.insert(
+            "password".to_string(),
+            GenericValue::from(serde_json::json!("mock_password")),
+        );
+        
+        self.log(&format!("Retrieved mock credential lookup for: {}", name));
+        Ok(creds)
+    }
+
     fn log(&self, message: &str) {
         let _span = span!(
             Level::DEBUG,

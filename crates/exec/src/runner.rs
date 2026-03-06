@@ -145,6 +145,38 @@ impl WorkflowRunner {
                 .gather_input_data(&parsed, node_index, &data_cache)
                 .await?;
 
+            // If the node has incoming edges, but received exactly 0 items across all inputs, 
+            // the upstream branch died (e.g. If node condition failed or Switch case didn't match).
+            // We should skip execution of this node.
+            use petgraph::visit::EdgeRef;
+            let has_incoming_edges = parsed
+                .graph
+                .edges_directed(node_index, petgraph::Direction::Incoming)
+                .next()
+                .is_some();
+
+            if has_incoming_edges {
+                let total_items: usize = input_data.0.values().map(|v| v.len()).sum();
+                if total_items == 0 {
+                    debug!("Skipping node '{}' because all upstream branches yielded 0 items", node.name);
+                    
+                    // Register an empty successful result to propagate the "dead branch" forward
+                    let result = NodeExecutionResult {
+                        node_name: node.name.clone(),
+                        outputs: vec![],
+                        success: true,
+                        error: None,
+                    };
+                    
+                    let node_id = node.id.clone();
+                    let node_name = node.name.clone();
+                    data_cache.insert(node_id, result.clone());
+                    results.insert(node_name, result);
+                    
+                    continue;
+                }
+            }
+
             // Build workflow_cache for this node execution
             let mut workflow_cache_map = HashMap::new();
             for (_, res) in &data_cache {
@@ -159,7 +191,43 @@ impl WorkflowRunner {
             let workflow_cache = Arc::new(workflow_cache_map);
 
             // Execute the node
-            let result = self.run_node(&context, node, input_data, &parsed, workflow_cache).await?;
+            let execute_result = self.run_node(&context, node, input_data.clone(), &parsed, workflow_cache).await;
+            
+            let result = match execute_result {
+                Ok(res) => res,
+                Err(BarqError::SuspendExecution { node_name: _, wait_config }) => {
+                    info!("Execution suspended at node '{}'", node.name);
+                    
+                    let config: crate::checkpoint::WaitConfig = serde_json::from_value(wait_config)
+                        .unwrap_or(crate::checkpoint::WaitConfig {
+                            wait_type: crate::checkpoint::WaitType::Time,
+                            duration_ms: None,
+                            webhook_path: None,
+                            external_id: None,
+                        });
+                        
+                    let mut manager = crate::checkpoint::CheckpointManager::with_filesystem(
+                        std::env::temp_dir().join("barqflow_checkpoints")
+                    );
+                    
+                    use crate::checkpoint::ExecutionCheckpointBuilder;
+                    let checkpoint = ExecutionCheckpointBuilder::new()
+                        .with_run_id(context.run_id)
+                        .with_workflow_id(context.workflow.id.0.to_string())
+                        .with_node_index(node_index.index())
+                        .with_node_data(serde_json::to_value(&input_data).unwrap_or(serde_json::Value::Null))
+                        .with_wait_config(config)
+                        .build();
+                        
+                    if let Ok(cp) = checkpoint {
+                        let _ = manager.save_checkpoint(cp).await;
+                    }
+
+                    // For now, break the loop and return what we have computed so far.
+                    return Ok(results);
+                },
+                Err(e) => return Err(e),
+            };
 
             let node_id = node.id.clone();
             let node_name = node.name.clone();
@@ -168,6 +236,138 @@ impl WorkflowRunner {
         }
 
         info!("Workflow execution completed");
+        Ok(results)
+    }
+
+    /// Resume a suspended workflow.
+    ///
+    /// # Arguments
+    /// * `context` - The workflow run context
+    /// * `checkpoint` - The loaded checkpoint
+    pub async fn resume_workflow(
+        &self,
+        context: WorkflowRunContext,
+        checkpoint: crate::checkpoint::ExecutionCheckpoint,
+    ) -> Result<HashMap<String, NodeExecutionResult>, BarqError> {
+        info!("Resuming workflow execution for run {}", checkpoint.run_id);
+
+        let flow_workflow = self.convert_workflow(&context.workflow);
+        let parsed = WorkflowToGraphParser::parse(&flow_workflow).map_err(|e| {
+            BarqError::WorkflowConfigurationError { message: e.to_string() }
+        })?;
+
+        let execution_order = GraphTraversal::topological_sort(&parsed.graph).map_err(|e| {
+            BarqError::WorkflowConfigurationError { message: e.to_string() }
+        })?;
+
+        let mut results = HashMap::new();
+        let mut data_cache: HashMap<NodeId, NodeExecutionResult> = HashMap::new();
+
+        let mut resume_started = false;
+
+        for node_index in execution_order {
+            let node = &parsed.graph[node_index];
+
+            if !resume_started {
+                if node_index.index() == checkpoint.current_node_index {
+                    info!("Resuming at node {}", node.name);
+                    resume_started = true;
+                    
+                    // The wait node completed! Deserialize its inputs/outputs.
+                    let output_data: barqflow_core::schema::ITaskDataConnections = 
+                        serde_json::from_value(checkpoint.node_data.clone())
+                        .unwrap_or_default();
+                    
+                    // For a Wait node, its output is generally equal to its input unless webhook data.
+                    // We just inject it straight into data_cache.
+                    let mut outputs = Vec::new();
+                    if let Some(items) = output_data.0.get(&0) {
+                        outputs.push(items.clone());
+                    } else if let Some(items) = output_data.0.values().next() {
+                        outputs.push(items.clone());
+                    } else {
+                        outputs.push(vec![]);
+                    }
+
+                    let res = NodeExecutionResult {
+                        node_name: node.name.clone(),
+                        outputs,
+                        success: true,
+                        error: None,
+                    };
+                    data_cache.insert(node.id.clone(), res.clone());
+                    results.insert(node.name.clone(), res);
+                }
+                continue;
+            }
+
+            // Normal execution loop from here on
+            let input_data = self.gather_input_data(&parsed, node_index, &data_cache).await?;
+            let has_incoming_edges = parsed.graph.edges_directed(node_index, petgraph::Direction::Incoming).next().is_some();
+
+            if has_incoming_edges {
+                let total_items: usize = input_data.0.values().map(|v| v.len()).sum();
+                if total_items == 0 {
+                    let result = NodeExecutionResult {
+                        node_name: node.name.clone(),
+                        outputs: vec![],
+                        success: true,
+                        error: None,
+                    };
+                    data_cache.insert(node.id.clone(), result.clone());
+                    results.insert(node.name.clone(), result);
+                    continue;
+                }
+            }
+
+            let mut workflow_cache_map = HashMap::new();
+            for (_, res) in &data_cache {
+                if let Some(first_output) = res.outputs.first() {
+                    let json_items: Vec<serde_json::Value> = first_output
+                        .iter()
+                        .map(|item| serde_json::Value::Object(item.json.0.clone()))
+                        .collect();
+                    workflow_cache_map.insert(res.node_name.clone(), json_items);
+                }
+            }
+            let workflow_cache = Arc::new(workflow_cache_map);
+
+            let execute_result = self.run_node(&context, node, input_data.clone(), &parsed, workflow_cache).await;
+            
+            let result = match execute_result {
+                Ok(res) => res,
+                Err(BarqError::SuspendExecution { node_name: _, wait_config }) => {
+                    let config: crate::checkpoint::WaitConfig = serde_json::from_value(wait_config)
+                        .unwrap_or(crate::checkpoint::WaitConfig {
+                            wait_type: crate::checkpoint::WaitType::Time,
+                            duration_ms: None,
+                            webhook_path: None,
+                            external_id: None,
+                        });
+                    let mut manager = crate::checkpoint::CheckpointManager::with_filesystem(
+                        std::env::temp_dir().join("barqflow_checkpoints")
+                    );
+                    use crate::checkpoint::ExecutionCheckpointBuilder;
+                    let checkpoint = ExecutionCheckpointBuilder::new()
+                        .with_run_id(context.run_id)
+                        .with_workflow_id(context.workflow.id.0.to_string())
+                        .with_node_index(node_index.index())
+                        .with_node_data(serde_json::to_value(&input_data).unwrap_or(serde_json::Value::Null))
+                        .with_wait_config(config)
+                        .build();
+                    if let Ok(cp) = checkpoint {
+                        let _ = manager.save_checkpoint(cp).await;
+                    }
+                    return Ok(results);
+                },
+                Err(e) => return Err(e),
+            };
+
+            data_cache.insert(node.id.clone(), result.clone());
+            results.insert(node.name.clone(), result);
+        }
+
+        info!("Resumed workflow execution completed");
         Ok(results)
     }
 
@@ -277,8 +477,32 @@ impl WorkflowRunner {
             workflow_cache,
         );
 
-        // Execute the node
-        let execute_result = node_info.node_impl.execute(&exec_context).await;
+        // Execute the node safely, catching any unexpected panics
+        use std::panic::AssertUnwindSafe;
+        use futures::FutureExt;
+        
+        // We use AssertUnwindSafe because we are just discarding the panic payload 
+        // and returning an error, so unwind safety is not strictly a concern for data structures here.
+        let execute_future = AssertUnwindSafe(node_info.node_impl.execute(&exec_context)).catch_unwind();
+        
+        let execute_result = match execute_future.await {
+            Ok(Ok(outputs)) => Ok(outputs),
+            Ok(Err(e)) => Err(e),
+            Err(panic_err) => {
+                let panic_msg = if let Some(s) = panic_err.downcast_ref::<&str>() {
+                    s.to_string()
+                } else if let Some(s) = panic_err.downcast_ref::<String>() {
+                    s.clone()
+                } else {
+                    "Unknown panic".to_string()
+                };
+                
+                Err(BarqError::NodeOperationError {
+                    node_name: node.name.clone(),
+                    message: format!("Node execution panicked: {}", panic_msg),
+                })
+            }
+        };
 
         match execute_result {
             Ok(outputs) => {

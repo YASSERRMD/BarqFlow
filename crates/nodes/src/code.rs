@@ -178,6 +178,23 @@ mod tests {
         fn get_node(&self) -> &INode {
             unimplemented!()
         }
+
+        async fn get_node_parameter_at_item(
+            &self,
+            parameter_name: &str,
+            _item_index: usize,
+            fallback_value: Option<barqflow_core::types::GenericValue>,
+        ) -> Result<barqflow_core::types::GenericValue, BarqError> {
+            self.get_node_parameter(parameter_name, fallback_value).await
+        }
+
+        async fn get_credentials(
+            &self,
+            _name: &str,
+        ) -> Result<std::collections::HashMap<String, barqflow_core::types::GenericValue>, BarqError> {
+            Ok(std::collections::HashMap::new())
+        }
+
         fn get_input_data(
             &self,
             _input_index: usize,

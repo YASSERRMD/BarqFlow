@@ -42,8 +42,11 @@ impl ITaskDataConnections {
         Self(HashMap::new())
     }
 
-    pub fn push(&mut self, input_index: usize, data: Vec<INodeExecutionData>) {
-        self.0.insert(input_index, data);
+    pub fn push(&mut self, input_index: usize, mut data: Vec<INodeExecutionData>) {
+        self.0
+            .entry(input_index)
+            .and_modify(|existing| existing.append(&mut data))
+            .or_insert(data);
     }
 }
 
