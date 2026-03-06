@@ -65,6 +65,28 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
     });
 
     let _ = registry.register_node(NodeInfo {
+        name: "n8n-nodes-base.filter".into(),
+        display_name: "Filter".into(),
+        version: 1.0,
+        description: "Filters items based on conditions".into(),
+        properties: empty_props.clone(),
+        is_trigger: false,
+        max_inputs: 1,
+        node_impl: Arc::new(crate::manipulation::FilterNode),
+    });
+
+    let _ = registry.register_node(NodeInfo {
+        name: "n8n-nodes-base.itemLists".into(),
+        display_name: "Item Lists".into(),
+        version: 1.0,
+        description: "Split items into batches or combine items".into(),
+        properties: empty_props.clone(),
+        is_trigger: false,
+        max_inputs: 1,
+        node_impl: Arc::new(crate::manipulation::ItemListsNode),
+    });
+
+    let _ = registry.register_node(NodeInfo {
         name: "n8n-nodes-base.code".into(),
         display_name: "Code".into(),
         version: 1.0,

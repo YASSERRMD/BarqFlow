@@ -190,9 +190,12 @@ mod tests {
     use super::*;
     use barqflow_core::types::GenericValue;
 
+    use barqflow_core::schema::INode;
+
     struct MockContext {
         input_data: Vec<INodeExecutionData>,
         params: std::collections::HashMap<String, GenericValue>,
+        node: INode,
     }
 
     impl MockContext {
@@ -200,28 +203,132 @@ mod tests {
             Self {
                 input_data: input,
                 params: std::collections::HashMap::new(),
+                node: INode {
+                    id: barqflow_core::types::NodeId("test_node".into()),
+                    name: "Test Node".into(),
+                    r#type: "test".into(),
+                    type_version: 1.0,
+                    position: vec![0.0, 0.0],
+                    parameters: barqflow_core::schema::INodeParameters(serde_json::Map::new()),
+                    credentials: None,
+                    disabled: false,
+                    notes: None,
+                    notes_in_flow: None,
+                    webhook_id: None,
+                },
             }
         }
+        
+        fn add_param(&mut self, key: &str, value: serde_json::Value) {
+            self.params.insert(key.to_string(), value);
+        }
+    }
+
+    #[async_trait]
+    impl IExecuteFunctions for MockContext {
+        async fn get_node_parameter(
+            &self,
+            parameter_name: &str,
+            fallback_value: Option<GenericValue>,
+        ) -> Result<GenericValue, BarqError> {
+            if let Some(val) = self.params.get(parameter_name) {
+                Ok(val.clone())
+            } else if let Some(fallback) = fallback_value {
+                Ok(fallback)
+            } else {
+                Err(BarqError::NodeOperationError {
+                    node_name: self.node.name.clone(),
+                    message: format!("Parameter '{}' not found", parameter_name),
+                })
+            }
+        }
+
+        async fn get_node_parameter_at_item(
+            &self,
+            parameter_name: &str,
+            _item_index: usize,
+            fallback_value: Option<GenericValue>,
+        ) -> Result<GenericValue, BarqError> {
+            self.get_node_parameter(parameter_name, fallback_value).await
+        }
+
+        fn get_node(&self) -> &INode {
+            &self.node
+        }
+
+        fn get_input_data(&self, _input_index: usize) -> Result<&Vec<INodeExecutionData>, BarqError> {
+            Ok(&self.input_data)
+        }
+
+        async fn get_credentials(&self, _name: &str) -> Result<std::collections::HashMap<String, GenericValue>, BarqError> {
+            Ok(std::collections::HashMap::new())
+        }
+
+        fn log(&self, _message: &str) {}
     }
 
     #[tokio::test]
     async fn test_set_node_creates_item() {
         let input = vec![INodeExecutionData::new(IDataObject::from(
-            serde_json::json!({}),
+            serde_json::json!({"old_key": "old_value"}),
         ))];
-        assert!(!input.is_empty());
+        
+        let mut context = MockContext::new(input);
+        context.add_param("assignments", serde_json::json!([
+            { "name": "new_key", "value": "new_val", "type": "string" }
+        ]));
+        
+        let node = SetNode;
+        let result = node.execute(&context).await.unwrap();
+        
+        assert_eq!(result.len(), 1);
+        let output_items = &result[0];
+        assert_eq!(output_items.len(), 1);
+        
+        let val = &output_items[0].json.0;
+        assert_eq!(val.get("new_key").unwrap().as_str().unwrap(), "new_val");
+        assert_eq!(val.get("old_key").unwrap().as_str().unwrap(), "old_value");
     }
 
     #[tokio::test]
-    async fn test_filter_node_empty_input() {
-        let input: Vec<INodeExecutionData> = vec![];
-        assert!(input.is_empty());
+    async fn test_filter_node_operation() {
+        let input = vec![
+            INodeExecutionData::new(IDataObject::from(serde_json::json!({"val": "keep"}))),
+            INodeExecutionData::new(IDataObject::from(serde_json::json!({"val": "drop"}))),
+        ];
+        
+        let mut context = MockContext::new(input);
+        context.add_param("operation", serde_json::json!("notEquals"));
+        // Simulating the item expression mapping where value1 evaluates per item.
+        // Since MockContext doesn't evaluate per item yet, we'll test simple case.
+        // So for MockContext, we will just say `value1` is "keep" and `value2` is "drop"
+        // Wait, FilterNode evaluates `value1 == value2`. Let's test `exists`.
+        context.add_param("operation", serde_json::json!("exists"));
+        context.add_param("value1", serde_json::json!("I exist"));
+        
+        let node = FilterNode;
+        let result = node.execute(&context).await.unwrap();
+        
+        assert_eq!(result[0].len(), 2);
     }
 
     #[tokio::test]
     async fn test_item_lists_split() {
+        let input = vec![
+            INodeExecutionData::new(IDataObject::from(serde_json::json!({"id": 1}))),
+            INodeExecutionData::new(IDataObject::from(serde_json::json!({"id": 2}))),
+            INodeExecutionData::new(IDataObject::from(serde_json::json!({"id": 3}))),
+        ];
+        
+        let mut context = MockContext::new(input);
+        context.add_param("mode", serde_json::json!("splitInBatches"));
+        context.add_param("batchSize", serde_json::json!(2));
+        
         let node = ItemListsNode;
-        let desc = node.get_description();
-        assert_eq!(desc.0.get("name").unwrap(), "Item Lists");
+        let result = node.execute(&context).await.unwrap();
+        
+        assert_eq!(result.len(), 2); // 2 batches
+        assert_eq!(result[0].len(), 2); // First batch has 2 items
+        assert_eq!(result[1].len(), 1); // Second batch has 1 item
     }
 }
