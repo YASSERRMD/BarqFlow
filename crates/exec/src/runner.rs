@@ -145,6 +145,38 @@ impl WorkflowRunner {
                 .gather_input_data(&parsed, node_index, &data_cache)
                 .await?;
 
+            // If the node has incoming edges, but received exactly 0 items across all inputs, 
+            // the upstream branch died (e.g. If node condition failed or Switch case didn't match).
+            // We should skip execution of this node.
+            use petgraph::visit::EdgeRef;
+            let has_incoming_edges = parsed
+                .graph
+                .edges_directed(node_index, petgraph::Direction::Incoming)
+                .next()
+                .is_some();
+
+            if has_incoming_edges {
+                let total_items: usize = input_data.0.values().map(|v| v.len()).sum();
+                if total_items == 0 {
+                    debug!("Skipping node '{}' because all upstream branches yielded 0 items", node.name);
+                    
+                    // Register an empty successful result to propagate the "dead branch" forward
+                    let result = NodeExecutionResult {
+                        node_name: node.name.clone(),
+                        outputs: vec![],
+                        success: true,
+                        error: None,
+                    };
+                    
+                    let node_id = node.id.clone();
+                    let node_name = node.name.clone();
+                    data_cache.insert(node_id, result.clone());
+                    results.insert(node_name, result);
+                    
+                    continue;
+                }
+            }
+
             // Build workflow_cache for this node execution
             let mut workflow_cache_map = HashMap::new();
             for (_, res) in &data_cache {
