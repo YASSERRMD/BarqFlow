@@ -2,7 +2,7 @@
 //!
 //! Thread-safe registry for managing node types with versioning support.
 
-use crate::node_properties::INodeProperties;
+use barqflow_core::properties::INodeProperties;
 use barqflow_core::traits::INodeType;
 use barqflow_core::types::IDataObject;
 use barqflow_core::errors::BarqError;
@@ -263,7 +263,7 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use barqflow_core::traits::IExecuteFunctions;
-    use crate::node_properties::{INodeProperty, NodePropertyType};
+    use barqflow_core::properties::{INodeProperty, NodePropertyType};
 
     // Mock node implementation for testing
     struct MockNode;

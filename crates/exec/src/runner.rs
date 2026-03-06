@@ -306,7 +306,7 @@ pub use barqflow_flow::graph::WorkflowToGraphParser;
 mod tests {
     use super::*;
     use barqflow_core::schema::{INode, INodeParameters, IWorkflowSettings};
-    use barqflow_registry::node_properties::INodeProperties;
+    use barqflow_core::properties::INodeProperties;
     use serde_json::json;
     use std::sync::Arc;
 

@@ -49,7 +49,7 @@ pub trait INodeType: Send + Sync {
 #[async_trait]
 pub trait ICredentialType: Send + Sync {
     /// Returns the UI metadata form for registering these credentials
-    fn get_description(&self) -> crate::types::IDataObject; // Maps to ICredentialDescription
+    fn get_description(&self) -> crate::properties::ICredentialProperties; // Maps to ICredentialDescription
 
     /// Optional hook to validate the credential externally when user clicks "test"
     async fn test_credential(&self, _credential_data: &HashMap<String, crate::types::GenericValue>) -> Result<bool, BarqError> {
