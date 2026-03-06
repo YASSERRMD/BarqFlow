@@ -392,7 +392,6 @@ mod tests {
             name: "Authorization".to_string(),
             value: "Bearer ={{$credentials.oauthToken}}".to_string(),
         };
-        
         let props = ICredentialProperties {
             name: "githubOAuth2Api".to_string(),
             display_name: "GitHub OAuth2 API".to_string(),
@@ -401,13 +400,11 @@ mod tests {
             documentation_url: Some("https://docs.github.com/en/rest".to_string()),
             authenticate: Some(auth),
         };
-        
         let serialized = serde_json::to_string(&props).unwrap();
         
         assert!(serialized.contains("\"name\":\"githubOAuth2Api\""));
         assert!(serialized.contains("\"value\":\"Bearer ={{$credentials.oauthToken}}\""));
         assert!(serialized.contains("\"name\":\"grantType\""));
-        
         let deserialized: ICredentialProperties = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized.properties.len(), 5);
         assert_eq!(deserialized.authenticate.unwrap().r#in, "header");

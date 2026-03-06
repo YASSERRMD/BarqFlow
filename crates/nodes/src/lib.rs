@@ -10,7 +10,7 @@ pub mod wait;
 
 pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) {
     use barqflow_registry::registry::NodeInfo;
-    use barqflow_registry::node_properties::INodeProperties;
+    use barqflow_core::properties::INodeProperties;
     use std::sync::Arc;
 
     let empty_props = INodeProperties {

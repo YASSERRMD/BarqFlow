@@ -2,7 +2,7 @@
 //!
 //! Thread-safe registry for managing node types with versioning support.
 
-use crate::node_properties::INodeProperties;
+use barqflow_core::properties::INodeProperties;
 use barqflow_core::traits::ICredentialType;
 use barqflow_core::traits::INodeType;
 use std::collections::HashMap;
@@ -276,9 +276,9 @@ impl Default for NodeRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::node_properties::{INodeProperty, NodePropertyType};
     use async_trait::async_trait;
     use barqflow_core::errors::BarqError;
+    use barqflow_core::properties::{INodeProperty, NodePropertyType};
     use barqflow_core::traits::IExecuteFunctions;
     use barqflow_core::types::IDataObject;
     use serde_json::json;

@@ -1,4 +1,4 @@
-pub mod node_properties;
+
 pub mod node_registry;
 pub mod registry;
 
