@@ -1,4 +1,4 @@
-import { Settings2, Globe, Database, Bot, Variable, GitBranch, GitMerge, FileCode2, Clock, Play, Send, Hash, Github, Table } from 'lucide-vue-next'
+import { Settings2, Globe, Database, Bot, Variable, GitBranch, GitMerge, FileCode2, Clock, Play, Send, Hash, Github, Table, MessageSquare, Notebook, Table2, DatabaseBackup, Layers } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
 export interface NodeVisualMeta {
@@ -39,6 +39,16 @@ export function getNodeVisuals(nodeTypeName: string): NodeVisualMeta {
             return { icon: Github, color: '#181717', bgColor: '#FFFFFF', iconBgColor: '#f1f5f9', iconColor: '#334155' }
         case 'barqflow-nodes.googleSheets':
             return { icon: Table, color: '#0F9D58', bgColor: '#FFFFFF', iconBgColor: '#dcfce7', iconColor: '#16a34a' }
+        case 'barqflow-nodes.discord':
+            return { icon: MessageSquare, color: '#5865F2', bgColor: '#FFFFFF', iconBgColor: '#e0e7ff', iconColor: '#4f46e5' }
+        case 'barqflow-nodes.notion':
+            return { icon: Notebook, color: '#000000', bgColor: '#FFFFFF', iconBgColor: '#f1f5f9', iconColor: '#1e293b' }
+        case 'barqflow-nodes.airtable':
+            return { icon: Table2, color: '#18BFFF', bgColor: '#FFFFFF', iconBgColor: '#e0f2fe', iconColor: '#0284c7' }
+        case 'barqflow-nodes.mysql':
+            return { icon: DatabaseBackup, color: '#00758F', bgColor: '#FFFFFF', iconBgColor: '#e0f2fe', iconColor: '#0369a1' }
+        case 'barqflow-nodes.redis':
+            return { icon: Layers, color: '#D82C20', bgColor: '#FFFFFF', iconBgColor: '#fee2e2', iconColor: '#dc2626' }
         default:
             return { icon: Settings2, color: '#94a3b8', bgColor: '#FFFFFF', iconBgColor: '#f1f5f9', iconColor: '#64748b' } // Default
     }
