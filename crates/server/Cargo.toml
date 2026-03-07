@@ -14,6 +14,7 @@ tracing.workspace = true
 anyhow.workspace = true
 barqflow-registry.workspace = true
 barqflow-nodes.workspace = true
+barqflow-exec.workspace = true
 reqwest.workspace = true
 serde_json.workspace = true
 tokio-cron-scheduler.workspace = true

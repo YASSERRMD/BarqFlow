@@ -1,7 +1,10 @@
 use crate::state::AppState;
 use tracing::info;
 use barqflow_api::controllers::webhooks::WebhookEndpoint;
-use barqflow_core::schema::INode;
+use barqflow_core::{schema::{INode, WorkflowDef, INodeConnections, IWorkflowSettings}, types::{RunId, WorkflowId}};
+use barqflow_exec::runner::{ExecutionConfig, WorkflowRunContext, WorkflowRunner};
+use std::collections::HashMap;
+use tokio_cron_scheduler::Job;
 
 pub async fn run_boot_sequence(
     state: &AppState,
@@ -33,7 +36,7 @@ pub async fn run_boot_sequence(
             }
         };
 
-        for node in nodes {
+        for node in &nodes {
             if node.r#type == "webhook" {
                 // Extract path parameter, fallback to node ID if not present
                 let path = node.parameters.0.get("path")
@@ -54,9 +57,56 @@ pub async fn run_boot_sequence(
                 });
 
                 info!("Registered webhook route: /webhook/{} -> Workflow: {}", path, wf.id);
+            } else if node.r#type == "barqflow-nodes.cronTrigger" {
+                let cron_expr = node.parameters.0.get("cron")
+                    .and_then(|p| p.as_str())
+                    .unwrap_or("0 * * * * *")
+                    .to_string();
+
+                let state_clone = state.clone();
+                let wf_clone = wf.clone();
+                let nodes_clone = nodes.clone();
+
+                let job = Job::new_async(cron_expr.as_str(), move |_uuid, mut _l| {
+                    let state = state_clone.clone();
+                    let wf = wf_clone.clone();
+                    let nodes = nodes_clone.clone();
+
+                    Box::pin(async move {
+                        let connections: HashMap<String, INodeConnections> = serde_json::from_value(wf.connections.clone()).unwrap_or_default();
+                        let settings: IWorkflowSettings = serde_json::from_value(wf.settings.clone()).unwrap_or_default();
+
+                        let workflow_def = WorkflowDef {
+                            id: WorkflowId(wf.id),
+                            name: wf.name.clone(),
+                            nodes,
+                            connections: connections.into_iter().collect(),
+                            active: wf.active,
+                            settings,
+                        };
+
+                        let runner = WorkflowRunner::new(state.node_registry.clone(), ExecutionConfig::default());
+                        let ctx = WorkflowRunContext {
+                            run_id: RunId::new(),
+                            workflow: workflow_def,
+                            static_data: None,
+                            manual: false,
+                        };
+
+                        if let Err(e) = runner.run_workflow(ctx).await {
+                            tracing::error!("Scheduled workflow {} execution failed: {:?}", wf.id, e);
+                        }
+                    })
+                }).map_err(|e| format!("Failed to create scheduled job: {}", e))?;
+
+                state.job_scheduler.add(job).await.map_err(|e| format!("Failed to add job: {}", e))?;
+                info!("Registered cron trigger ({}) -> Workflow: {}", cron_expr, wf.id);
             }
         }
     }
+
+    state.job_scheduler.start().await.map_err(|e| format!("Failed to start job scheduler: {}", e))?;
+    info!("Background Job Scheduler started successfully.");
 
     info!("Boot sequence completed successfully.");
     Ok(())
