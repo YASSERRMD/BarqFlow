@@ -17,6 +17,7 @@ use crate::controllers::{
     users::{user_routes, AppState as UserState},
     webhooks::{new_webhook_registry, webhook_routes, WebhookRegistry, WebhookState},
     workflows::{workflow_routes, AppState as WfState},
+    nodes::{node_routes, AppState as NodeState},
 };
 
 #[derive(Clone)]
@@ -51,6 +52,9 @@ pub fn create_router(state: AppState) -> Router {
         }))
         .merge(oauth2_routes(OAuth2State {
             credential_repo: Arc::clone(&state.credential_repo),
+        }))
+        .nest("/nodes", node_routes(NodeState {
+            node_registry: Arc::clone(&state.node_registry),
         }));
 
     let webh_routes = webhook_routes(WebhookState {

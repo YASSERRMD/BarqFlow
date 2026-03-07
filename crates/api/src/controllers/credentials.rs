@@ -19,6 +19,7 @@ pub struct AppState {
 pub fn credential_routes(state: AppState) -> Router {
     Router::new()
         .route("/credentials", get(get_credentials).post(create_credential))
+        .route("/credentials/types", get(get_credential_types))
         .route("/credentials/test", post(test_credential))
         .with_state(state)
 }
@@ -47,6 +48,18 @@ async fn get_credentials(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(creds))
+}
+
+async fn get_credential_types(
+    _claims: Claims,
+    State(state): State<AppState>,
+) -> Result<Json<Vec<barqflow_core::properties::ICredentialProperties>>, (StatusCode, String)> {
+    let creds = state.credential_registry.get_all_credentials();
+    let schema_list: Vec<_> = creds.into_iter()
+        .map(|info| info.cred_impl.get_description())
+        .collect();
+    
+    Ok(Json(schema_list))
 }
 
 async fn create_credential(

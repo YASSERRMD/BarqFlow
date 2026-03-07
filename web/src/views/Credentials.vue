@@ -1,15 +1,60 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { Plus, Search, Shield, Key, Lock, MoreVertical, ExternalLink } from 'lucide-vue-next'
+import { ref, onMounted } from 'vue'
+import { Plus, Search, Shield, Key, Lock, MoreVertical, ExternalLink, X } from 'lucide-vue-next'
+import api from '../api'
 
-const credentials = ref([
-  { id: '1', name: 'My Postgres', type: 'Database', status: 'connected', lastUsed: '5m ago' },
-  { id: '2', name: 'Slack Bot Token', type: 'Messaging', status: 'connected', lastUsed: '2h ago' },
-  { id: '3', name: 'OpenAI API Key', type: 'AI', status: 'expired', lastUsed: '4d ago' },
-])
+const credentials = ref<any[]>([])
+const credentialTypes = ref<any[]>([])
 
 const categories = ['All', 'Database', 'Messaging', 'AI', 'Marketing', 'Storage']
 const activeCategory = ref('All')
+
+// Modal State
+const isModalOpen = ref(false)
+const selectedType = ref<any>(null)
+const newCredentialData = ref<any>({})
+const newCredentialName = ref('')
+
+onMounted(async () => {
+  await fetchCredentials()
+  await fetchCredentialTypes()
+})
+
+async function fetchCredentials() {
+  try {
+    const res = await api.get('/credentials')
+    credentials.value = res.data
+  } catch (err) {
+    console.error(err)
+  }
+}
+
+async function fetchCredentialTypes() {
+  try {
+    const res = await api.get('/credentials/types')
+    credentialTypes.value = res.data
+  } catch (err) {
+    console.error(err)
+  }
+}
+
+async function saveCredential() {
+  if (!selectedType.value || !newCredentialName.value) return;
+  try {
+    await api.post('/credentials', {
+      name: newCredentialName.value,
+      cred_type: selectedType.value.name,
+      data: newCredentialData.value
+    })
+    isModalOpen.value = false;
+    newCredentialData.value = {};
+    newCredentialName.value = '';
+    selectedType.value = null;
+    await fetchCredentials(); // Refresh list
+  } catch (err) {
+    console.error("Failed to save credential", err)
+  }
+}
 </script>
 
 <template>
@@ -24,6 +69,7 @@ const activeCategory = ref('All')
         </div>
         
         <button 
+          @click="isModalOpen = true"
           class="bg-brand-500 hover:bg-brand-600 text-white px-6 py-3.5 rounded-2xl flex items-center gap-2.5 shadow-xl shadow-brand-500/20 transition-all hover:-translate-y-1 active:translate-y-0 font-bold"
         >
           <Plus class="w-5 h-5" /> Add Credential
@@ -80,26 +126,19 @@ const activeCategory = ref('All')
                 </div>
               </td>
               <td class="px-8 py-6">
-                <span class="text-sm font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-lg">{{ cred.type }}</span>
+                <span class="text-sm font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-lg">{{ cred.credential_type }}</span>
               </td>
               <td class="px-8 py-6">
                 <div class="flex items-center gap-2">
-                  <div :class="[
-                    'w-2 h-2 rounded-full',
-                    cred.status === 'connected' ? 'bg-green-500' : 'bg-red-500'
-                  ]"></div>
-                  <span :class="[
-                    'text-sm font-bold capitalize',
-                    cred.status === 'connected' ? 'text-green-600' : 'text-red-600'
-                  ]">{{ cred.status }}</span>
+                  <div class="w-2 h-2 rounded-full bg-green-500"></div>
+                  <span class="text-sm font-bold capitalize text-green-600">Saved</span>
                 </div>
               </td>
               <td class="px-8 py-6">
-                <span class="text-sm font-medium text-slate-400">{{ cred.lastUsed }}</span>
+                <span class="text-sm font-medium text-slate-400">Unknown</span>
               </td>
               <td class="px-8 py-6 text-right">
                 <div class="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button class="p-2 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-all"><ExternalLink class="w-4 h-4" /></button>
                   <button class="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"><Trash2 class="w-4 h-4" /></button>
                 </div>
               </td>
@@ -119,6 +158,95 @@ const activeCategory = ref('All')
         </div>
       </div>
 
+    </div>
+
+    <!-- Create Credential Modal -->
+    <div v-if="isModalOpen" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div class="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+        <div class="px-8 py-6 border-b border-slate-100 flex items-center justify-between">
+          <h2 class="text-2xl font-black text-slate-900">Add Credential</h2>
+          <button @click="isModalOpen = false" class="p-2 text-slate-400 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 rounded-xl transition-colors">
+            <X class="w-5 h-5" />
+          </button>
+        </div>
+        
+        <div class="p-8 overflow-y-auto flex-1 bg-slate-50/50">
+          <!-- Step 1: Select Type -->
+          <div v-if="!selectedType" class="space-y-4">
+            <label class="block text-sm font-bold text-slate-700">Select Credential Type</label>
+            <div class="grid grid-cols-2 gap-4">
+              <button 
+                v-for="type in credentialTypes" 
+                :key="type.name"
+                @click="selectedType = type"
+                class="p-4 bg-white border-2 border-slate-100 hover:border-brand-500 rounded-2xl flex flex-col items-start gap-2 text-left transition-all"
+              >
+                <div class="w-10 h-10 bg-brand-50 text-brand-600 rounded-xl flex items-center justify-center">
+                  <Key class="w-5 h-5" />
+                </div>
+                <span class="font-bold text-slate-800">{{ type.displayName || type.name }}</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Step 2: Fill Details -->
+          <div v-else class="space-y-6">
+            <div class="flex items-center justify-between bg-white p-4 rounded-2xl border border-slate-100">
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-brand-50 text-brand-600 rounded-xl flex items-center justify-center">
+                  <Key class="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 class="font-bold text-slate-900">{{ selectedType.displayName || selectedType.name }}</h3>
+                  <button @click="selectedType = null" class="text-xs font-bold text-brand-600 hover:text-brand-700">Change Type</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="space-y-4">
+              <div>
+                <label class="block text-sm font-bold text-slate-700 mb-2">Credential Name</label>
+                <input 
+                  v-model="newCredentialName"
+                  type="text" 
+                  placeholder="e.g. Production Database"
+                  class="w-full px-4 py-3 bg-white border border-slate-200 focus:border-brand-500 rounded-xl text-sm font-medium transition-all outline-none"
+                />
+              </div>
+
+              <div v-for="(prop, idx) in selectedType.properties" :key="idx" class="pt-4 border-t border-slate-100">
+                <label class="block text-sm font-bold text-slate-700 mb-2">{{ prop.displayName }}</label>
+                <input 
+                  v-if="prop.type === 'string' || prop.type === 'text'"
+                  v-model="newCredentialData[prop.name]"
+                  :type="prop.type === 'string' && prop.name.toLowerCase().includes('password') ? 'password' : 'text'" 
+                  class="w-full px-4 py-3 bg-white border border-slate-200 focus:border-brand-500 rounded-xl text-sm font-medium transition-all outline-none"
+                />
+                <select 
+                  v-else-if="prop.type === 'options'"
+                  v-model="newCredentialData[prop.name]"
+                  class="w-full px-4 py-3 bg-white border border-slate-200 focus:border-brand-500 rounded-xl text-sm font-bold text-slate-800 transition-all outline-none"
+                >
+                  <option v-for="opt in prop.options" :key="opt.value" :value="opt.value">{{ opt.name }}</option>
+                </select>
+                <p v-if="prop.description" class="mt-2 text-xs text-slate-400">{{ prop.description }}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="px-8 py-6 border-t border-slate-100 bg-white flex justify-end gap-3">
+          <button @click="isModalOpen = false" class="px-6 py-3 font-bold text-slate-500 hover:bg-slate-50 rounded-xl transition-colors">Cancel</button>
+          <button 
+            v-if="selectedType" 
+            @click="saveCredential"
+            :disabled="!newCredentialName"
+            class="px-8 py-3 font-bold text-white bg-slate-900 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-800 rounded-xl transition-all shadow-xl shadow-slate-900/10 hover:-translate-y-0.5 active:translate-y-0"
+          >
+            Save Credential
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>

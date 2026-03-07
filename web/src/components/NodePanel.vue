@@ -1,11 +1,26 @@
 <script setup lang="ts">
 import { X, Save, Trash2, Info, ExternalLink } from 'lucide-vue-next'
 
+import { useNodeStore } from '../stores/nodes'
+import { computed } from 'vue'
+
+const nodeStore = useNodeStore()
+
 const props = defineProps({
   node: {
     type: Object,
     required: false
   }
+})
+
+const nodeSchema = computed(() => {
+  if (!props.node) return null;
+  // Match the node type from the store
+  const matchedType = nodeStore.nodeTypes.find((n: any) => n.schema?.name === props.node?.data?.type);
+  if (matchedType) return matchedType.schema;
+
+  // Fallback for mock nodes
+  return props.node.data.schema || null;
 })
 
 function getCategoryColor(type: string) {
@@ -50,7 +65,46 @@ function getCategoryColor(type: string) {
 
         <!-- Node Configuration -->
         <div class="space-y-6">
-          <div v-if="node.data.type === 'action'">
+          <!-- Dynamic Node Schema Renderer -->
+          <div v-if="nodeSchema && nodeSchema.properties">
+            <template v-for="(prop, pIdx) in nodeSchema.properties" :key="pIdx">
+              <div class="mb-5">
+                <label class="block text-sm font-bold text-slate-700 mb-2">{{ prop.displayName }}</label>
+                
+                <div v-if="prop.type === 'string' || prop.type === 'text'" class="relative group">
+                  <input 
+                    type="text" 
+                    :placeholder="prop.placeholder || ''"
+                    class="w-full pl-4 pr-16 py-3 bg-slate-50 border-2 border-transparent focus:border-brand-500 focus:bg-white rounded-xl text-sm font-medium transition-all outline-none"
+                  />
+                  <div v-if="prop.type === 'string'" class="absolute right-3 top-1/2 -translate-y-1/2 px-2 py-1 bg-white border border-slate-200 text-[10px] font-black text-slate-400 rounded-lg shadow-sm">EXPR</div>
+                </div>
+
+                <div v-else-if="prop.type === 'options'">
+                  <select class="w-full px-4 py-3 bg-slate-50 border-2 border-transparent focus:border-brand-500 focus:bg-white rounded-xl text-sm font-bold text-slate-800 transition-all outline-none">
+                    <option v-for="opt in prop.options" :key="opt.value" :value="opt.value">
+                      {{ opt.name }}
+                    </option>
+                  </select>
+                </div>
+
+                <div v-else-if="prop.type === 'boolean'" class="flex items-center gap-2 mt-2">
+                  <input type="checkbox" class="w-4 h-4 text-brand-500 bg-slate-50 border-slate-300 rounded focus:ring-brand-500" />
+                  <span class="text-sm font-medium text-slate-700">{{ prop.description || prop.displayName }}</span>
+                </div>
+                
+                <div v-else-if="prop.type === 'collection' || prop.type === 'fixedCollection'">
+                  <button class="w-full py-3 border-2 border-dashed border-slate-200 rounded-xl text-xs font-bold text-slate-400 hover:border-brand-300 hover:text-brand-600 hover:bg-brand-50/30 transition-all">+ Add {{ prop.displayName }}</button>
+                </div>
+                
+                <p v-if="prop.description && prop.type !== 'boolean'" class="mt-2 text-xs text-slate-400">{{ prop.description }}</p>
+              </div>
+            </template>
+          </div>
+
+          <!-- Fallback Hardcoded UI for unlinked schema types -->
+          <div v-else-if="node.data.type === 'action'">
+            <p class="text-xs text-slate-400 italic mb-4">No dynamic schema available from backend. Using fallback rendering.</p>
             <label class="block text-xs font-black text-slate-400 uppercase tracking-widest mb-3">HTTP Configuration</label>
             <div class="space-y-4">
               <div>
@@ -58,34 +112,9 @@ function getCategoryColor(type: string) {
                 <select class="w-full px-4 py-3 bg-slate-50 border-2 border-transparent focus:border-brand-500 focus:bg-white rounded-xl text-sm font-bold text-slate-800 transition-all outline-none">
                   <option>GET</option>
                   <option>POST</option>
-                  <option>PUT</option>
-                  <option>DELETE</option>
                 </select>
               </div>
-              <div>
-                <label class="block text-sm font-bold text-slate-700 mb-2">URL Endpoint</label>
-                <div class="relative group">
-                  <input 
-                    type="text" 
-                    placeholder="https://api.acme.com/v1"
-                    class="w-full pl-4 pr-16 py-3 bg-slate-50 border-2 border-transparent focus:border-brand-500 focus:bg-white rounded-xl text-sm font-medium transition-all outline-none"
-                  />
-                  <div class="absolute right-3 top-1/2 -translate-y-1/2 px-2 py-1 bg-white border border-slate-200 text-[10px] font-black text-slate-400 rounded-lg shadow-sm">EXPR</div>
-                </div>
-              </div>
             </div>
-          </div>
-
-          <div v-if="node.data.type === 'manipulation'">
-             <label class="block text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Assignments</label>
-             <div class="space-y-3">
-               <div class="flex items-center gap-2 p-1 bg-slate-50 rounded-xl border border-slate-100">
-                 <input type="text" placeholder="key" class="w-1/3 bg-transparent px-3 py-2 text-sm font-bold border-none focus:ring-0" />
-                 <div class="w-px h-6 bg-slate-200"></div>
-                 <input type="text" placeholder="value" class="w-full bg-transparent px-3 py-2 text-sm font-medium border-none focus:ring-0" />
-               </div>
-               <button class="w-full py-3 border-2 border-dashed border-slate-200 rounded-xl text-xs font-bold text-slate-400 hover:border-brand-300 hover:text-brand-600 hover:bg-brand-50/30 transition-all">+ Add Assignment</button>
-             </div>
           </div>
 
           <!-- Documentation Link -->
