@@ -336,4 +336,154 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
         max_inputs: 1,
         node_impl: Arc::new(integration::ollama::OllamaNode::new()),
     });
+
+    // --- Phase 59 Expanded Integrations ---
+
+    let mut telegram_props = empty_props.clone();
+    telegram_props.properties = vec![
+        barqflow_core::properties::INodeProperty {
+            name: "chatId".into(),
+            display_name: "Chat ID".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("Target Chat ID".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "text".into(),
+            display_name: "Text".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Text,
+            default: None,
+            description: Some("Message to send".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        }
+    ];
+
+    let _ = registry.register_node(NodeInfo {
+        name: "barqflow-nodes.telegram".into(),
+        display_name: "Telegram".into(),
+        version: 1.0,
+        description: "Send messages via Telegram Bot API".into(),
+        properties: telegram_props,
+        is_trigger: false,
+        max_inputs: 1,
+        node_impl: Arc::new(integration::telegram::TelegramNode::new()),
+    });
+
+    let mut slack_props = empty_props.clone();
+    slack_props.properties = vec![
+        barqflow_core::properties::INodeProperty {
+            name: "channel".into(),
+            display_name: "Channel".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("Slack Channel Name or ID".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "text".into(),
+            display_name: "Text".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Text,
+            default: None,
+            description: Some("Message to send".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        }
+    ];
+
+    let _ = registry.register_node(NodeInfo {
+        name: "barqflow-nodes.slack".into(),
+        display_name: "Slack".into(),
+        version: 1.0,
+        description: "Send messages to Slack channels".into(),
+        properties: slack_props,
+        is_trigger: false,
+        max_inputs: 1,
+        node_impl: Arc::new(integration::slack::SlackNode::new()),
+    });
+
+    let mut github_props = empty_props.clone();
+    github_props.properties = vec![
+        barqflow_core::properties::INodeProperty {
+            name: "owner".into(),
+            display_name: "Repository Owner".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("Owner of the repository".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "repo".into(),
+            display_name: "Repository Name".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("Name of the repository".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        }
+    ];
+
+    let _ = registry.register_node(NodeInfo {
+        name: "barqflow-nodes.github".into(),
+        display_name: "GitHub".into(),
+        version: 1.0,
+        description: "Interact with GitHub API".into(),
+        properties: github_props,
+        is_trigger: false,
+        max_inputs: 1,
+        node_impl: Arc::new(integration::github::GithubNode::new()),
+    });
+
+    let mut sheets_props = empty_props.clone();
+    sheets_props.properties = vec![
+        barqflow_core::properties::INodeProperty {
+            name: "spreadsheetId".into(),
+            display_name: "Spreadsheet ID".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("The ID of the spreadsheet".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "range".into(),
+            display_name: "Range".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("A1 notation range (e.g. Sheet1!A1:B2)".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        }
+    ];
+
+    let _ = registry.register_node(NodeInfo {
+        name: "barqflow-nodes.googleSheets".into(),
+        display_name: "Google Sheets".into(),
+        version: 1.0,
+        description: "Read, write to Google Sheets".into(),
+        properties: sheets_props,
+        is_trigger: false,
+        max_inputs: 1,
+        node_impl: Arc::new(integration::google_sheets::SheetsNode::new()),
+    });
 }

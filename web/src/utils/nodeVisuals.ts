@@ -1,4 +1,4 @@
-import { Settings2, Globe, Database, Bot, Variable, GitBranch, GitMerge, FileCode2, Clock, Play } from 'lucide-vue-next'
+import { Settings2, Globe, Database, Bot, Variable, GitBranch, GitMerge, FileCode2, Clock, Play, Send, Hash, Github, Table } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
 export interface NodeVisualMeta {
@@ -31,6 +31,14 @@ export function getNodeVisuals(nodeTypeName: string): NodeVisualMeta {
         case 'barqflow-nodes.set':
         case 'barqflow-nodes.filter':
             return { icon: Variable, color: '#64748b', bgColor: '#FFFFFF', iconBgColor: '#f8fafc', iconColor: '#475569' } // Slate
+        case 'barqflow-nodes.telegram':
+            return { icon: Send, color: '#229ED9', bgColor: '#FFFFFF', iconBgColor: '#e0f2fe', iconColor: '#0284c7' }
+        case 'barqflow-nodes.slack':
+            return { icon: Hash, color: '#E01E5A', bgColor: '#FFFFFF', iconBgColor: '#ffe4e6', iconColor: '#e11d48' }
+        case 'barqflow-nodes.github':
+            return { icon: Github, color: '#181717', bgColor: '#FFFFFF', iconBgColor: '#f1f5f9', iconColor: '#334155' }
+        case 'barqflow-nodes.googleSheets':
+            return { icon: Table, color: '#0F9D58', bgColor: '#FFFFFF', iconBgColor: '#dcfce7', iconColor: '#16a34a' }
         default:
             return { icon: Settings2, color: '#94a3b8', bgColor: '#FFFFFF', iconBgColor: '#f1f5f9', iconColor: '#64748b' } // Default
     }
