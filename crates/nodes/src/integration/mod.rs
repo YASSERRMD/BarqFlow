@@ -10,3 +10,8 @@ pub mod notion;
 pub mod airtable;
 pub mod mysql;
 pub mod redis;
+pub mod aws_s3;
+pub mod google_drive;
+pub mod jira;
+pub mod stripe;
+pub mod sendgrid;

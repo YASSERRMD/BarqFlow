@@ -1,4 +1,4 @@
-import { Settings2, Globe, Database, Bot, Variable, GitBranch, GitMerge, FileCode2, Clock, Play, Send, Hash, Github, Table, MessageSquare, Notebook, Table2, DatabaseBackup, Layers } from 'lucide-vue-next'
+import { Settings2, Globe, Database, Bot, Variable, GitBranch, GitMerge, FileCode2, Clock, Play, Send, Hash, Github, Table, MessageSquare, Notebook, Table2, DatabaseBackup, Layers, HardDrive, Cloud, Ticket, CreditCard, Mail } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
 export interface NodeVisualMeta {
@@ -49,6 +49,16 @@ export function getNodeVisuals(nodeTypeName: string): NodeVisualMeta {
             return { icon: DatabaseBackup, color: '#00758F', bgColor: '#FFFFFF', iconBgColor: '#e0f2fe', iconColor: '#0369a1' }
         case 'barqflow-nodes.redis':
             return { icon: Layers, color: '#D82C20', bgColor: '#FFFFFF', iconBgColor: '#fee2e2', iconColor: '#dc2626' }
+        case 'barqflow-nodes.awsS3':
+            return { icon: HardDrive, color: '#FF9900', bgColor: '#FFFFFF', iconBgColor: '#fff7ed', iconColor: '#ea580c' }
+        case 'barqflow-nodes.googleDrive':
+            return { icon: Cloud, color: '#1FA463', bgColor: '#FFFFFF', iconBgColor: '#dcfce7', iconColor: '#16a34a' }
+        case 'barqflow-nodes.jira':
+            return { icon: Ticket, color: '#0052CC', bgColor: '#FFFFFF', iconBgColor: '#eff6ff', iconColor: '#2563eb' }
+        case 'barqflow-nodes.stripe':
+            return { icon: CreditCard, color: '#635BFF', bgColor: '#FFFFFF', iconBgColor: '#ede9fe', iconColor: '#7c3aed' }
+        case 'barqflow-nodes.sendGrid':
+            return { icon: Mail, color: '#1A82E2', bgColor: '#FFFFFF', iconBgColor: '#e0f2fe', iconColor: '#0284c7' }
         default:
             return { icon: Settings2, color: '#94a3b8', bgColor: '#FFFFFF', iconBgColor: '#f1f5f9', iconColor: '#64748b' } // Default
     }

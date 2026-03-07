@@ -662,4 +662,180 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
         max_inputs: 1,
         node_impl: Arc::new(integration::redis::RedisNode::new()),
     });
+
+    // --- Phase 61 Integration Nodes (Batch 3) ---
+
+    let mut aws_s3_props = empty_props.clone();
+    aws_s3_props.properties = vec![
+        barqflow_core::properties::INodeProperty {
+            name: "bucketName".into(),
+            display_name: "Bucket Name".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("AWS S3 Bucket Name".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "objectKey".into(),
+            display_name: "Object Key".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("Key of the object to access".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        }
+    ];
+
+    let _ = registry.register_node(NodeInfo {
+        name: "barqflow-nodes.awsS3".into(),
+        display_name: "AWS S3".into(),
+        version: 1.0,
+        description: "Interact with AWS Simple Storage Service".into(),
+        properties: aws_s3_props,
+        is_trigger: false,
+        max_inputs: 1,
+        node_impl: Arc::new(integration::aws_s3::AwsS3Node::new()),
+    });
+
+    let mut google_drive_props = empty_props.clone();
+    google_drive_props.properties = vec![
+        barqflow_core::properties::INodeProperty {
+            name: "fileId".into(),
+            display_name: "File ID".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("Google Drive File ID".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        }
+    ];
+
+    let _ = registry.register_node(NodeInfo {
+        name: "barqflow-nodes.googleDrive".into(),
+        display_name: "Google Drive".into(),
+        version: 1.0,
+        description: "Access and modify Google Drive files".into(),
+        properties: google_drive_props,
+        is_trigger: false,
+        max_inputs: 1,
+        node_impl: Arc::new(integration::google_drive::GoogleDriveNode::new()),
+    });
+
+    let mut jira_props = empty_props.clone();
+    jira_props.properties = vec![
+        barqflow_core::properties::INodeProperty {
+            name: "issueKey".into(),
+            display_name: "Issue Key".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("Jira Issue Key (e.g. PROJ-123)".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        }
+    ];
+
+    let _ = registry.register_node(NodeInfo {
+        name: "barqflow-nodes.jira".into(),
+        display_name: "Jira".into(),
+        version: 1.0,
+        description: "Manage issues and projects in Jira".into(),
+        properties: jira_props,
+        is_trigger: false,
+        max_inputs: 1,
+        node_impl: Arc::new(integration::jira::JiraNode::new()),
+    });
+
+    let mut stripe_props = empty_props.clone();
+    stripe_props.properties = vec![
+        barqflow_core::properties::INodeProperty {
+            name: "resource".into(),
+            display_name: "Resource".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("customer")),
+            description: Some("Stripe Resource".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Customer".into(),
+                    value: serde_json::json!("customer"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Charge".into(),
+                    value: serde_json::json!("charge"),
+                    description: None,
+                }
+            ]),
+        }
+    ];
+
+    let _ = registry.register_node(NodeInfo {
+        name: "barqflow-nodes.stripe".into(),
+        display_name: "Stripe".into(),
+        version: 1.0,
+        description: "Process payments and manage customers in Stripe".into(),
+        properties: stripe_props,
+        is_trigger: false,
+        max_inputs: 1,
+        node_impl: Arc::new(integration::stripe::StripeNode::new()),
+    });
+
+    let mut sendgrid_props = empty_props.clone();
+    sendgrid_props.properties = vec![
+        barqflow_core::properties::INodeProperty {
+            name: "toEmail".into(),
+            display_name: "Recipient Email".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("Email address to send to".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "subject".into(),
+            display_name: "Subject".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("Email Subject".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "content".into(),
+            display_name: "Content".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Text,
+            default: None,
+            description: Some("Email Body".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        }
+    ];
+
+    let _ = registry.register_node(NodeInfo {
+        name: "barqflow-nodes.sendGrid".into(),
+        display_name: "SendGrid".into(),
+        version: 1.0,
+        description: "Send emails via SendGrid".into(),
+        properties: sendgrid_props,
+        is_trigger: false,
+        max_inputs: 1,
+        node_impl: Arc::new(integration::sendgrid::SendGridNode::new()),
+    });
 }
