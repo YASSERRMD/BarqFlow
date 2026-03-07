@@ -1,5 +1,6 @@
 mod boot;
 mod state;
+mod shutdown;
 
 use boot::run_boot_sequence;
 use state::AppState;
@@ -60,5 +61,8 @@ async fn main() {
         listener.local_addr().unwrap()
     );
 
-    axum::serve(listener, api_router).await.unwrap();
+    axum::serve(listener, api_router)
+        .with_graceful_shutdown(shutdown::shutdown_signal(app_state))
+        .await
+        .unwrap();
 }

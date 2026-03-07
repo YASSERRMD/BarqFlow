@@ -36,7 +36,9 @@ pub async fn run_server(db_url: &str, port: u16) -> Result<()> {
     println!("BarqFlow server listening on http://{}", addr);
 
     // Start server
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(crate::shutdown::shutdown_signal(state))
+        .await?;
 
     Ok(())
 }
