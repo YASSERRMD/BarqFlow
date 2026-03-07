@@ -5,3 +5,8 @@ pub mod telegram;
 pub mod slack;
 pub mod github;
 pub mod google_sheets;
+pub mod discord;
+pub mod notion;
+pub mod airtable;
+pub mod mysql;
+pub mod redis;

@@ -486,4 +486,180 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
         max_inputs: 1,
         node_impl: Arc::new(integration::google_sheets::SheetsNode::new()),
     });
+
+    // --- Phase 60 Integration Nodes (Batch 2) ---
+
+    let mut discord_props = empty_props.clone();
+    discord_props.properties = vec![
+        barqflow_core::properties::INodeProperty {
+            name: "webhookUrl".into(),
+            display_name: "Webhook URL".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("Discord Webhook URL".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "content".into(),
+            display_name: "Content".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Text,
+            default: None,
+            description: Some("Message to send".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        }
+    ];
+
+    let _ = registry.register_node(NodeInfo {
+        name: "barqflow-nodes.discord".into(),
+        display_name: "Discord".into(),
+        version: 1.0,
+        description: "Send messages to Discord channels".into(),
+        properties: discord_props,
+        is_trigger: false,
+        max_inputs: 1,
+        node_impl: Arc::new(integration::discord::DiscordNode::new()),
+    });
+
+    let mut notion_props = empty_props.clone();
+    notion_props.properties = vec![
+        barqflow_core::properties::INodeProperty {
+            name: "databaseId".into(),
+            display_name: "Database ID".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("Notion Database ID".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        }
+    ];
+
+    let _ = registry.register_node(NodeInfo {
+        name: "barqflow-nodes.notion".into(),
+        display_name: "Notion".into(),
+        version: 1.0,
+        description: "Interact with Notion API".into(),
+        properties: notion_props,
+        is_trigger: false,
+        max_inputs: 1,
+        node_impl: Arc::new(integration::notion::NotionNode::new()),
+    });
+
+    let mut airtable_props = empty_props.clone();
+    airtable_props.properties = vec![
+        barqflow_core::properties::INodeProperty {
+            name: "baseId".into(),
+            display_name: "Base ID".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("Airtable Base ID".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "table".into(),
+            display_name: "Table".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("Airtable Table Name".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        }
+    ];
+
+    let _ = registry.register_node(NodeInfo {
+        name: "barqflow-nodes.airtable".into(),
+        display_name: "Airtable".into(),
+        version: 1.0,
+        description: "Interact with Airtable".into(),
+        properties: airtable_props,
+        is_trigger: false,
+        max_inputs: 1,
+        node_impl: Arc::new(integration::airtable::AirtableNode::new()),
+    });
+
+    let mut mysql_props = empty_props.clone();
+    mysql_props.properties = vec![
+        barqflow_core::properties::INodeProperty {
+            name: "query".into(),
+            display_name: "Query".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Text,
+            default: None,
+            description: Some("SQL query to execute".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        }
+    ];
+
+    let _ = registry.register_node(NodeInfo {
+        name: "barqflow-nodes.mysql".into(),
+        display_name: "MySQL".into(),
+        version: 1.0,
+        description: "Execute SQL queries on MySQL".into(),
+        properties: mysql_props,
+        is_trigger: false,
+        max_inputs: 1,
+        node_impl: Arc::new(integration::mysql::MysqlNode::new()),
+    });
+
+    let mut redis_props = empty_props.clone();
+    redis_props.properties = vec![
+        barqflow_core::properties::INodeProperty {
+            name: "operation".into(),
+            display_name: "Operation".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("set")),
+            description: Some("Redis Operation".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Get".into(),
+                    value: serde_json::json!("get"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Set".into(),
+                    value: serde_json::json!("set"),
+                    description: None,
+                }
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "key".into(),
+            display_name: "Key".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("Redis Key".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        }
+    ];
+
+    let _ = registry.register_node(NodeInfo {
+        name: "barqflow-nodes.redis".into(),
+        display_name: "Redis".into(),
+        version: 1.0,
+        description: "Interact with Redis key/value store".into(),
+        properties: redis_props,
+        is_trigger: false,
+        max_inputs: 1,
+        node_impl: Arc::new(integration::redis::RedisNode::new()),
+    });
 }
