@@ -66,6 +66,33 @@ impl WorkflowRepo {
         .await
     }
 
+    pub async fn update(
+        &self,
+        id: Uuid,
+        name: &str,
+        nodes: serde_json::Value,
+        connections: serde_json::Value,
+        settings: serde_json::Value,
+    ) -> Result<Option<WorkflowEntity>> {
+        let now = Utc::now();
+        sqlx::query_as::<_, WorkflowEntity>(
+            r#"
+            UPDATE workflows
+            SET name = $1, nodes = $2, connections = $3, settings = $4, updated_at = $5
+            WHERE id = $6
+            RETURNING id, name, active, nodes, connections, settings, created_at, updated_at
+            "#,
+        )
+        .bind(name)
+        .bind(nodes)
+        .bind(connections)
+        .bind(settings)
+        .bind(now)
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
     pub async fn toggle_active(&self, id: Uuid, active: bool) -> Result<Option<WorkflowEntity>> {
         let now = Utc::now();
         sqlx::query_as::<_, WorkflowEntity>(

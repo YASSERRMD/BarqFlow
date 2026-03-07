@@ -47,7 +47,7 @@ function getCategoryColor(type: string) {
           </div>
           <h2 class="font-black text-slate-900 text-xl tracking-tight leading-none">{{ node.data.label }}</h2>
         </div>
-        <button class="w-10 h-10 rounded-xl hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-900 transition-all">
+        <button @click="$emit('close')" class="w-10 h-10 rounded-xl hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-900 transition-all">
           <X class="w-5 h-5" />
         </button>
       </div>
@@ -73,6 +73,7 @@ function getCategoryColor(type: string) {
                 
                 <div v-if="prop.type === 'string' || prop.type === 'text'" class="relative group">
                   <input 
+                    v-model="node.data.properties[prop.name]"
                     type="text" 
                     :placeholder="prop.placeholder || ''"
                     class="w-full pl-4 pr-16 py-3 bg-slate-50 border-2 border-transparent focus:border-brand-500 focus:bg-white rounded-xl text-sm font-medium transition-all outline-none"
@@ -81,7 +82,7 @@ function getCategoryColor(type: string) {
                 </div>
 
                 <div v-else-if="prop.type === 'options'">
-                  <select class="w-full px-4 py-3 bg-slate-50 border-2 border-transparent focus:border-brand-500 focus:bg-white rounded-xl text-sm font-bold text-slate-800 transition-all outline-none">
+                  <select v-model="node.data.properties[prop.name]" class="w-full px-4 py-3 bg-slate-50 border-2 border-transparent focus:border-brand-500 focus:bg-white rounded-xl text-sm font-bold text-slate-800 transition-all outline-none">
                     <option v-for="opt in prop.options" :key="opt.value" :value="opt.value">
                       {{ opt.name }}
                     </option>
@@ -89,7 +90,7 @@ function getCategoryColor(type: string) {
                 </div>
 
                 <div v-else-if="prop.type === 'boolean'" class="flex items-center gap-2 mt-2">
-                  <input type="checkbox" class="w-4 h-4 text-brand-500 bg-slate-50 border-slate-300 rounded focus:ring-brand-500" />
+                  <input v-model="node.data.properties[prop.name]" type="checkbox" class="w-4 h-4 text-brand-500 bg-slate-50 border-slate-300 rounded focus:ring-brand-500" />
                   <span class="text-sm font-medium text-slate-700">{{ prop.description || prop.displayName }}</span>
                 </div>
                 

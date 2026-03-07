@@ -100,6 +100,7 @@ impl WorkflowRepository {
         .await
     }
 
+
     pub async fn toggle_active(&self, id: Uuid, active: bool) -> Result<Option<WorkflowEntity>> {
         let now = Utc::now();
         sqlx::query_as::<_, WorkflowEntity>(

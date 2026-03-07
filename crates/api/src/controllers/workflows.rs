@@ -19,6 +19,7 @@ pub struct AppState {
 pub fn workflow_routes(state: AppState) -> Router {
     Router::new()
         .route("/workflows", get(get_workflows).post(create_workflow))
+        .route("/workflows/{id}", get(get_workflow).put(update_workflow))
         .route("/workflows/{id}/activate", put(toggle_workflow_active))
         .with_state(state)
 }
@@ -49,6 +50,21 @@ async fn get_workflows(
     Ok(Json(workflows))
 }
 
+async fn get_workflow(
+    _claims: Claims,
+    State(state): State<AppState>,
+    Path(id): Path<uuid::Uuid>,
+) -> Result<Json<WorkflowEntity>, (StatusCode, String)> {
+    let workflow = state
+        .workflow_repo
+        .find_by_id(id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Workflow not found".into()))?;
+
+    Ok(Json(workflow))
+}
+
 async fn create_workflow(
     _claims: Claims,
     State(state): State<AppState>,
@@ -66,6 +82,28 @@ async fn create_workflow(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(new_wf))
+}
+
+async fn update_workflow(
+    _claims: Claims,
+    State(state): State<AppState>,
+    Path(id): Path<uuid::Uuid>,
+    Json(payload): Json<CreateWorkflowRequest>,
+) -> Result<Json<WorkflowEntity>, (StatusCode, String)> {
+    let updated_wf = state
+        .workflow_repo
+        .update(
+            id,
+            &payload.name,
+            payload.nodes,
+            payload.connections,
+            payload.settings,
+        )
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Workflow not found".into()))?;
+
+    Ok(Json(updated_wf))
 }
 
 async fn toggle_workflow_active(
