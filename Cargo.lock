@@ -402,6 +402,7 @@ dependencies = [
  "barqflow-api",
  "barqflow-core",
  "barqflow-db",
+ "barqflow-exec",
  "barqflow-nodes",
  "barqflow-registry",
  "dotenvy",
