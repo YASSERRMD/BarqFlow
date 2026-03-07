@@ -1,17 +1,34 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { Handle, Position, type NodeProps } from '@vue-flow/core'
-import { Settings2, Play, AlertCircle, CheckCircle2 } from 'lucide-vue-next'
+import { Play } from 'lucide-vue-next'
+import { getNodeVisuals } from '../utils/nodeVisuals'
 
 const props = defineProps<NodeProps>()
+
+// data.schema.name is the backend name, e.g. "barqflow-nodes.postgres"
+const visuals = computed(() => {
+  const backendName = props.data.schema?.name || '';
+  return getNodeVisuals(backendName);
+})
+
+// Correct text presentation: Top line should be the Node Description/Display Name, bottom line is generic execution or subtitle
+const primaryLabel = computed(() => {
+  return props.data.schema?.display_name || props.data.label || 'Unknown Node';
+})
 </script>
 
 <template>
   <div 
     class="min-w-[220px] bg-white rounded-md border shadow-sm transition-all duration-200 group relative"
     :class="[
-      selected ? 'border-brand-500 ring-1 ring-brand-500 shadow-md' : 'border-slate-300 hover:border-slate-400',
-      data.schema?.type === 'trigger' ? 'border-l-4 border-l-purple-500' : 'border-l-4 border-l-brand-500'
+      selected ? 'ring-1 shadow-md' : 'hover:border-slate-400',
     ]"
+    :style="{ 
+      borderLeftWidth: '4px', 
+      borderLeftColor: visuals.color,
+      borderColor: selected ? visuals.color : '#cbd5e1'
+    }"
   >
     <!-- Handle (Input) -->
     <Handle 
@@ -26,13 +43,13 @@ const props = defineProps<NodeProps>()
     <div class="px-3 py-2 flex items-center justify-between gap-3">
       <!-- Icon & Title -->
       <div class="flex items-center gap-2 overflow-hidden">
-        <div class="w-6 h-6 rounded flex items-center justify-center shrink-0"
-          :class="data.schema?.type === 'trigger' ? 'text-purple-600 bg-purple-50' : 'text-brand-600 bg-brand-50'"
+        <div class="w-7 h-7 rounded flex items-center justify-center shrink-0 shadow-sm"
+          :style="{ backgroundColor: visuals.iconBgColor, color: visuals.iconColor }"
         >
-          <Settings2 class="w-4 h-4" />
+          <component :is="visuals.icon" class="w-4 h-4" />
         </div>
         <div class="min-w-0">
-          <div class="text-sm font-semibold text-slate-800 truncate">{{ data.label }}</div>
+          <div class="text-[13px] font-bold text-slate-800 truncate">{{ primaryLabel }}</div>
           <div class="text-[10px] text-slate-500 uppercase tracking-wide truncate">{{ data.schema?.type || data.type }}</div>
         </div>
       </div>

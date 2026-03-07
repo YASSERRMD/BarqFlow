@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { Search, Settings2, X, Plus } from 'lucide-vue-next'
+import { Search, X, Plus } from 'lucide-vue-next'
 import { useNodeStore } from '../stores/nodes'
+import { getNodeVisuals } from '../utils/nodeVisuals'
 
 const props = defineProps<{
   show: boolean
@@ -62,15 +63,13 @@ function onDragStart(event: DragEvent, nodeTypeObj: any) {
         @dragstart="onDragStart($event, nt)"
       >
         <div class="flex items-center gap-3">
-          <div :class="[
-            'w-8 h-8 rounded shrink-0 flex items-center justify-center',
-            nt.type === 'trigger' ? 'bg-purple-100 text-purple-600' : 'bg-brand-100 text-brand-600'
-          ]">
-            <Settings2 class="w-5 h-5" />
+          <div class="w-8 h-8 rounded shrink-0 flex items-center justify-center text-slate-600 bg-slate-100"
+               :style="{ backgroundColor: getNodeVisuals(nt.schema?.name || '').iconBgColor, color: getNodeVisuals(nt.schema?.name || '').iconColor }">
+            <component :is="getNodeVisuals(nt.schema?.name || '').icon" class="w-5 h-5" />
           </div>
           <div class="flex-1 min-w-0">
-            <h4 class="text-sm font-semibold text-slate-900 truncate">{{ nt.name }}</h4>
-            <p class="text-xs text-slate-500 font-medium uppercase tracking-wider">{{ nt.type }}</p>
+            <h4 class="text-[13px] font-bold text-slate-900 truncate">{{ nt.name }}</h4>
+            <p class="text-[10px] text-slate-500 font-medium uppercase tracking-wider">{{ nt.type }}</p>
           </div>
         </div>
         <p class="text-[11px] text-slate-500 line-clamp-2 mt-1">{{ nt.description }}</p>
