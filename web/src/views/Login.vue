@@ -9,9 +9,19 @@ const authStore = useAuthStore()
 
 const email = ref('')
 const password = ref('')
+const firstName = ref('')
+const lastName = ref('')
+const isLogin = ref(true)
 
-async function handleLogin() {
-  const success = await authStore.login({ email: email.value, password: password.value })
+async function handleSubmit() {
+  const payload = isLogin.value 
+    ? { email: email.value, password: password.value }
+    : { email: email.value, password: password.value, first_name: firstName.value, last_name: lastName.value };
+
+  const success = isLogin.value 
+    ? await authStore.login(payload)
+    : await authStore.register(payload);
+
   if (success) {
     router.push('/workflows')
   }
@@ -29,11 +39,36 @@ async function handleLogin() {
         <div class="w-16 h-16 bg-gradient-to-tr from-brand-500 to-brand-600 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-xl shadow-brand-500/20">
           <img src="/logo.png" alt="Logo" class="w-10 h-10 brightness-0 invert" />
         </div>
-        <h1 class="text-3xl font-extrabold text-slate-900 tracking-tight">Welcome back</h1>
-        <p class="text-slate-500 mt-2 font-medium">Log in to manage your workflows</p>
+        <h1 class="text-3xl font-extrabold text-slate-900 tracking-tight">{{ isLogin ? 'Welcome back' : 'Create an account' }}</h1>
+        <p class="text-slate-500 mt-2 font-medium">{{ isLogin ? 'Log in to manage your workflows' : 'Sign up to start automating' }}</p>
       </div>
 
-      <form @submit.prevent="handleLogin" class="space-y-6">
+      <!-- Error Message -->
+      <div v-if="authStore.error" class="mb-6 p-4 bg-red-50 text-red-600 rounded-xl text-sm font-bold text-center border border-red-100">
+        {{ authStore.error }}
+      </div>
+
+      <form @submit.prevent="handleSubmit" class="space-y-6">
+        
+        <div v-if="!isLogin" class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-bold text-slate-700 mb-2 ml-1">First Name</label>
+            <input 
+              v-model="firstName"
+              type="text" 
+              class="w-full px-4 py-4 bg-white border border-slate-200 rounded-2xl text-slate-900 focus:outline-none focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500 transition-all font-medium"
+            />
+          </div>
+          <div>
+            <label class="block text-sm font-bold text-slate-700 mb-2 ml-1">Last Name</label>
+            <input 
+              v-model="lastName"
+              type="text" 
+              class="w-full px-4 py-4 bg-white border border-slate-200 rounded-2xl text-slate-900 focus:outline-none focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500 transition-all font-medium"
+            />
+          </div>
+        </div>
+
         <div>
           <label class="block text-sm font-bold text-slate-700 mb-2 ml-1">Email address</label>
           <div class="relative group">
@@ -62,7 +97,7 @@ async function handleLogin() {
           </div>
         </div>
 
-        <div class="flex items-center justify-between ml-1">
+        <div v-if="isLogin" class="flex items-center justify-between ml-1">
           <label class="flex items-center gap-2 cursor-pointer">
             <input type="checkbox" class="w-4 h-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
             <span class="text-sm text-slate-500 font-medium">Remember me</span>
@@ -77,15 +112,17 @@ async function handleLogin() {
         >
           <Loader2 v-if="authStore.loading" class="w-5 h-5 animate-spin" />
           <template v-else>
-            Sign in <ArrowRight class="w-5 h-5" />
+            {{ isLogin ? 'Sign in' : 'Create Account' }} <ArrowRight class="w-5 h-5" />
           </template>
         </button>
       </form>
 
       <div class="mt-10 text-center">
         <p class="text-slate-500 text-sm font-medium">
-          Don't have an account? 
-          <a href="#" class="text-brand-600 font-bold hover:text-brand-700">Create one for free</a>
+          {{ isLogin ? "Don't have an account?" : "Already have an account?" }}
+          <button @click="isLogin = !isLogin; authStore.error = null" class="text-brand-600 font-bold hover:text-brand-700 ml-1">
+            {{ isLogin ? 'Create one for free' : 'Sign in instead' }}
+          </button>
         </p>
       </div>
     </div>
