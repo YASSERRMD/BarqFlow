@@ -12,3 +12,7 @@ docs/
 scripts/
 .github/
 .sqlx/
+
+web/node_modules
+web/dist
+
