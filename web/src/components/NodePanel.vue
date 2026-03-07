@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { X, Save, Trash2, Info, ExternalLink } from 'lucide-vue-next'
+import { X, Play, Trash2, Info, ExternalLink, Settings2 } from 'lucide-vue-next'
 
 import { useNodeStore } from '../stores/nodes'
 import { computed } from 'vue'
@@ -25,116 +25,130 @@ const nodeSchema = computed(() => {
 
 function getCategoryColor(type: string) {
   switch (type) {
-    case 'trigger': return 'bg-purple-50 text-purple-700 border-purple-100'
-    case 'logic': return 'bg-amber-50 text-amber-700 border-amber-100'
-    case 'manipulation': return 'bg-blue-50 text-blue-700 border-blue-100'
-    default: return 'bg-brand-50 text-brand-700 border-brand-100'
+    case 'trigger': return 'bg-purple-100 text-purple-700'
+    case 'logic': return 'bg-amber-100 text-amber-700'
+    case 'manipulation': return 'bg-blue-100 text-blue-700'
+    default: return 'bg-brand-100 text-brand-700'
   }
 }
 </script>
 
 <template>
+  <!-- Background Overlay -->
+  <div v-if="node" class="fixed inset-0 bg-slate-900/20 z-40 transition-opacity" @click="$emit('close')"></div>
+
+  <!-- Panel -->
   <aside 
-    class="w-[380px] bg-white border-l border-slate-200 flex flex-col transition-all duration-500 ease-in-out transform shadow-[-10px_0_30px_-5px_rgba(0,0,0,0.03)] z-50 overflow-hidden"
-    :class="node ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0 pointer-events-none'"
+    class="fixed inset-y-0 right-0 w-[450px] bg-white shadow-2xl flex flex-col transition-transform duration-300 ease-in-out z-50 border-l border-slate-200"
+    :class="node ? 'translate-x-0' : 'translate-x-full pointer-events-none'"
   >
-    <div v-if="node" class="flex-1 flex flex-col h-full">
+    <div v-if="node" class="flex-1 flex flex-col h-full bg-slate-50">
       <!-- Header -->
-      <div class="px-7 py-6 border-b border-slate-100 flex items-center justify-between bg-white relative">
-        <div class="flex flex-col">
-          <div :class="['inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-widest border mb-2 w-fit', getCategoryColor(node.data.type)]">
-            {{ node.data.type }}
+      <div class="px-6 py-4 border-b border-slate-200 bg-white flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div :class="['w-8 h-8 rounded flex items-center justify-center', getCategoryColor(node.data.type)]">
+            <Settings2 class="w-5 h-5" />
           </div>
-          <h2 class="font-black text-slate-900 text-xl tracking-tight leading-none">{{ node.data.label }}</h2>
+          <div>
+            <h2 class="text-lg font-bold text-slate-800 leading-tight">{{ node.data.label }}</h2>
+            <div class="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mt-0.5">
+              {{ node.data.type }} Node
+            </div>
+          </div>
         </div>
-        <button @click="$emit('close')" class="w-10 h-10 rounded-xl hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-900 transition-all">
+        <button @click="$emit('close')" class="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">
           <X class="w-5 h-5" />
         </button>
       </div>
 
       <!-- Scrollable Properties Area -->
-      <div class="flex-1 overflow-y-auto px-7 py-8 space-y-8 scrollbar-hide">
+      <div class="flex-1 overflow-y-auto px-6 py-6 space-y-6">
         
         <!-- Description Info Box -->
-        <div class="bg-slate-50 border border-slate-100 rounded-2xl p-4 flex gap-3 items-start">
-          <Info class="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
-          <p class="text-xs text-slate-500 font-medium leading-relaxed">
-            {{ node.data.description || 'Configure this node to handle your workflow data processing requirements.' }}
-          </p>
+        <div class="bg-blue-50/50 border border-blue-100 rounded-lg p-3 flex gap-3 text-sm text-blue-800">
+          <Info class="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
+          <p>{{ node.data.description || 'Configure this node to handle your workflow data processing requirements.' }}</p>
         </div>
 
         <!-- Node Configuration -->
-        <div class="space-y-6">
+        <div class="space-y-5 bg-white border border-slate-200 rounded-lg p-5">
+          <h3 class="font-semibold text-slate-800 mb-4">Parameters</h3>
+
           <!-- Dynamic Node Schema Renderer -->
-          <div v-if="nodeSchema && nodeSchema.properties">
+          <div v-if="nodeSchema && nodeSchema.properties" class="space-y-4">
             <template v-for="(prop, pIdx) in nodeSchema.properties" :key="pIdx">
-              <div class="mb-5">
-                <label class="block text-sm font-bold text-slate-700 mb-2">{{ prop.displayName }}</label>
+              <div>
+                <label class="block text-sm font-medium text-slate-700 mb-1.5">{{ prop.displayName }}</label>
                 
-                <div v-if="prop.type === 'string' || prop.type === 'text'" class="relative group">
+                <div v-if="prop.type === 'string' || prop.type === 'text'" class="relative">
                   <input 
                     v-model="node.data.properties[prop.name]"
                     type="text" 
                     :placeholder="prop.placeholder || ''"
-                    class="w-full pl-4 pr-16 py-3 bg-slate-50 border-2 border-transparent focus:border-brand-500 focus:bg-white rounded-xl text-sm font-medium transition-all outline-none"
+                    class="w-full px-3 py-2 bg-white border border-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500 rounded-md text-sm text-slate-900 shadow-sm"
                   />
-                  <div v-if="prop.type === 'string'" class="absolute right-3 top-1/2 -translate-y-1/2 px-2 py-1 bg-white border border-slate-200 text-[10px] font-black text-slate-400 rounded-lg shadow-sm">EXPR</div>
+                  <button v-if="prop.type === 'string'" class="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-medium text-brand-600 bg-brand-50 px-1.5 rounded hover:bg-brand-100">
+                    Expression
+                  </button>
                 </div>
 
                 <div v-else-if="prop.type === 'options'">
-                  <select v-model="node.data.properties[prop.name]" class="w-full px-4 py-3 bg-slate-50 border-2 border-transparent focus:border-brand-500 focus:bg-white rounded-xl text-sm font-bold text-slate-800 transition-all outline-none">
+                  <select v-model="node.data.properties[prop.name]" class="w-full px-3 py-2 bg-white border border-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500 rounded-md text-sm text-slate-900 shadow-sm">
                     <option v-for="opt in prop.options" :key="opt.value" :value="opt.value">
                       {{ opt.name }}
                     </option>
                   </select>
                 </div>
 
-                <div v-else-if="prop.type === 'boolean'" class="flex items-center gap-2 mt-2">
-                  <input v-model="node.data.properties[prop.name]" type="checkbox" class="w-4 h-4 text-brand-500 bg-slate-50 border-slate-300 rounded focus:ring-brand-500" />
-                  <span class="text-sm font-medium text-slate-700">{{ prop.description || prop.displayName }}</span>
+                <div v-else-if="prop.type === 'boolean'" class="flex items-center mt-2">
+                  <input v-model="node.data.properties[prop.name]" type="checkbox" class="w-4 h-4 text-brand-600 bg-white border-slate-300 rounded focus:ring-brand-500" />
+                  <label class="ml-2 text-sm text-slate-700">{{ prop.description || prop.displayName }}</label>
                 </div>
                 
                 <div v-else-if="prop.type === 'collection' || prop.type === 'fixedCollection'">
-                  <button class="w-full py-3 border-2 border-dashed border-slate-200 rounded-xl text-xs font-bold text-slate-400 hover:border-brand-300 hover:text-brand-600 hover:bg-brand-50/30 transition-all">+ Add {{ prop.displayName }}</button>
+                  <button class="w-full py-2 bg-slate-50 border border-dashed border-slate-300 rounded-md text-sm font-medium text-slate-600 hover:border-brand-500 hover:text-brand-600 transition-colors">
+                    + Add {{ prop.displayName }}
+                  </button>
                 </div>
                 
-                <p v-if="prop.description && prop.type !== 'boolean'" class="mt-2 text-xs text-slate-400">{{ prop.description }}</p>
+                <p v-if="prop.description && prop.type !== 'boolean'" class="mt-1 text-xs text-slate-500">{{ prop.description }}</p>
               </div>
             </template>
           </div>
 
-          <!-- Fallback Hardcoded UI for unlinked schema types -->
-          <div v-else-if="node.data.type === 'action'">
-            <p class="text-xs text-slate-400 italic mb-4">No dynamic schema available from backend. Using fallback rendering.</p>
-            <label class="block text-xs font-black text-slate-400 uppercase tracking-widest mb-3">HTTP Configuration</label>
-            <div class="space-y-4">
-              <div>
-                <label class="block text-sm font-bold text-slate-700 mb-2">Request Method</label>
-                <select class="w-full px-4 py-3 bg-slate-50 border-2 border-transparent focus:border-brand-500 focus:bg-white rounded-xl text-sm font-bold text-slate-800 transition-all outline-none">
-                  <option>GET</option>
-                  <option>POST</option>
-                </select>
-              </div>
+          <!-- Fallback Hardcoded UI -->
+          <div v-else-if="node.data.type === 'action'" class="space-y-4">
+            <p class="text-xs text-amber-600 bg-amber-50 p-2 rounded border border-amber-200">No dynamic schema available from backend. Using fallback rendering.</p>
+            <div>
+              <label class="block text-sm font-medium text-slate-700 mb-1.5">Request Method</label>
+              <select class="w-full px-3 py-2 bg-white border border-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500 rounded-md text-sm text-slate-900 shadow-sm">
+                <option>GET</option>
+                <option>POST</option>
+              </select>
             </div>
           </div>
+        </div>
 
-          <!-- Documentation Link -->
-          <div class="pt-4">
-            <a href="#" class="inline-flex items-center gap-1.5 text-xs font-bold text-brand-600 hover:text-brand-700 transition-colors">
-              <ExternalLink class="w-3 h-3" /> View Node Documentation
-            </a>
-          </div>
+        <!-- Documentation Link -->
+        <div>
+          <a href="#" class="inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 hover:text-brand-700">
+            <ExternalLink class="w-4 h-4" /> View Documentation
+          </a>
         </div>
       </div>
 
-      <!-- Fixed Footer -->
-      <div class="px-7 py-6 border-t border-slate-100 bg-white flex items-center justify-between gap-4">
-        <button class="w-12 h-12 rounded-2xl border-2 border-red-50 text-red-400 hover:bg-red-50 hover:text-red-500 hover:border-red-100 flex items-center justify-center transition-all group">
-          <Trash2 class="w-5 h-5 group-hover:scale-110 transition-transform" />
+      <!-- Footer Actions -->
+      <div class="px-6 py-4 border-t border-slate-200 bg-white flex items-center justify-between gap-3">
+        <button class="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors border border-transparent hover:border-red-100 title='Delete Node'">
+          <Trash2 class="w-5 h-5" />
         </button>
-        <div class="flex-1 flex gap-3">
-          <button class="flex-1 py-3 text-sm font-bold text-slate-500 hover:bg-slate-50 rounded-2xl transition-all">Discard</button>
-          <button class="flex-[1.5] py-3 text-sm font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-2xl shadow-xl shadow-slate-900/10 transition-all hover:-translate-y-1 active:translate-y-0">Apply Changes</button>
+        <div class="flex gap-2">
+          <button class="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 shadow-sm">
+            Mock Data
+          </button>
+          <button class="px-4 py-2 text-sm font-medium text-white bg-brand-600 rounded-lg hover:bg-brand-700 shadow-sm flex items-center gap-2">
+            <Play class="w-4 h-4 fill-current" /> Test Step
+          </button>
         </div>
       </div>
     </div>

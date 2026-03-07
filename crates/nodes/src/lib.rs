@@ -8,6 +8,7 @@ pub mod scheduler;
 pub mod subworkflow;
 pub mod trigger;
 pub mod wait;
+pub mod integration;
 
 pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) {
     use barqflow_registry::registry::NodeInfo;
@@ -172,5 +173,167 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
         is_trigger: false,
         max_inputs: 1,
         node_impl: Arc::new(subworkflow::ExecuteWorkflowNode),
+    });
+
+    let mut postgres_props = empty_props.clone();
+    postgres_props.properties = vec![
+        barqflow_core::properties::INodeProperty {
+            name: "operation".into(),
+            display_name: "Operation".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("executeQuery")),
+            description: Some("The operation to perform".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Execute Query".into(),
+                    value: serde_json::json!("executeQuery"),
+                    description: None,
+                }
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "query".into(),
+            display_name: "Query".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Text,
+            default: Some(serde_json::json!("SELECT * FROM users;")),
+            description: Some("The SQL query to execute".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        }
+    ];
+
+    let _ = registry.register_node(NodeInfo {
+        name: "barqflow-nodes.postgres".into(),
+        display_name: "PostgreSQL".into(),
+        version: 1.0,
+        description: "Execute SQL queries on PostgreSQL".into(),
+        properties: postgres_props,
+        is_trigger: false,
+        max_inputs: 1,
+        node_impl: Arc::new(integration::postgres::PostgresNode::new()),
+    });
+
+    let mut openai_props = empty_props.clone();
+    openai_props.properties = vec![
+        barqflow_core::properties::INodeProperty {
+            name: "operation".into(),
+            display_name: "Operation".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("chatCompletion")),
+            description: Some("The operation to perform".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Chat Completion".into(),
+                    value: serde_json::json!("chatCompletion"),
+                    description: None,
+                }
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "model".into(),
+            display_name: "Model".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: Some(serde_json::json!("gpt-4o-mini")),
+            description: Some("The OpenAI model to use".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "prompt".into(),
+            display_name: "Prompt".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Text,
+            default: None,
+            description: Some("The user prompt to send".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        }
+    ];
+
+    let _ = registry.register_node(NodeInfo {
+        name: "barqflow-nodes.openai".into(),
+        display_name: "OpenAI".into(),
+        version: 1.0,
+        description: "Interact with OpenAI APIs".into(),
+        properties: openai_props,
+        is_trigger: false,
+        max_inputs: 1,
+        node_impl: Arc::new(integration::openai::OpenAINode::new()),
+    });
+
+    let mut ollama_props = empty_props.clone();
+    ollama_props.properties = vec![
+        barqflow_core::properties::INodeProperty {
+            name: "baseUrl".into(),
+            display_name: "Base URL".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: Some(serde_json::json!("http://host.docker.internal:11434")),
+            description: Some("The Ollama instance base URL".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "operation".into(),
+            display_name: "Operation".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("generate")),
+            description: Some("The operation to perform".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Generate Text".into(),
+                    value: serde_json::json!("generate"),
+                    description: None,
+                }
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "model".into(),
+            display_name: "Model".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: Some(serde_json::json!("llama3")),
+            description: Some("The Ollama model to use".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "prompt".into(),
+            display_name: "Prompt".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Text,
+            default: None,
+            description: Some("The user prompt to send".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        }
+    ];
+
+    let _ = registry.register_node(NodeInfo {
+        name: "barqflow-nodes.ollama".into(),
+        display_name: "Ollama".into(),
+        version: 1.0,
+        description: "Interact with a local Ollama instance".into(),
+        properties: ollama_props,
+        is_trigger: false,
+        max_inputs: 1,
+        node_impl: Arc::new(integration::ollama::OllamaNode::new()),
     });
 }

@@ -7,56 +7,62 @@ const props = defineProps<NodeProps>()
 
 <template>
   <div 
+    class="min-w-[220px] bg-white rounded-md border shadow-sm transition-all duration-200 group relative"
     :class="[
-      'min-w-[180px] bg-white rounded-xl shadow-node border-2 transition-all duration-200 group',
-      selected ? 'border-brand-500 ring-4 ring-brand-500/10 shadow-lg scale-102' : 'border-slate-200 hover:border-slate-300'
+      selected ? 'border-brand-500 ring-1 ring-brand-500 shadow-md' : 'border-slate-300 hover:border-slate-400',
+      data.schema?.type === 'trigger' ? 'border-l-4 border-l-purple-500' : 'border-l-4 border-l-brand-500'
     ]"
   >
-    <!-- Status Indicator -->
-    <div v-if="data.status" class="absolute -top-2 -right-2 z-10">
-      <div v-if="data.status === 'success'" class="bg-green-500 text-white p-1 rounded-full shadow-sm">
-        <CheckCircle2 class="w-3.5 h-3.5" />
-      </div>
-      <div v-else-if="data.status === 'error'" class="bg-red-500 text-white p-1 rounded-full shadow-sm">
-        <AlertCircle class="w-3.5 h-3.5" />
-      </div>
-      <div v-else-if="data.status === 'running'" class="bg-brand-500 text-white p-1 rounded-full shadow-sm animate-pulse">
-        <Play class="w-3.5 h-3.5" />
-      </div>
-    </div>
-
-    <!-- Node Header -->
-    <div class="px-4 py-3 border-b border-slate-100 flex items-center gap-3">
-      <div :class="[
-        'w-8 h-8 rounded-lg flex items-center justify-center shadow-sm transition-colors',
-        data.type === 'trigger' ? 'bg-purple-100 text-purple-600' : 'bg-brand-100 text-brand-600'
-      ]">
-        <Settings2 class="w-5 h-5" />
-      </div>
-      <div class="flex-1 min-w-0">
-        <h3 class="text-sm font-semibold text-slate-800 truncate">{{ data.label }}</h3>
-        <p class="text-[10px] text-slate-400 font-medium uppercase tracking-wider">{{ data.type }}</p>
-      </div>
-    </div>
-
-    <!-- Node Body -->
-    <div class="px-4 py-3 bg-slate-50/50 rounded-b-xl">
-      <p class="text-[11px] text-slate-500 line-clamp-2 leading-relaxed italic">
-        {{ data.description || 'No configuration set' }}
-      </p>
-    </div>
-
-    <!-- Handles -->
-    <Handle
-      v-if="data.type !== 'trigger'"
-      type="target"
-      :position="Position.Left"
-      class="!w-3 !h-3 !bg-white !border-2 !border-slate-300 hover:!border-brand-400 !transition-colors !z-20"
+    <!-- Handle (Input) -->
+    <Handle 
+      v-if="data.schema?.type !== 'trigger'"
+      id="a" 
+      type="target" 
+      :position="Position.Left" 
+      class="!w-4 !h-6 !bg-slate-300 !border-2 !border-white !rounded-sm hover:!bg-brand-500 !-ml-2 !transition-colors !z-10" 
     />
-    <Handle
-      type="source"
-      :position="Position.Right"
-      class="!w-3 !h-3 !bg-white !border-2 !border-slate-300 hover:!border-brand-400 !transition-colors !z-20"
+
+    <!-- Header Section -->
+    <div class="px-3 py-2 flex items-center justify-between gap-3">
+      <!-- Icon & Title -->
+      <div class="flex items-center gap-2 overflow-hidden">
+        <div class="w-6 h-6 rounded flex items-center justify-center shrink-0"
+          :class="data.schema?.type === 'trigger' ? 'text-purple-600 bg-purple-50' : 'text-brand-600 bg-brand-50'"
+        >
+          <Settings2 class="w-4 h-4" />
+        </div>
+        <div class="min-w-0">
+          <div class="text-sm font-semibold text-slate-800 truncate">{{ data.label }}</div>
+          <div class="text-[10px] text-slate-500 uppercase tracking-wide truncate">{{ data.schema?.type || data.type }}</div>
+        </div>
+      </div>
+
+      <!-- Action (Run) button - visible on hover -->
+      <button 
+        class="opacity-0 group-hover:opacity-100 p-1.5 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded transition-all shrink-0"
+        title="Execute Node"
+      >
+        <Play class="w-3.5 h-3.5" />
+      </button>
+    </div>
+
+    <!-- Execution Status indicators if needed later -->
+    <div v-if="data.status" class="px-3 py-1.5 border-t border-slate-100 bg-slate-50 rounded-b-md flex items-center gap-2">
+       <span class="w-2 h-2 rounded-full" 
+            :class="{
+              'bg-blue-500 animate-pulse': data.status === 'running',
+              'bg-green-500': data.status === 'success',
+              'bg-red-500': data.status === 'error'
+            }"></span>
+       <span class="text-xs font-medium text-slate-600 capitalize">{{ data.status }}</span>
+    </div>
+
+    <!-- Handle (Output) -->
+    <Handle 
+      id="b" 
+      type="source" 
+      :position="Position.Right" 
+      class="!w-4 !h-6 !bg-slate-300 !border-2 !border-white !rounded-sm hover:!bg-brand-500 !-mr-2 !transition-colors !z-10" 
     />
   </div>
 </template>

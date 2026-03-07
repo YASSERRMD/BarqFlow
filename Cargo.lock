@@ -365,6 +365,7 @@ dependencies = [
  "rhai",
  "serde",
  "serde_json",
+ "sqlx",
  "tokio",
  "tokio-cron-scheduler",
 ]

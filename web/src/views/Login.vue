@@ -29,18 +29,19 @@ async function handleSubmit() {
 </script>
 
 <template>
-  <div class="min-h-screen w-full flex items-center justify-center bg-slate-50 relative overflow-hidden p-6">
-    <!-- Background Accents -->
-    <div class="absolute top-0 right-0 w-[500px] h-[500px] bg-brand-100/50 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2"></div>
-    <div class="absolute bottom-0 left-0 w-[500px] h-[500px] bg-purple-100/50 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2"></div>
+  <div class="min-h-screen w-full flex items-center justify-center bg-mesh-gradient relative overflow-hidden p-6">
+    <!-- Animated Glowing Orbs -->
+    <div class="absolute top-1/4 left-1/4 w-[600px] h-[600px] bg-brand-400/20 rounded-full blur-[100px] mix-blend-multiply animate-blob"></div>
+    <div class="absolute top-1/3 right-1/4 w-[500px] h-[500px] bg-purple-400/20 rounded-full blur-[100px] mix-blend-multiply animate-blob animation-delay-2000"></div>
+    <div class="absolute bottom-1/4 left-1/3 w-[550px] h-[550px] bg-pink-400/20 rounded-full blur-[100px] mix-blend-multiply animate-blob animation-delay-4000"></div>
 
-    <div class="w-full max-w-md bg-white/80 backdrop-blur-xl border border-white shadow-2xl shadow-slate-200/50 rounded-3xl p-8 md:p-12 relative z-10">
+    <div class="w-full max-w-md glass-card rounded-[2.5rem] p-8 md:p-12 relative z-10">
       <div class="text-center mb-10">
-        <div class="w-16 h-16 bg-gradient-to-tr from-brand-500 to-brand-600 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-xl shadow-brand-500/20">
-          <img src="/logo.png" alt="Logo" class="w-10 h-10 brightness-0 invert" />
+        <div class="w-20 h-20 bg-gradient-to-br from-brand-400 to-brand-600 rounded-3xl flex items-center justify-center mx-auto mb-8 shadow-[0_8px_30px_rgb(14,165,233,0.3)] transform -rotate-3 hover:rotate-0 transition-transform duration-500">
+          <img src="/logo.png" alt="Logo" class="w-10 h-10 brightness-0 invert filter" />
         </div>
-        <h1 class="text-3xl font-extrabold text-slate-900 tracking-tight">{{ isLogin ? 'Welcome back' : 'Create an account' }}</h1>
-        <p class="text-slate-500 mt-2 font-medium">{{ isLogin ? 'Log in to manage your workflows' : 'Sign up to start automating' }}</p>
+        <h1 class="text-4xl font-display font-black text-slate-900 tracking-tight leading-none mb-3">{{ isLogin ? 'Welcome back' : 'Create an account' }}</h1>
+        <p class="text-slate-500 font-medium text-lg">{{ isLogin ? 'Log in to manage your workflows' : 'Sign up to start automating' }}</p>
       </div>
 
       <!-- Error Message -->
@@ -56,7 +57,7 @@ async function handleSubmit() {
             <input 
               v-model="firstName"
               type="text" 
-              class="w-full px-4 py-4 bg-white border border-slate-200 rounded-2xl text-slate-900 focus:outline-none focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500 transition-all font-medium"
+              class="w-full px-4 py-4 bg-white/50 backdrop-blur-sm border border-white/60 focus:bg-white rounded-2xl text-slate-900 shadow-inner focus:outline-none focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500 transition-all font-medium"
             />
           </div>
           <div>
@@ -64,7 +65,7 @@ async function handleSubmit() {
             <input 
               v-model="lastName"
               type="text" 
-              class="w-full px-4 py-4 bg-white border border-slate-200 rounded-2xl text-slate-900 focus:outline-none focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500 transition-all font-medium"
+              class="w-full px-4 py-4 bg-white/50 backdrop-blur-sm border border-white/60 focus:bg-white rounded-2xl text-slate-900 shadow-inner focus:outline-none focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500 transition-all font-medium"
             />
           </div>
         </div>
@@ -78,7 +79,7 @@ async function handleSubmit() {
               type="email" 
               required
               placeholder="you@example.com"
-              class="w-full pl-12 pr-4 py-4 bg-white border border-slate-200 rounded-2xl text-slate-900 focus:outline-none focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500 transition-all font-medium"
+              class="w-full pl-12 pr-4 py-4 bg-white/50 backdrop-blur-sm border border-white/60 focus:bg-white rounded-2xl text-slate-900 shadow-inner focus:outline-none focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500 transition-all font-medium"
             />
           </div>
         </div>
@@ -92,7 +93,7 @@ async function handleSubmit() {
               type="password" 
               required
               placeholder="••••••••"
-              class="w-full pl-12 pr-4 py-4 bg-white border border-slate-200 rounded-2xl text-slate-900 focus:outline-none focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500 transition-all font-medium"
+              class="w-full pl-12 pr-4 py-4 bg-white/50 backdrop-blur-sm border border-white/60 focus:bg-white rounded-2xl text-slate-900 shadow-inner focus:outline-none focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500 transition-all font-medium"
             />
           </div>
         </div>
@@ -108,11 +109,11 @@ async function handleSubmit() {
         <button 
           type="submit"
           :disabled="authStore.loading"
-          class="w-full bg-brand-500 hover:bg-brand-600 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 shadow-xl shadow-brand-500/20 transition-all hover:-translate-y-1 active:translate-y-0 disabled:opacity-70"
+          class="w-full bg-gradient-to-r from-brand-500 to-brand-600 hover:tracking-wide text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-[0_8px_30px_rgb(14,165,233,0.3)] transition-all duration-300 hover:-translate-y-1 active:translate-y-0 disabled:opacity-70 text-lg"
         >
-          <Loader2 v-if="authStore.loading" class="w-5 h-5 animate-spin" />
+          <Loader2 v-if="authStore.loading" class="w-6 h-6 animate-spin" />
           <template v-else>
-            {{ isLogin ? 'Sign in' : 'Create Account' }} <ArrowRight class="w-5 h-5" />
+            {{ isLogin ? 'Sign In Securely' : 'Create Account' }} <ArrowRight class="w-5 h-5" />
           </template>
         </button>
       </form>
@@ -120,7 +121,7 @@ async function handleSubmit() {
       <div class="mt-10 text-center">
         <p class="text-slate-500 text-sm font-medium">
           {{ isLogin ? "Don't have an account?" : "Already have an account?" }}
-          <button @click="isLogin = !isLogin; authStore.error = null" class="text-brand-600 font-bold hover:text-brand-700 ml-1">
+          <button @click="isLogin = !isLogin; authStore.error = null" class="text-brand-600 font-bold hover:text-brand-700 ml-1 underline decoration-brand-500/30 underline-offset-4">
             {{ isLogin ? 'Create one for free' : 'Sign in instead' }}
           </button>
         </p>
@@ -128,3 +129,21 @@ async function handleSubmit() {
     </div>
   </div>
 </template>
+
+<style scoped>
+.animate-blob {
+  animation: blob 7s infinite;
+}
+.animation-delay-2000 {
+  animation-delay: 2s;
+}
+.animation-delay-4000 {
+  animation-delay: 4s;
+}
+@keyframes blob {
+  0% { transform: translate(0px, 0px) scale(1); }
+  33% { transform: translate(30px, -50px) scale(1.1); }
+  66% { transform: translate(-20px, 20px) scale(0.9); }
+  100% { transform: translate(0px, 0px) scale(1); }
+}
+</style>

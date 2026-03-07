@@ -5,12 +5,47 @@
 @layer base {
     body {
         @apply bg-canvas text-slate-800 antialiased font-sans;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
     }
+
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6 {
+        @apply font-display tracking-tight text-slate-900;
+    }
+}
+
+/* Stunning Animated Background for Login/Root */
+.bg-mesh-gradient {
+    background-color: #f8fafc;
+    background-image:
+        radial-gradient(at 40% 20%, rgba(14, 165, 233, 0.15) 0px, transparent 50%),
+        radial-gradient(at 80% 0%, rgba(168, 85, 247, 0.15) 0px, transparent 50%),
+        radial-gradient(at 0% 50%, rgba(56, 189, 248, 0.15) 0px, transparent 50%),
+        radial-gradient(at 80% 50%, rgba(217, 70, 239, 0.15) 0px, transparent 50%),
+        radial-gradient(at 0% 100%, rgba(14, 165, 233, 0.15) 0px, transparent 50%),
+        radial-gradient(at 80% 100%, rgba(139, 92, 246, 0.15) 0px, transparent 50%),
+        radial-gradient(at 0% 0%, rgba(255, 255, 255, 0.9) 0px, transparent 50%);
+    background-attachment: fixed;
+    background-size: 100vw 100vh;
+}
+
+/* Glassmorphism Surface Base */
+.glass-panel {
+    @apply bg-white/70 backdrop-blur-2xl border border-white/50 shadow-glass;
+}
+
+.glass-card {
+    @apply bg-white/90 backdrop-blur-xl border border-white/60 shadow-xl shadow-slate-200/50;
 }
 
 /* Custom Workflow Canvas Graph Paper Pattern */
 .bg-graph-pattern {
-    background-image: linear-gradient(to right, #e2e8f0 1px, transparent 1px),
-        linear-gradient(to bottom, #e2e8f0 1px, transparent 1px);
-    background-size: 20px 20px;
+    background-image: linear-gradient(to right, #f1f5f9 1px, transparent 1px),
+        linear-gradient(to bottom, #f1f5f9 1px, transparent 1px);
+    background-size: 24px 24px;
 }

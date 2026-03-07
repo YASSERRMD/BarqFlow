@@ -1,11 +1,11 @@
 # Build the Frontend Web UI
 FROM node:20-alpine AS web-builder
 WORKDIR /app/web
-COPY web/package.json web/package-lock.json ./
-RUN npm install -g pnpm && pnpm install
+RUN npm install -g pnpm
+COPY web/package.json web/pnpm-lock.yaml* ./
+RUN pnpm install
 COPY web/ ./
 RUN pnpm run build
-
 # Build the Rust Backend
 FROM rust:1.88-slim-bookworm AS rust-builder
 WORKDIR /app

@@ -29,6 +29,24 @@ export const useAuthStore = defineStore('auth', {
                 this.loading = false;
             }
         },
+        async register(credentials) {
+            this.loading = true;
+            this.error = null;
+            try {
+                const response = await api.post('/users', credentials);
+                this.token = response.data.token;
+                this.user = response.data.user;
+                localStorage.setItem('token', this.token);
+                return true;
+            }
+            catch (err) {
+                this.error = err.response?.data?.message || 'Registration failed';
+                return false;
+            }
+            finally {
+                this.loading = false;
+            }
+        },
         logout() {
             this.token = null;
             this.user = null;
