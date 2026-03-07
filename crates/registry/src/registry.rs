@@ -43,6 +43,14 @@ impl CredentialRegistry {
         creds.get(name).cloned()
     }
 
+    pub fn get_all_credentials(&self) -> Vec<CredentialInfo> {
+        if let Ok(creds) = self.credentials.read() {
+            creds.values().cloned().collect()
+        } else {
+            Vec::new()
+        }
+    }
+
     /// Retrieves the test rules for a given credential type if available
     pub fn test_credential_rules(
         &self,
