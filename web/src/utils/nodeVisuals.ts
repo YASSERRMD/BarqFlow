@@ -1,4 +1,4 @@
-import { Settings2, Globe, Database, Bot, Variable, GitBranch, GitMerge, FileCode2, Clock, Play, Send, Hash, Github, Table, MessageSquare, Notebook, Table2, DatabaseBackup, Layers, HardDrive, Cloud, Ticket, CreditCard, Mail } from 'lucide-vue-next'
+import { Settings2, Globe, Database, Bot, Variable, GitBranch, GitMerge, FileCode2, Clock, Play, Send, Hash, Github, Table, MessageSquare, Notebook, Table2, DatabaseBackup, Layers, HardDrive, Cloud, Ticket, CreditCard, Mail, CloudLightning, Hexagon, Inbox, Megaphone, Kanban } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
 export interface NodeVisualMeta {
@@ -59,6 +59,16 @@ export function getNodeVisuals(nodeTypeName: string): NodeVisualMeta {
             return { icon: CreditCard, color: '#635BFF', bgColor: '#FFFFFF', iconBgColor: '#ede9fe', iconColor: '#7c3aed' }
         case 'barqflow-nodes.sendGrid':
             return { icon: Mail, color: '#1A82E2', bgColor: '#FFFFFF', iconBgColor: '#e0f2fe', iconColor: '#0284c7' }
+        case 'barqflow-nodes.salesforce':
+            return { icon: CloudLightning, color: '#00A1E0', bgColor: '#FFFFFF', iconBgColor: '#e0f2fe', iconColor: '#0284c7' }
+        case 'barqflow-nodes.hubspot':
+            return { icon: Hexagon, color: '#FF7A59', bgColor: '#FFFFFF', iconBgColor: '#ffedd5', iconColor: '#ea580c' }
+        case 'barqflow-nodes.outlook':
+            return { icon: Inbox, color: '#0078D4', bgColor: '#FFFFFF', iconBgColor: '#dbeafe', iconColor: '#2563eb' }
+        case 'barqflow-nodes.mailchimp':
+            return { icon: Megaphone, color: '#FFE01B', bgColor: '#FFFFFF', iconBgColor: '#fef08a', iconColor: '#ca8a04' }
+        case 'barqflow-nodes.asana':
+            return { icon: Kanban, color: '#F06A6A', bgColor: '#FFFFFF', iconBgColor: '#fee2e2', iconColor: '#ef4444' }
         default:
             return { icon: Settings2, color: '#94a3b8', bgColor: '#FFFFFF', iconBgColor: '#f1f5f9', iconColor: '#64748b' } // Default
     }

@@ -838,4 +838,240 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
         max_inputs: 1,
         node_impl: Arc::new(integration::sendgrid::SendGridNode::new()),
     });
+
+    // --- Phase 62 Integration Nodes (Batch 4) ---
+
+    let mut salesforce_props = empty_props.clone();
+    salesforce_props.properties = vec![
+        barqflow_core::properties::INodeProperty {
+            name: "resource".into(),
+            display_name: "Resource".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("contact")),
+            description: Some("Salesforce Resource".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Contact".into(),
+                    value: serde_json::json!("contact"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Account".into(),
+                    value: serde_json::json!("account"),
+                    description: None,
+                }
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "operation".into(),
+            display_name: "Operation".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("get")),
+            description: Some("Salesforce Operation".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Get".into(),
+                    value: serde_json::json!("get"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Create".into(),
+                    value: serde_json::json!("create"),
+                    description: None,
+                }
+            ]),
+        }
+    ];
+
+    let _ = registry.register_node(NodeInfo {
+        name: "barqflow-nodes.salesforce".into(),
+        display_name: "Salesforce".into(),
+        version: 1.0,
+        description: "Consume Salesforce API".into(),
+        properties: salesforce_props,
+        is_trigger: false,
+        max_inputs: 1,
+        node_impl: Arc::new(integration::salesforce::SalesforceNode::new()),
+    });
+
+    let mut hubspot_props = empty_props.clone();
+    hubspot_props.properties = vec![
+        barqflow_core::properties::INodeProperty {
+            name: "resource".into(),
+            display_name: "Resource".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("contact")),
+            description: Some("HubSpot Resource".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Contact".into(),
+                    value: serde_json::json!("contact"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Company".into(),
+                    value: serde_json::json!("company"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Deal".into(),
+                    value: serde_json::json!("deal"),
+                    description: None,
+                }
+            ]),
+        }
+    ];
+
+    let _ = registry.register_node(NodeInfo {
+        name: "barqflow-nodes.hubspot".into(),
+        display_name: "HubSpot".into(),
+        version: 1.0,
+        description: "Consume HubSpot API".into(),
+        properties: hubspot_props,
+        is_trigger: false,
+        max_inputs: 1,
+        node_impl: Arc::new(integration::hubspot::HubspotNode::new()),
+    });
+
+    let mut outlook_props = empty_props.clone();
+    outlook_props.properties = vec![
+        barqflow_core::properties::INodeProperty {
+            name: "toEmail".into(),
+            display_name: "Recipient Email".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("Email address to send to".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "subject".into(),
+            display_name: "Subject".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("Email Subject".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "content".into(),
+            display_name: "Content".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Text,
+            default: None,
+            description: Some("Email Body".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        }
+    ];
+
+    let _ = registry.register_node(NodeInfo {
+        name: "barqflow-nodes.outlook".into(),
+        display_name: "Microsoft Outlook".into(),
+        version: 1.0,
+        description: "Send emails and manage events in Outlook".into(),
+        properties: outlook_props,
+        is_trigger: false,
+        max_inputs: 1,
+        node_impl: Arc::new(integration::outlook::OutlookNode::new()),
+    });
+
+    let mut mailchimp_props = empty_props.clone();
+    mailchimp_props.properties = vec![
+        barqflow_core::properties::INodeProperty {
+            name: "listId".into(),
+            display_name: "List".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("Mailchimp List (Audience) ID".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "emailAddress".into(),
+            display_name: "Email Address".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("Email address to add".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        }
+    ];
+
+    let _ = registry.register_node(NodeInfo {
+        name: "barqflow-nodes.mailchimp".into(),
+        display_name: "Mailchimp".into(),
+        version: 1.0,
+        description: "Manage lists and campaigns in Mailchimp".into(),
+        properties: mailchimp_props,
+        is_trigger: false,
+        max_inputs: 1,
+        node_impl: Arc::new(integration::mailchimp::MailchimpNode::new()),
+    });
+
+    let mut asana_props = empty_props.clone();
+    asana_props.properties = vec![
+        barqflow_core::properties::INodeProperty {
+            name: "workspace".into(),
+            display_name: "Workspace ID".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("Asana Workspace ID".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "project".into(),
+            display_name: "Project ID".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("Asana Project ID".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "name".into(),
+            display_name: "Task Name".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("Name of task to create".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        }
+    ];
+
+    let _ = registry.register_node(NodeInfo {
+        name: "barqflow-nodes.asana".into(),
+        display_name: "Asana".into(),
+        version: 1.0,
+        description: "Manage projects and tasks in Asana".into(),
+        properties: asana_props,
+        is_trigger: false,
+        max_inputs: 1,
+        node_impl: Arc::new(integration::asana::AsanaNode::new()),
+    });
 }

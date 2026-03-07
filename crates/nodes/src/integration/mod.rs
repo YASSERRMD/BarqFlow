@@ -15,3 +15,8 @@ pub mod google_drive;
 pub mod jira;
 pub mod stripe;
 pub mod sendgrid;
+pub mod salesforce;
+pub mod hubspot;
+pub mod outlook;
+pub mod mailchimp;
+pub mod asana;
