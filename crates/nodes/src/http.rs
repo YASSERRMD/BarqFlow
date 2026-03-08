@@ -8,6 +8,7 @@ use barqflow_core::schema::INodeExecutionData;
 use barqflow_core::traits::INodeType;
 use barqflow_core::types::IDataObject;
 use reqwest::Client;
+use std::time::Duration;
 
 pub struct HttpRequestNode {
     client: Client,
@@ -20,6 +21,51 @@ impl HttpRequestNode {
             .build()
             .unwrap_or_default();
         Self { client }
+    }
+
+    fn parse_kv_pairs(value: &serde_json::Value) -> Vec<(String, String)> {
+        if value.is_null() {
+            return Vec::new();
+        }
+
+        if let Some(obj) = value.as_object() {
+            return obj
+                .iter()
+                .map(|(k, v)| {
+                    let val = v
+                        .as_str()
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| v.to_string());
+                    (k.clone(), val)
+                })
+                .collect();
+        }
+
+        if let Some(arr) = value.as_array() {
+            return arr
+                .iter()
+                .filter_map(|entry| {
+                    let name = entry.get("name").and_then(|n| n.as_str())?;
+                    let value = entry
+                        .get("value")
+                        .map(|v| {
+                            v.as_str()
+                                .map(|s| s.to_string())
+                                .unwrap_or_else(|| v.to_string())
+                        })
+                        .unwrap_or_default();
+                    Some((name.to_string(), value))
+                })
+                .collect();
+        }
+
+        if let Some(raw) = value.as_str() {
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(raw) {
+                return Self::parse_kv_pairs(&parsed);
+            }
+        }
+
+        Vec::new()
     }
 }
 
@@ -68,14 +114,7 @@ impl INodeType for HttpRequestNode {
             let body = context
                 .get_node_parameter_at_item("body", item_index, None)
                 .await
-                .ok()
-                .and_then(|v| {
-                    if v.is_object() || v.is_array() {
-                        Some(v.to_string())
-                    } else {
-                        v.as_str().map(|s| s.to_string())
-                    }
-                });
+                .ok();
 
             let mut request = match method.to_uppercase().as_str() {
                 "POST" => self.client.post(&url),
@@ -85,30 +124,70 @@ impl INodeType for HttpRequestNode {
                 _ => self.client.get(&url),
             };
 
-            // Query parameters
-            if let Ok(queries) = context.get_node_parameter_at_item("queryParameters", item_index, None).await {
-                if let Some(q_array) = queries.as_array() {
-                    for q in q_array {
-                        if let (Some(name), Some(value)) = (q.get("name").and_then(|n| n.as_str()), q.get("value").and_then(|v| v.as_str())) {
-                            request = request.query(&[(name, value)]);
+            let timeout_ms = context
+                .get_node_parameter_at_item("timeout", item_index, None)
+                .await
+                .ok()
+                .and_then(|v| v.as_u64())
+                .unwrap_or(30_000);
+            request = request.timeout(Duration::from_millis(timeout_ms));
+
+            let auth_mode = context
+                .get_node_parameter_at_item("authentication", item_index, None)
+                .await
+                .ok()
+                .and_then(|v| v.as_str().map(|s| s.to_string()))
+                .unwrap_or_else(|| "none".to_string());
+            if auth_mode == "bearer" {
+                if let Ok(token) = context
+                    .get_node_parameter_at_item("authToken", item_index, None)
+                    .await
+                {
+                    if let Some(value) = token.as_str() {
+                        if !value.trim().is_empty() {
+                            request = request.bearer_auth(value.trim());
                         }
                     }
+                }
+            }
+
+            // Query parameters
+            if let Ok(queries) = context
+                .get_node_parameter_at_item("queryParameters", item_index, None)
+                .await
+            {
+                let parsed_queries = Self::parse_kv_pairs(&queries);
+                if !parsed_queries.is_empty() {
+                    request = request.query(&parsed_queries);
                 }
             }
 
             // Headers
-            if let Ok(headers) = context.get_node_parameter_at_item("headers", item_index, None).await {
-                if let Some(h_array) = headers.as_array() {
-                    for h in h_array {
-                        if let (Some(name), Some(value)) = (h.get("name").and_then(|n| n.as_str()), h.get("value").and_then(|v| v.as_str())) {
-                            request = request.header(name, value);
-                        }
+            if let Ok(headers) = context
+                .get_node_parameter_at_item("headers", item_index, None)
+                .await
+            {
+                for (name, value) in Self::parse_kv_pairs(&headers) {
+                    if !name.is_empty() {
+                        request = request.header(name, value);
                     }
                 }
             }
 
-            if let Some(b) = body {
-                request = request.body(b);
+            if let Some(body_value) = body {
+                if !body_value.is_null() {
+                    if body_value.is_object() || body_value.is_array() {
+                        request = request.json(&body_value);
+                    } else if let Some(raw) = body_value.as_str() {
+                        if let Ok(parsed_json) = serde_json::from_str::<serde_json::Value>(raw) {
+                            request = request.json(&parsed_json);
+                        } else {
+                            request = request.body(raw.to_string());
+                        }
+                    } else {
+                        request = request.body(body_value.to_string());
+                    }
+                }
             }
 
             let result = request
@@ -120,28 +199,35 @@ impl INodeType for HttpRequestNode {
                 })?;
 
             let status = result.status().as_u16();
-            let content_type = result.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
-            
+            let content_type = result
+                .headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+
             // Check if response should be treated as binary based on parameters or auto-detect
             let response_format = context
-                .get_node_parameter("responseFormat", None)
+                .get_node_parameter_at_item("responseFormat", item_index, None)
                 .await
                 .map(|v| v.as_str().unwrap_or("autodetect").to_string())
                 .unwrap_or_else(|_| "autodetect".to_string());
 
             let mut is_binary = response_format == "file";
             if response_format == "autodetect" {
-                if !content_type.starts_with("application/json") && !content_type.starts_with("text/") {
+                if !content_type.starts_with("application/json")
+                    && !content_type.starts_with("text/")
+                {
                     is_binary = true;
                 }
             }
 
             if is_binary {
-                use base64::{Engine as _, engine::general_purpose::STANDARD};
+                use base64::{engine::general_purpose::STANDARD, Engine as _};
                 let bytes = result.bytes().await.unwrap_or_default();
                 let b64 = STANDARD.encode(&bytes);
-                
-                use barqflow_core::types::{IBinaryData, BinaryDataContent};
+
+                use barqflow_core::types::{BinaryDataContent, IBinaryData};
                 let bin_data = IBinaryData {
                     content: BinaryDataContent::Memory { data: b64 },
                     mime_type: content_type.clone(),
@@ -151,30 +237,32 @@ impl INodeType for HttpRequestNode {
                     file_extension: None,
                     file_size: Some(bytes.len().to_string()),
                 };
-                
+
                 let output = serde_json::json!({
                     "status": status,
                     "body": "[Binary Data]"
                 });
-                
+
                 let execution_data = INodeExecutionData::new(IDataObject::from(output))
                     .with_binary("data".to_string(), bin_data);
-                
+
                 output_items.push(execution_data);
             } else {
-                let output = if content_type.contains("application/json") {
-                    let json_body: serde_json::Value = result.json().await.unwrap_or(serde_json::json!({}));
-                    serde_json::json!({
-                        "status": status,
-                        "body": json_body
-                    })
-                } else {
-                    let body_text = result.text().await.unwrap_or_default();
-                    serde_json::json!({
-                        "status": status,
-                        "body": body_text
-                    })
-                };
+                let output =
+                    if response_format == "json" || content_type.contains("application/json") {
+                        let json_body: serde_json::Value =
+                            result.json().await.unwrap_or(serde_json::json!({}));
+                        serde_json::json!({
+                            "status": status,
+                            "body": json_body
+                        })
+                    } else {
+                        let body_text = result.text().await.unwrap_or_default();
+                        serde_json::json!({
+                            "status": status,
+                            "body": body_text
+                        })
+                    };
 
                 output_items.push(INodeExecutionData::new(IDataObject::from(output)));
             }
@@ -188,9 +276,9 @@ impl INodeType for HttpRequestNode {
 mod tests {
     use super::*;
 
+    use async_trait::async_trait;
     use barqflow_core::schema::{INode, INodeParameters};
     use barqflow_core::types::{GenericValue, NodeId};
-    use async_trait::async_trait;
     use mockito::Server;
 
     struct MockContext {
@@ -201,7 +289,9 @@ mod tests {
 
     impl MockContext {
         fn new() -> Self {
-            let input = vec![INodeExecutionData::new(IDataObject::from(serde_json::json!({})))];
+            let input = vec![INodeExecutionData::new(IDataObject::from(
+                serde_json::json!({}),
+            ))];
             Self {
                 input_data: vec![input],
                 params: std::collections::HashMap::new(),
@@ -217,7 +307,7 @@ mod tests {
                 },
             }
         }
-        
+
         fn add_param(&mut self, key: &str, value: serde_json::Value) {
             self.params.insert(key.to_string(), value);
         }
@@ -248,14 +338,18 @@ mod tests {
             _item_index: usize,
             fallback_value: Option<GenericValue>,
         ) -> Result<GenericValue, BarqError> {
-            self.get_node_parameter(parameter_name, fallback_value).await
+            self.get_node_parameter(parameter_name, fallback_value)
+                .await
         }
 
         fn get_node(&self) -> &INode {
             &self.node
         }
 
-        async fn get_input_data(&self, input_index: usize) -> Result<Vec<INodeExecutionData>, BarqError> {
+        async fn get_input_data(
+            &self,
+            input_index: usize,
+        ) -> Result<Vec<INodeExecutionData>, BarqError> {
             self.input_data
                 .get(input_index)
                 .cloned()
@@ -265,7 +359,10 @@ mod tests {
                 })
         }
 
-        async fn get_credentials(&self, _name: &str) -> Result<std::collections::HashMap<String, GenericValue>, BarqError> {
+        async fn get_credentials(
+            &self,
+            _name: &str,
+        ) -> Result<std::collections::HashMap<String, GenericValue>, BarqError> {
             Ok(std::collections::HashMap::new())
         }
 
@@ -275,68 +372,72 @@ mod tests {
     #[tokio::test]
     async fn test_http_node_json_request() {
         let mut server = Server::new_async().await;
-        let mock = server.mock("POST", "/data")
+        let mock = server
+            .mock("POST", "/data")
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(r#"{"success": true}"#)
-            .create_async().await;
+            .create_async()
+            .await;
 
         let url = format!("{}/data", server.url());
-        
+
         let mut context = MockContext::new();
         context.add_param("url", serde_json::json!(url));
         context.add_param("method", serde_json::json!("POST"));
         context.add_param("body", serde_json::json!({"test": "payload"}));
-        
+
         let node = HttpRequestNode::new();
         let result = node.execute(&context).await.unwrap();
-        
+
         mock.assert_async().await;
-        
+
         assert_eq!(result.len(), 1);
         let output = &result[0][0].json.0;
         assert_eq!(output.get("status").unwrap().as_u64().unwrap(), 200);
         let body = output.get("body").unwrap();
         assert_eq!(body.get("success").unwrap().as_bool().unwrap(), true);
     }
-    
+
     #[tokio::test]
     async fn test_http_node_binary_request() {
         let mut server = Server::new_async().await;
-        let mock = server.mock("GET", "/image.png")
+        let mock = server
+            .mock("GET", "/image.png")
             .with_status(200)
             .with_header("content-type", "image/png")
             .with_body(vec![137, 80, 78, 71, 13, 10, 26, 10]) // PNG signature
-            .create_async().await;
+            .create_async()
+            .await;
 
         let url = format!("{}/image.png", server.url());
-        
+
         let mut context = MockContext::new();
         context.add_param("url", serde_json::json!(url));
         context.add_param("method", serde_json::json!("GET"));
         context.add_param("responseFormat", serde_json::json!("autodetect"));
-        
+
         let node = HttpRequestNode::new();
         let result = node.execute(&context).await.unwrap();
-        
+
         mock.assert_async().await;
-        
+
         assert_eq!(result.len(), 1);
         let exec_data = &result[0][0];
-        
+
         // Assert we got a binary payload map
         let binary_map = exec_data.binary.as_ref().unwrap();
         let bin_payload = binary_map.get("data").unwrap();
-        
+
         assert_eq!(bin_payload.mime_type, "image/png");
-        
+
         use barqflow_core::types::BinaryDataContent;
         match &bin_payload.content {
             BinaryDataContent::Memory { data } => {
-                use base64::{Engine as _, engine::general_purpose::STANDARD};
+                use base64::{engine::general_purpose::STANDARD, Engine as _};
                 let bytes = STANDARD.decode(data).unwrap();
                 assert_eq!(bytes, vec![137, 80, 78, 71, 13, 10, 26, 10]);
-            },
+            }
             _ => panic!("Expected Memory binary content"),
         }
     }

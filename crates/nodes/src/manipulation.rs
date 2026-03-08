@@ -3,8 +3,93 @@ use barqflow_core::errors::BarqError;
 use barqflow_core::schema::INodeExecutionData;
 use barqflow_core::traits::{IExecuteFunctions, INodeType};
 use barqflow_core::types::IDataObject;
+use serde_json::Value;
 
 pub struct SetNode;
+
+impl SetNode {
+    fn parse_assignments(value: &Value) -> Vec<Value> {
+        if value.is_null() {
+            return Vec::new();
+        }
+
+        if let Some(array) = value.as_array() {
+            return array.clone();
+        }
+
+        if let Some(object) = value.as_object() {
+            if let Some(array) = object.get("assignments").and_then(|v| v.as_array()) {
+                return array.clone();
+            }
+
+            if let Some(array) = object.get("values").and_then(|v| v.as_array()) {
+                return array.clone();
+            }
+
+            // Accept n8n-like grouped object forms, e.g. { "string": [{name, value}] }
+            let mut flattened = Vec::new();
+            for (typed_key, typed_values) in object {
+                if let Some(entries) = typed_values.as_array() {
+                    for entry in entries {
+                        if let Some(map) = entry.as_object() {
+                            let mut assignment = Value::Object(map.clone());
+                            if assignment.get("type").is_none() {
+                                assignment["type"] = Value::String(typed_key.clone());
+                            }
+                            flattened.push(assignment);
+                        }
+                    }
+                }
+            }
+
+            return flattened;
+        }
+
+        if let Some(raw) = value.as_str() {
+            if let Ok(parsed) = serde_json::from_str::<Value>(raw) {
+                return Self::parse_assignments(&parsed);
+            }
+        }
+
+        Vec::new()
+    }
+
+    fn coerce_assignment_value(value: &Value, target_type: Option<&str>) -> Value {
+        match target_type {
+            Some("string") => {
+                if let Some(as_str) = value.as_str() {
+                    Value::String(as_str.to_string())
+                } else {
+                    Value::String(value.to_string())
+                }
+            }
+            Some("number") => {
+                if let Some(number) = value.as_f64() {
+                    serde_json::json!(number)
+                } else if let Some(as_str) = value.as_str() {
+                    if let Ok(parsed) = as_str.parse::<f64>() {
+                        serde_json::json!(parsed)
+                    } else {
+                        value.clone()
+                    }
+                } else {
+                    value.clone()
+                }
+            }
+            Some("boolean") => {
+                if let Some(boolean) = value.as_bool() {
+                    serde_json::json!(boolean)
+                } else if let Some(as_str) = value.as_str() {
+                    let lowered = as_str.trim().to_lowercase();
+                    serde_json::json!(lowered == "true" || lowered == "1")
+                } else {
+                    value.clone()
+                }
+            }
+            _ => value.clone(),
+        }
+    }
+}
 
 #[async_trait]
 impl INodeType for SetNode {
@@ -22,11 +107,29 @@ impl INodeType for SetNode {
         let input_data = context.get_input_data(0).await?;
         let mut output_items = Vec::new();
 
-        let keep_only_set = context
+        let keep_only_set_direct = context
+            .get_node_parameter("keepOnlySet", None)
+            .await
+            .ok()
+            .and_then(|v| v.as_bool());
+        let keep_only_set_legacy = context
             .get_node_parameter("options", None)
             .await
             .ok()
-            .and_then(|v| v.get("keepOnlySet").and_then(|k| k.as_bool()))
+            .and_then(|value| {
+                value
+                    .get("keepOnlySet")
+                    .and_then(|flag| flag.as_bool())
+                    .or_else(|| {
+                        value.as_str().and_then(|raw| {
+                            serde_json::from_str::<Value>(raw).ok().and_then(|parsed| {
+                                parsed.get("keepOnlySet").and_then(|flag| flag.as_bool())
+                            })
+                        })
+                    })
+            });
+        let keep_only_set = keep_only_set_direct
+            .or(keep_only_set_legacy)
             .unwrap_or(false);
 
         for (item_index, item) in input_data.iter().enumerate() {
@@ -36,42 +139,28 @@ impl INodeType for SetNode {
                 item.json.0.clone()
             };
 
-            if let Ok(options) = context.get_node_parameter_at_item("assignments", item_index, None).await {
-                if let Some(assignments) = options.as_array() {
-                    for assignment in assignments {
-                        if let (Some(name), Some(value)) = (
-                            assignment.get("name").and_then(|v| v.as_str()),
-                            assignment.get("value"),
-                        ) {
-                            let mut val = value.clone();
-                            // Type coercion if provided in N8N v1 assignments property
-                            if let Some(target_type) = assignment.get("type").and_then(|t| t.as_str()) {
-                                val = match target_type {
-                                    "string" => serde_json::json!(val.as_str().unwrap_or(&val.to_string())),
-                                    "number" => {
-                                        if let Some(n) = val.as_f64() {
-                                            serde_json::json!(n)
-                                        } else if let Ok(n) = val.as_str().unwrap_or("").parse::<f64>() {
-                                            serde_json::json!(n)
-                                        } else {
-                                            val
-                                        }
-                                    },
-                                    "boolean" => {
-                                        if let Some(b) = val.as_bool() {
-                                            serde_json::json!(b)
-                                        } else if let Some(s) = val.as_str() {
-                                            serde_json::json!(s.to_lowercase() == "true")
-                                        } else {
-                                            val
-                                        }
-                                    },
-                                    _ => val,
-                                };
-                            }
-                            
-                            new_item.insert(name.to_string(), val);
-                        }
+            let mut assignments_value = context
+                .get_node_parameter_at_item("assignments", item_index, None)
+                .await
+                .ok();
+            if assignments_value.is_none() {
+                assignments_value = context
+                    .get_node_parameter_at_item("values", item_index, None)
+                    .await
+                    .ok();
+            }
+
+            if let Some(raw_assignments) = assignments_value {
+                let assignments = SetNode::parse_assignments(&raw_assignments);
+
+                for assignment in assignments {
+                    if let (Some(name), Some(value)) = (
+                        assignment.get("name").and_then(|v| v.as_str()),
+                        assignment.get("value"),
+                    ) {
+                        let target_type = assignment.get("type").and_then(|t| t.as_str());
+                        let val = SetNode::coerce_assignment_value(value, target_type);
+                        new_item.insert(name.to_string(), val);
                     }
                 }
             }
@@ -120,7 +209,10 @@ impl INodeType for FilterNode {
                 keep = !v1.is_null();
             } else if operation == "notExists" {
                 keep = v1.is_null();
-            } else if let Ok(v2) = context.get_node_parameter_at_item("value2", item_index, None).await {
+            } else if let Ok(v2) = context
+                .get_node_parameter_at_item("value2", item_index, None)
+                .await
+            {
                 let v1_str = v1.as_str().unwrap_or("");
                 let v2_str = v2.as_str().unwrap_or("");
                 if operation == "equals" {
@@ -164,6 +256,12 @@ impl INodeType for ItemListsNode {
             .map(|v| v.as_str().unwrap_or("splitInBatches").to_string())
             .unwrap_or_else(|_| "splitInBatches".to_string());
 
+        let normalized_mode = if context.get_node().r#type == "n8n-nodes-base.splitInBatches" {
+            "splitInBatches".to_string()
+        } else {
+            mode
+        };
+
         let batch_size = context
             .get_node_parameter("batchSize", None)
             .await
@@ -171,11 +269,12 @@ impl INodeType for ItemListsNode {
             .and_then(|v| v.as_u64())
             .map(|n| n as usize)
             .unwrap_or(1);
+        let safe_batch_size = if batch_size == 0 { 1 } else { batch_size };
 
-        match mode.as_str() {
+        match normalized_mode.as_str() {
             "splitInBatches" => {
                 let items_per_batch = input_data
-                    .chunks(batch_size)
+                    .chunks(safe_batch_size)
                     .map(|chunk| chunk.to_vec())
                     .collect::<Vec<_>>();
                 Ok(items_per_batch)
@@ -209,13 +308,15 @@ mod tests {
                     r#type: "test".into(),
                     type_version: 1.0,
                     position: [0.0, 0.0],
-                    parameters: barqflow_core::schema::INodeParameters(std::collections::HashMap::new()),
+                    parameters: barqflow_core::schema::INodeParameters(
+                        std::collections::HashMap::new(),
+                    ),
                     credentials: vec![],
                     disabled: false,
                 },
             }
         }
-        
+
         fn add_param(&mut self, key: &str, value: serde_json::Value) {
             self.params.insert(key.to_string(), value);
         }
@@ -246,18 +347,25 @@ mod tests {
             _item_index: usize,
             fallback_value: Option<GenericValue>,
         ) -> Result<GenericValue, BarqError> {
-            self.get_node_parameter(parameter_name, fallback_value).await
+            self.get_node_parameter(parameter_name, fallback_value)
+                .await
         }
 
         fn get_node(&self) -> &INode {
             &self.node
         }
 
-        async fn get_input_data(&self, _input_index: usize) -> Result<Vec<INodeExecutionData>, BarqError> {
+        async fn get_input_data(
+            &self,
+            _input_index: usize,
+        ) -> Result<Vec<INodeExecutionData>, BarqError> {
             Ok(self.input_data.clone())
         }
 
-        async fn get_credentials(&self, _name: &str) -> Result<std::collections::HashMap<String, GenericValue>, BarqError> {
+        async fn get_credentials(
+            &self,
+            _name: &str,
+        ) -> Result<std::collections::HashMap<String, GenericValue>, BarqError> {
             Ok(std::collections::HashMap::new())
         }
 
@@ -269,22 +377,48 @@ mod tests {
         let input = vec![INodeExecutionData::new(IDataObject::from(
             serde_json::json!({"old_key": "old_value"}),
         ))];
-        
+
         let mut context = MockContext::new(input);
-        context.add_param("assignments", serde_json::json!([
-            { "name": "new_key", "value": "new_val", "type": "string" }
-        ]));
-        
+        context.add_param(
+            "assignments",
+            serde_json::json!([
+                { "name": "new_key", "value": "new_val", "type": "string" }
+            ]),
+        );
+
         let node = SetNode;
         let result = node.execute(&context).await.unwrap();
-        
+
         assert_eq!(result.len(), 1);
         let output_items = &result[0];
         assert_eq!(output_items.len(), 1);
-        
+
         let val = &output_items[0].json.0;
         assert_eq!(val.get("new_key").unwrap().as_str().unwrap(), "new_val");
         assert_eq!(val.get("old_key").unwrap().as_str().unwrap(), "old_value");
+    }
+
+    #[tokio::test]
+    async fn test_set_node_keep_only_set_from_legacy_options() {
+        let input = vec![INodeExecutionData::new(IDataObject::from(
+            serde_json::json!({"old_key": "old_value"}),
+        ))];
+
+        let mut context = MockContext::new(input);
+        context.add_param("options", serde_json::json!({ "keepOnlySet": true }));
+        context.add_param(
+            "values",
+            serde_json::json!([
+                { "name": "new_key", "value": "new_val", "type": "string" }
+            ]),
+        );
+
+        let node = SetNode;
+        let result = node.execute(&context).await.unwrap();
+
+        let val = &result[0][0].json.0;
+        assert_eq!(val.get("new_key").unwrap().as_str().unwrap(), "new_val");
+        assert!(val.get("old_key").is_none());
     }
 
     #[tokio::test]
@@ -293,7 +427,7 @@ mod tests {
             INodeExecutionData::new(IDataObject::from(serde_json::json!({"val": "keep"}))),
             INodeExecutionData::new(IDataObject::from(serde_json::json!({"val": "drop"}))),
         ];
-        
+
         let mut context = MockContext::new(input);
         context.add_param("operation", serde_json::json!("notEquals"));
         // Simulating the item expression mapping where value1 evaluates per item.
@@ -302,10 +436,10 @@ mod tests {
         // Wait, FilterNode evaluates `value1 == value2`. Let's test `exists`.
         context.add_param("operation", serde_json::json!("exists"));
         context.add_param("value1", serde_json::json!("I exist"));
-        
+
         let node = FilterNode;
         let result = node.execute(&context).await.unwrap();
-        
+
         assert_eq!(result[0].len(), 2);
     }
 
@@ -316,16 +450,35 @@ mod tests {
             INodeExecutionData::new(IDataObject::from(serde_json::json!({"id": 2}))),
             INodeExecutionData::new(IDataObject::from(serde_json::json!({"id": 3}))),
         ];
-        
+
         let mut context = MockContext::new(input);
         context.add_param("mode", serde_json::json!("splitInBatches"));
         context.add_param("batchSize", serde_json::json!(2));
-        
+
         let node = ItemListsNode;
         let result = node.execute(&context).await.unwrap();
-        
+
         assert_eq!(result.len(), 2); // 2 batches
         assert_eq!(result[0].len(), 2); // First batch has 2 items
         assert_eq!(result[1].len(), 1); // Second batch has 1 item
+    }
+
+    #[tokio::test]
+    async fn test_split_in_batches_alias_uses_batch_size() {
+        let input = vec![
+            INodeExecutionData::new(IDataObject::from(serde_json::json!({"id": 1}))),
+            INodeExecutionData::new(IDataObject::from(serde_json::json!({"id": 2}))),
+        ];
+
+        let mut context = MockContext::new(input);
+        context.node.r#type = "n8n-nodes-base.splitInBatches".to_string();
+        context.add_param("batchSize", serde_json::json!(0));
+
+        let node = ItemListsNode;
+        let result = node.execute(&context).await.unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].len(), 1);
+        assert_eq!(result[1].len(), 1);
     }
 }
