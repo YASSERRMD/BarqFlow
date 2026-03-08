@@ -161,12 +161,96 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
         node_impl: Arc::new(crate::trigger::ManualTriggerNode),
     });
 
+    let mut wait_props = empty_props.clone();
+    wait_props.properties = vec![
+        barqflow_core::properties::INodeProperty {
+            name: "resume".into(),
+            display_name: "Resume".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("time")),
+            description: Some("How this execution should be resumed.".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "After Time Interval".into(),
+                    value: serde_json::json!("time"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "By Webhook".into(),
+                    value: serde_json::json!("webhook"),
+                    description: None,
+                },
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "amount".into(),
+            display_name: "Amount".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Number,
+            default: Some(serde_json::json!(1)),
+            description: Some("Wait duration amount when using time-based resume.".into()),
+            hint: None,
+            required: true,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "resume".into(),
+                    values: vec![serde_json::json!("time")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "unit".into(),
+            display_name: "Unit".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("seconds")),
+            description: Some("Time unit used by Amount.".into()),
+            hint: None,
+            required: true,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "resume".into(),
+                    values: vec![serde_json::json!("time")],
+                }),
+            }),
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Milliseconds".into(),
+                    value: serde_json::json!("milliseconds"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Seconds".into(),
+                    value: serde_json::json!("seconds"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Minutes".into(),
+                    value: serde_json::json!("minutes"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Hours".into(),
+                    value: serde_json::json!("hours"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Days".into(),
+                    value: serde_json::json!("days"),
+                    description: None,
+                },
+            ]),
+        },
+    ];
+
     let _ = registry.register_node(NodeInfo {
         name: "barqflow-nodes.wait".into(),
         display_name: "Wait".into(),
         version: 1.0,
         description: "Suspend execution for a time or webhook".into(),
-        properties: empty_props.clone(),
+        properties: wait_props,
         is_trigger: false,
         max_inputs: 1,
         node_impl: Arc::new(wait::WaitNode),

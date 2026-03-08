@@ -240,6 +240,14 @@ function onDeleteNode() {
                   />
                 </div>
 
+                <div v-else-if="prop.type === 'number'" class="relative">
+                  <input
+                    v-model.number="node.data.properties[prop.name]"
+                    type="number"
+                    class="w-full px-3 py-2 bg-white border border-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500 rounded-md text-sm text-slate-900 shadow-sm"
+                  />
+                </div>
+
                 <div v-else-if="prop.type === 'options'">
                   <select
                     v-model="node.data.properties[prop.name]"
