@@ -40,7 +40,8 @@ pub fn is_node_ui_exposed(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::is_node_ui_exposed;
+    use super::{is_node_ui_exposed, register_all_nodes};
+    use barqflow_registry::registry::NodeRegistry;
 
     #[test]
     fn test_ui_exposure_hides_scaffold_integrations() {
@@ -48,6 +49,29 @@ mod tests {
         assert!(is_node_ui_exposed("barqflow-nodes.postgres"));
         assert!(!is_node_ui_exposed("barqflow-nodes.slack"));
         assert!(!is_node_ui_exposed("barqflow-nodes.github"));
+    }
+
+    #[test]
+    fn test_webhook_schema_exposes_response_configuration_properties() {
+        let registry = NodeRegistry::new();
+        register_all_nodes(&registry);
+
+        let webhook = registry
+            .get_latest_node("barqflow-nodes.webhook")
+            .expect("webhook node should be registered");
+
+        let names: Vec<String> = webhook
+            .properties
+            .properties
+            .iter()
+            .map(|p| p.name.clone())
+            .collect();
+
+        assert!(names.contains(&"path".to_string()));
+        assert!(names.contains(&"httpMethod".to_string()));
+        assert!(names.contains(&"responseMode".to_string()));
+        assert!(names.contains(&"responseCode".to_string()));
+        assert!(names.contains(&"responseData".to_string()));
     }
 }
 
@@ -757,12 +781,118 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
         node_impl: Arc::new(trigger::ErrorTriggerNode),
     });
 
+    let mut webhook_props = empty_props.clone();
+    webhook_props.properties = vec![
+        barqflow_core::properties::INodeProperty {
+            name: "path".into(),
+            display_name: "Path".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: Some(serde_json::json!("webhook")),
+            description: Some("Webhook path segment used under /webhook/{path}.".into()),
+            hint: Some("Example: lead-capture".into()),
+            required: true,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "httpMethod".into(),
+            display_name: "HTTP Method".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("ANY")),
+            description: Some("Method this webhook endpoint accepts.".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "ANY".into(),
+                    value: serde_json::json!("ANY"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "GET".into(),
+                    value: serde_json::json!("GET"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "POST".into(),
+                    value: serde_json::json!("POST"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "PUT".into(),
+                    value: serde_json::json!("PUT"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "PATCH".into(),
+                    value: serde_json::json!("PATCH"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "DELETE".into(),
+                    value: serde_json::json!("DELETE"),
+                    description: None,
+                },
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "responseMode".into(),
+            display_name: "Response Mode".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("onReceived")),
+            description: Some("Choose when to respond to the webhook request.".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "On Received".into(),
+                    value: serde_json::json!("onReceived"),
+                    description: Some("Respond immediately after receiving the request.".into()),
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "After Workflow Completes".into(),
+                    value: serde_json::json!("lastNode"),
+                    description: Some("Respond only after execution finishes.".into()),
+                },
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "responseCode".into(),
+            display_name: "Response Code".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Number,
+            default: Some(serde_json::json!(200)),
+            description: Some("HTTP status code returned to the caller.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "responseData".into(),
+            display_name: "Response Data".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Text,
+            default: Some(serde_json::json!("{\"success\":true}")),
+            description: Some("Optional JSON response payload for On Received mode.".into()),
+            hint: Some("Leave empty to use default payload.".into()),
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "responseMode".into(),
+                    values: vec![serde_json::json!("onReceived")],
+                }),
+            }),
+            options: None,
+        },
+    ];
+
     let _ = registry.register_node(NodeInfo {
         name: "barqflow-nodes.webhook".into(),
         display_name: "Webhook".into(),
         version: 1.0,
         description: "Triggered via webhook".into(),
-        properties: empty_props.clone(),
+        properties: webhook_props,
         is_trigger: true,
         max_inputs: 0,
         node_impl: Arc::new(trigger::WebhookNode::new()),
