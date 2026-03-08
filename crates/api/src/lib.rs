@@ -4,5 +4,6 @@ pub mod routes;
 pub mod db;
 pub mod crypto;
 pub mod repositories;
+pub mod credentials_provider;
 
 pub use routes::{create_router, AppState};

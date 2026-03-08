@@ -1,4 +1,4 @@
-use crate::crypto::{CryptoError, CryptoService};
+use crate::crypto::CryptoService;
 use barqflow_db::models::CredentialEntity;
 use chrono::Utc;
 use sqlx::{PgPool, Result};
@@ -31,11 +31,7 @@ impl CredentialRepository {
         .await?;
 
         for e in &mut entities {
-            if let Some(enc) = e.data.get("encrypted").and_then(|v| v.as_str()) {
-                if let Ok(dec) = self.crypto.decrypt_value(enc) {
-                    e.data = dec;
-                }
-            }
+            self.decrypt_entity_data(e);
         }
 
         Ok(entities)
@@ -54,11 +50,49 @@ impl CredentialRepository {
         .await?;
 
         if let Some(ref mut e) = entity_opt {
-            if let Some(enc) = e.data.get("encrypted").and_then(|v| v.as_str()) {
-                if let Ok(dec) = self.crypto.decrypt_value(enc) {
-                    e.data = dec;
-                }
-            }
+            self.decrypt_entity_data(e);
+        }
+
+        Ok(entity_opt)
+    }
+
+    pub async fn find_by_name(&self, name: &str) -> Result<Option<CredentialEntity>> {
+        let mut entity_opt = sqlx::query_as::<_, CredentialEntity>(
+            r#"
+            SELECT id, name, cred_type, data, created_at, updated_at
+            FROM credentials
+            WHERE name = $1
+            ORDER BY updated_at DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(name)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        if let Some(ref mut e) = entity_opt {
+            self.decrypt_entity_data(e);
+        }
+
+        Ok(entity_opt)
+    }
+
+    pub async fn find_latest_by_type(&self, cred_type: &str) -> Result<Option<CredentialEntity>> {
+        let mut entity_opt = sqlx::query_as::<_, CredentialEntity>(
+            r#"
+            SELECT id, name, cred_type, data, created_at, updated_at
+            FROM credentials
+            WHERE cred_type = $1
+            ORDER BY updated_at DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(cred_type)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        if let Some(ref mut e) = entity_opt {
+            self.decrypt_entity_data(e);
         }
 
         Ok(entity_opt)
@@ -139,6 +173,14 @@ impl CredentialRepository {
         .await?;
 
         Ok(result.rows_affected() > 0)
+    }
+
+    fn decrypt_entity_data(&self, entity: &mut CredentialEntity) {
+        if let Some(enc) = entity.data.get("encrypted").and_then(|v| v.as_str()) {
+            if let Ok(dec) = self.crypto.decrypt_value(enc) {
+                entity.data = dec;
+            }
+        }
     }
 }
 

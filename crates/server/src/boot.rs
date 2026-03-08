@@ -1,6 +1,7 @@
 use crate::state::AppState;
 use tracing::info;
 use barqflow_api::controllers::webhooks::WebhookEndpoint;
+use barqflow_api::credentials_provider::RepositoryCredentialProvider;
 use barqflow_core::{schema::{INode, WorkflowDef, INodeConnections, IWorkflowSettings}, types::{RunId, WorkflowId}};
 use barqflow_exec::runner::{ExecutionConfig, WorkflowRunContext, WorkflowRunner};
 use std::collections::HashMap;
@@ -89,7 +90,11 @@ pub async fn run_boot_sequence(
                             settings,
                         };
 
-                        let runner = WorkflowRunner::new(state.node_registry.clone(), ExecutionConfig::default());
+                        let credential_provider = std::sync::Arc::new(
+                            RepositoryCredentialProvider::new(std::sync::Arc::clone(&state.credential_repo))
+                        );
+                        let runner = WorkflowRunner::new(state.node_registry.clone(), ExecutionConfig::default())
+                            .with_credential_provider(credential_provider);
                         let ctx = WorkflowRunContext {
                             run_id: RunId::new(),
                             workflow: workflow_def,

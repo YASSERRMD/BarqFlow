@@ -13,10 +13,17 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, span, Level};
 
+#[async_trait]
+pub trait CredentialProvider: Send + Sync {
+    async fn get_credentials(
+        &self,
+        name: &str,
+    ) -> Result<HashMap<String, GenericValue>, BarqError>;
+}
+
 /// Execution context passed to each node during execution.
 ///
 /// Provides nodes access to their parameters, input data, and logging facilities.
-#[derive(Debug)]
 pub struct NodeExecutionContext {
     /// The node being executed
     node: INode,
@@ -28,6 +35,17 @@ pub struct NodeExecutionContext {
     run_id: uuid::Uuid,
     /// Execution output cache from previous nodes
     workflow_cache: Arc<RwLock<HashMap<String, Vec<serde_json::Value>>>>,
+    /// Credentials resolver for runtime secret lookup
+    credential_provider: Option<Arc<dyn CredentialProvider>>,
+}
+
+impl std::fmt::Debug for NodeExecutionContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NodeExecutionContext")
+            .field("node", &self.node.name)
+            .field("run_id", &self.run_id)
+            .finish()
+    }
 }
 
 impl NodeExecutionContext {
@@ -45,12 +63,31 @@ impl NodeExecutionContext {
         run_id: uuid::Uuid,
         workflow_cache: Arc<RwLock<HashMap<String, Vec<serde_json::Value>>>>,
     ) -> Self {
+        Self::new_with_credentials(
+            node,
+            input_data,
+            static_data,
+            run_id,
+            workflow_cache,
+            None,
+        )
+    }
+
+    pub fn new_with_credentials(
+        node: INode,
+        input_data: ITaskDataConnections,
+        static_data: Option<IDataObject>,
+        run_id: uuid::Uuid,
+        workflow_cache: Arc<RwLock<HashMap<String, Vec<serde_json::Value>>>>,
+        credential_provider: Option<Arc<dyn CredentialProvider>>,
+    ) -> Self {
         Self {
             node,
             input_data: Arc::new(RwLock::new(input_data)),
             static_data,
             run_id,
             workflow_cache,
+            credential_provider,
         }
     }
 
@@ -227,23 +264,18 @@ impl IExecuteFunctions for NodeExecutionContext {
         &self,
         name: &str,
     ) -> Result<HashMap<String, GenericValue>, BarqError> {
-        // Mocked database retrieval for phase 21. Real implementation would look up 
-        // decrypted credentials from the DB using the active user's encryption key.
-        let mut creds = HashMap::new();
-        creds.insert(
-            "apiKey".to_string(),
-            GenericValue::from(serde_json::json!("mock-api-key-12345")),
-        );
-        creds.insert(
-            "username".to_string(),
-            GenericValue::from(serde_json::json!("mock_user")),
-        );
-        creds.insert(
-            "password".to_string(),
-            GenericValue::from(serde_json::json!("mock_password")),
-        );
-        
-        self.log(&format!("Retrieved mock credential lookup for: {}", name));
+        let provider = self.credential_provider.as_ref().ok_or_else(|| {
+            BarqError::NodeOperationError {
+                node_name: self.node.name.clone(),
+                message: format!(
+                    "Credential provider is not configured; cannot resolve '{}'",
+                    name
+                ),
+            }
+        })?;
+
+        let creds = provider.get_credentials(name).await?;
+        self.log(&format!("Resolved credentials for '{}'", name));
         Ok(creds)
     }
 
@@ -330,6 +362,7 @@ pub struct NodeExecutionContextBuilder {
     static_data: Option<IDataObject>,
     run_id: Option<uuid::Uuid>,
     workflow_cache: Option<Arc<RwLock<HashMap<String, Vec<serde_json::Value>>>>>,
+    credential_provider: Option<Arc<dyn CredentialProvider>>,
 }
 
 impl Default for NodeExecutionContextBuilder {
@@ -346,6 +379,7 @@ impl NodeExecutionContextBuilder {
             static_data: None,
             run_id: None,
             workflow_cache: None,
+            credential_provider: None,
         }
     }
 
@@ -377,14 +411,23 @@ impl NodeExecutionContextBuilder {
         self
     }
 
+    pub fn with_credential_provider(
+        mut self,
+        credential_provider: Arc<dyn CredentialProvider>,
+    ) -> Self {
+        self.credential_provider = Some(credential_provider);
+        self
+    }
+
     pub fn build(self) -> Result<NodeExecutionContext, String> {
-        Ok(NodeExecutionContext::new(
+        Ok(NodeExecutionContext::new_with_credentials(
             self.node.ok_or("node is required")?,
             self.input_data.unwrap_or_default(),
             self.static_data,
             self.run_id.unwrap_or_else(uuid::Uuid::new_v4),
             self.workflow_cache
                 .unwrap_or_else(|| Arc::new(RwLock::new(HashMap::new()))),
+            self.credential_provider,
         ))
     }
 }
@@ -392,6 +435,7 @@ impl NodeExecutionContextBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
     use barqflow_core::types::NodeId;
     use serde_json::json;
 
@@ -407,6 +451,28 @@ mod tests {
             position: [0.0, 0.0],
             parameters: barqflow_core::schema::INodeParameters(params),
             disabled: false,
+        }
+    }
+
+    struct MockCredentialProvider;
+
+    #[async_trait]
+    impl CredentialProvider for MockCredentialProvider {
+        async fn get_credentials(
+            &self,
+            name: &str,
+        ) -> Result<HashMap<String, GenericValue>, BarqError> {
+            if name != "openAiApi" {
+                return Err(BarqError::NodeOperationError {
+                    node_name: "MockProvider".to_string(),
+                    message: format!("unknown credential ref '{}'", name),
+                });
+            }
+
+            Ok(HashMap::from([(
+                "apiKey".to_string(),
+                json!("test-key-123"),
+            )]))
         }
     }
 
@@ -572,5 +638,38 @@ mod tests {
         // Verify the data was updated
         let input = context.input_data.read().await;
         assert!(input.0.contains_key(&0));
+    }
+
+    #[tokio::test]
+    async fn test_get_credentials_uses_runtime_provider() {
+        let node = create_test_node("CredNode");
+        let context = NodeExecutionContext::new_with_credentials(
+            node,
+            ITaskDataConnections::default(),
+            None,
+            uuid::Uuid::new_v4(),
+            Arc::new(RwLock::new(HashMap::new())),
+            Some(Arc::new(MockCredentialProvider)),
+        );
+
+        let creds = context.get_credentials("openAiApi").await.unwrap();
+        assert_eq!(creds.get("apiKey").and_then(|v| v.as_str()), Some("test-key-123"));
+    }
+
+    #[tokio::test]
+    async fn test_get_credentials_without_provider_fails() {
+        let node = create_test_node("NoProviderNode");
+        let context = NodeExecutionContext::new(
+            node,
+            ITaskDataConnections::default(),
+            None,
+            uuid::Uuid::new_v4(),
+            Arc::new(RwLock::new(HashMap::new())),
+        );
+
+        let err = context.get_credentials("openAiApi").await.unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("Credential provider is not configured"));
     }
 }

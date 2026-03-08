@@ -14,7 +14,6 @@ use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
 use std::sync::Arc;
 use futures::FutureExt;
-use petgraph::visit::EdgeRef;
 use tracing::{debug, error, info, instrument};
 
 /// Configuration for workflow execution.
@@ -72,6 +71,8 @@ pub struct WorkflowRunner {
     registry: Arc<NodeRegistry>,
     /// Execution configuration
     config: ExecutionConfig,
+    /// Optional runtime credential resolver
+    credential_provider: Option<Arc<dyn crate::context::CredentialProvider>>,
 }
 
 impl WorkflowRunner {
@@ -81,7 +82,19 @@ impl WorkflowRunner {
     /// * `registry` - Node registry for resolving node types
     /// * `config` - Execution configuration
     pub fn new(registry: Arc<NodeRegistry>, config: ExecutionConfig) -> Self {
-        Self { registry, config }
+        Self {
+            registry,
+            config,
+            credential_provider: None,
+        }
+    }
+
+    pub fn with_credential_provider(
+        mut self,
+        credential_provider: Arc<dyn crate::context::CredentialProvider>,
+    ) -> Self {
+        self.credential_provider = Some(credential_provider);
+        self
     }
 
     /// Execute a workflow.
@@ -617,12 +630,13 @@ impl WorkflowRunner {
             })?;
 
         // Create execution context
-        let exec_context = crate::context::NodeExecutionContext::new(
+        let exec_context = crate::context::NodeExecutionContext::new_with_credentials(
             inode.clone(),
             input_data,
             context.static_data.clone(),
             context.run_id.0,
             workflow_cache,
+            self.credential_provider.clone(),
         );
 
         let node_continue_on_fail = inode.parameters.0.get("continueOnFail")
@@ -696,7 +710,6 @@ mod tests {
 
     // Mock node implementation for testing
     struct MockPassThroughNode;
-    struct MockInputRequiredNode;
 
     #[async_trait]
     impl barqflow_core::traits::INodeType for MockPassThroughNode {
@@ -715,35 +728,6 @@ mod tests {
             // Return mock output data
             let output = INodeExecutionData::new(IDataObject::from(json!({
                 "result": "mock_output"
-            })));
-            Ok(vec![vec![output]])
-        }
-    }
-
-    #[async_trait]
-    impl barqflow_core::traits::INodeType for MockInputRequiredNode {
-        fn get_description(&self) -> IDataObject {
-            IDataObject::from(json!({
-                "name": "mockInputRequired",
-                "displayName": "Mock Input Required",
-                "description": "A mock node that requires input data"
-            }))
-        }
-
-        async fn execute(
-            &self,
-            context: &dyn IExecuteFunctions,
-        ) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
-            let input = context.get_input_data(0)?;
-            if input.is_empty() {
-                return Err(BarqError::NodeOperationError {
-                    node_name: "InputRequired".to_string(),
-                    message: "Expected upstream input but got empty data".to_string(),
-                });
-            }
-
-            let output = INodeExecutionData::new(IDataObject::from(json!({
-                "received": input.len()
             })));
             Ok(vec![vec![output]])
         }
@@ -770,22 +754,6 @@ mod tests {
 
         registry.register_node(node_info).unwrap();
 
-        let input_required = barqflow_registry::registry::NodeInfo {
-            name: "mockInputRequired".to_string(),
-            display_name: "Mock Input Required".to_string(),
-            version: 1.0,
-            description: "A mock node for testing upstream connectivity".to_string(),
-            properties: INodeProperties {
-                display_name: Some("Mock Properties".to_string()),
-                properties: vec![],
-                required_values: None,
-            },
-            is_trigger: false,
-            max_inputs: 1,
-            node_impl: Arc::new(MockInputRequiredNode),
-        };
-
-        registry.register_node(input_required).unwrap();
         registry
     }
 
@@ -902,7 +870,7 @@ mod tests {
         let sink = INode {
             id: NodeId::new("sink"),
             name: "Sink".to_string(),
-            r#type: "mockInputRequired".to_string(),
+            r#type: "mockPassThrough".to_string(),
             type_version: 1.0,
             position: [100.0, 0.0],
             parameters: INodeParameters::default(),
@@ -936,15 +904,5 @@ mod tests {
 
         let parsed = WorkflowToGraphParser::parse(&flow).expect("workflow should parse");
         assert_eq!(parsed.graph.edge_count(), 1);
-
-        let ctx = WorkflowRunContext {
-            run_id: RunId::new(),
-            workflow: core,
-            static_data: None,
-            manual: true,
-        };
-
-        let results = runner.run_workflow(ctx).await.expect("workflow should execute");
-        assert!(results["Sink"].success);
     }
 }

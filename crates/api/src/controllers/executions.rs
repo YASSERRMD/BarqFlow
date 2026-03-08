@@ -9,6 +9,7 @@ use axum::{
 };
 use crate::repositories::execution::ExecutionRepository;
 use crate::repositories::workflow::WorkflowRepository;
+use crate::repositories::credential::CredentialRepository;
 use barqflow_db::models::ExecutionEntity;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -18,6 +19,7 @@ pub struct AppState {
     pub execution_repo: Arc<ExecutionRepository>,
     pub workflow_repo: Arc<WorkflowRepository>,
     pub node_registry: Arc<barqflow_registry::registry::NodeRegistry>,
+    pub credential_repo: Arc<CredentialRepository>,
 }
 
 pub fn execution_routes(state: AppState) -> Router {
@@ -83,7 +85,11 @@ async fn execute_workflow(
         settings,
     };
 
-    let runner = WorkflowRunner::new(state.node_registry.clone(), ExecutionConfig::default());
+    let credential_provider = Arc::new(crate::credentials_provider::RepositoryCredentialProvider::new(
+        Arc::clone(&state.credential_repo),
+    ));
+    let runner = WorkflowRunner::new(state.node_registry.clone(), ExecutionConfig::default())
+        .with_credential_provider(credential_provider);
     let run_id = RunId::new();
     let ctx = WorkflowRunContext {
         run_id,
