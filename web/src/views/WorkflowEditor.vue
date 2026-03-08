@@ -457,12 +457,14 @@ function extractNodeError(result: any, nodeLabel?: string): string {
     return String(result.data.error)
   }
 
-  const firstFailure = Object.values(result?.data || {}).find(
-    (entry: any) => entry && entry.success === false,
-  ) as any
+  const firstFailureEntry = Object.entries(result?.data || {}).find(
+    ([, entry]: [string, any]) => entry && entry.success === false,
+  ) as [string, any] | undefined
 
-  if (firstFailure?.error) {
-    return String(firstFailure.error)
+  if (firstFailureEntry?.[1]?.error) {
+    const [failedNodeName, failedNode] = firstFailureEntry
+    const error = String(failedNode.error)
+    return failedNodeName ? `${failedNodeName}: ${error}` : error
   }
 
   return 'Execution failed'
