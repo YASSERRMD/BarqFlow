@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { Plus, Search, Shield, Key, Lock, X, Trash2 } from 'lucide-vue-next'
+import { computed, onMounted, ref, watch } from 'vue'
+import { Plus, Search, Shield, Key, Lock, X, Trash2, FlaskConical, CheckCircle2, XCircle, Loader2 } from 'lucide-vue-next'
 import api from '../api'
 
 const credentials = ref<any[]>([])
@@ -10,11 +10,16 @@ const categories = ['All', 'Database', 'Messaging', 'AI', 'Marketing', 'Storage'
 const activeCategory = ref('All')
 const searchTerm = ref('')
 
-// Modal State
 const isModalOpen = ref(false)
 const selectedType = ref<any>(null)
 const newCredentialData = ref<any>({})
 const newCredentialName = ref('')
+
+const saveLoading = ref(false)
+const testLoading = ref(false)
+const modalError = ref<string | null>(null)
+const modalSuccess = ref<string | null>(null)
+const lastTestValid = ref<boolean | null>(null)
 
 const filteredCredentials = computed(() => {
   const query = searchTerm.value.trim().toLowerCase()
@@ -31,10 +36,46 @@ const filteredCredentials = computed(() => {
   })
 })
 
+watch(
+  () => JSON.stringify(newCredentialData.value),
+  () => {
+    if (lastTestValid.value !== null) {
+      lastTestValid.value = null
+      modalSuccess.value = null
+    }
+  },
+)
+
 onMounted(async () => {
   await fetchCredentials()
   await fetchCredentialTypes()
 })
+
+function resetModalState() {
+  modalError.value = null
+  modalSuccess.value = null
+  lastTestValid.value = null
+}
+
+function openCreateModal() {
+  isModalOpen.value = true
+  selectedType.value = null
+  newCredentialData.value = {}
+  newCredentialName.value = ''
+  resetModalState()
+}
+
+function chooseType(type: any) {
+  selectedType.value = type
+  newCredentialData.value = {}
+  resetModalState()
+}
+
+function changeType() {
+  selectedType.value = null
+  newCredentialData.value = {}
+  resetModalState()
+}
 
 async function fetchCredentials() {
   try {
@@ -54,21 +95,63 @@ async function fetchCredentialTypes() {
   }
 }
 
+async function testCredential() {
+  if (!selectedType.value) return
+
+  testLoading.value = true
+  modalError.value = null
+  modalSuccess.value = null
+
+  try {
+    const res = await api.post('/credentials/test', {
+      cred_type: selectedType.value.name,
+      data: newCredentialData.value,
+    })
+
+    if (res.data?.valid) {
+      lastTestValid.value = true
+      modalSuccess.value = 'Credential test passed.'
+    } else {
+      lastTestValid.value = false
+      modalError.value = 'Credential test failed.'
+    }
+  } catch (err: any) {
+    lastTestValid.value = false
+    modalError.value = err?.response?.data || err?.message || 'Credential test failed.'
+  } finally {
+    testLoading.value = false
+  }
+}
+
 async function saveCredential() {
-  if (!selectedType.value || !newCredentialName.value) return;
+  if (!selectedType.value || !newCredentialName.value) return
+
+  if (lastTestValid.value !== true) {
+    modalError.value = 'Run and pass credential test before saving.'
+    return
+  }
+
+  saveLoading.value = true
+  modalError.value = null
+  modalSuccess.value = null
+
   try {
     await api.post('/credentials', {
       name: newCredentialName.value,
       cred_type: selectedType.value.name,
-      data: newCredentialData.value
+      data: newCredentialData.value,
     })
-    isModalOpen.value = false;
-    newCredentialData.value = {};
-    newCredentialName.value = '';
-    selectedType.value = null;
-    await fetchCredentials(); // Refresh list
-  } catch (err) {
-    console.error("Failed to save credential", err)
+
+    isModalOpen.value = false
+    newCredentialData.value = {}
+    newCredentialName.value = ''
+    selectedType.value = null
+    resetModalState()
+    await fetchCredentials()
+  } catch (err: any) {
+    modalError.value = err?.response?.data || err?.message || 'Failed to save credential.'
+  } finally {
+    saveLoading.value = false
   }
 }
 
@@ -88,27 +171,24 @@ async function deleteCredential(id: string) {
 <template>
   <div class="h-full bg-slate-50/50 overflow-auto p-6 md:p-10 text-slate-900">
     <div class="max-w-6xl mx-auto">
-      
-      <!-- Header -->
       <div class="flex flex-col md:flex-row md:items-end justify-between mb-10 gap-6">
         <div>
           <h1 class="text-4xl font-extrabold text-slate-900 tracking-tight">Credentials</h1>
           <p class="text-slate-500 text-lg mt-2 font-medium">Securely managed keys and OAuth tokens for your integrations.</p>
         </div>
-        
-        <button 
-          @click="isModalOpen = true"
+
+        <button
+          @click="openCreateModal"
           class="bg-brand-500 hover:bg-brand-600 text-white px-6 py-3.5 rounded-2xl flex items-center gap-2.5 shadow-xl shadow-brand-500/20 transition-all hover:-translate-y-1 active:translate-y-0 font-bold"
         >
           <Plus class="w-5 h-5" /> Add Credential
         </button>
       </div>
 
-      <!-- Categories & Search -->
       <div class="flex flex-col md:flex-row gap-6 mb-8 items-center">
         <div class="flex gap-2 overflow-x-auto pb-2 w-full md:w-auto">
-          <button 
-            v-for="cat in categories" 
+          <button
+            v-for="cat in categories"
             :key="cat"
             @click="activeCategory = cat"
             :class="[
@@ -119,19 +199,18 @@ async function deleteCredential(id: string) {
             {{ cat }}
           </button>
         </div>
-        
+
         <div class="flex-1 relative group w-full md:w-auto">
           <Search class="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-brand-500 transition-colors" />
-          <input 
+          <input
             v-model="searchTerm"
-            type="text" 
-            placeholder="Search credentials..." 
-            class="w-full pl-12 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500 transition-all font-medium" 
+            type="text"
+            placeholder="Search credentials..."
+            class="w-full pl-12 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500 transition-all font-medium"
           />
         </div>
       </div>
 
-      <!-- Credentials List -->
       <div class="bg-white/80 backdrop-blur-md border border-slate-200 rounded-3xl overflow-hidden shadow-sm">
         <table class="w-full text-left border-collapse">
           <thead>
@@ -176,7 +255,6 @@ async function deleteCredential(id: string) {
         </table>
       </div>
 
-      <!-- Info Box -->
       <div class="mt-8 bg-brand-50 border border-brand-100 rounded-2xl p-6 flex gap-4 items-start">
         <div class="w-10 h-10 bg-brand-100 rounded-xl flex items-center justify-center text-brand-600 shrink-0">
           <Lock class="w-5 h-5" />
@@ -186,10 +264,8 @@ async function deleteCredential(id: string) {
           <p class="text-sm text-brand-700/80 mt-1 font-medium leading-relaxed">All credentials are encrypted using AES-256-GCM before being stored. Your secrets never leave the server in plain text.</p>
         </div>
       </div>
-
     </div>
 
-    <!-- Create Credential Modal -->
     <div v-if="isModalOpen" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div class="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
         <div class="px-8 py-6 border-b border-slate-100 flex items-center justify-between">
@@ -198,16 +274,15 @@ async function deleteCredential(id: string) {
             <X class="w-5 h-5" />
           </button>
         </div>
-        
+
         <div class="p-8 overflow-y-auto flex-1 bg-slate-50/50">
-          <!-- Step 1: Select Type -->
           <div v-if="!selectedType" class="space-y-4">
             <label class="block text-sm font-bold text-slate-700">Select Credential Type</label>
             <div class="grid grid-cols-2 gap-4">
-              <button 
-                v-for="type in credentialTypes" 
+              <button
+                v-for="type in credentialTypes"
                 :key="type.name"
-                @click="selectedType = type"
+                @click="chooseType(type)"
                 class="p-4 bg-white border-2 border-slate-100 hover:border-brand-500 rounded-2xl flex flex-col items-start gap-2 text-left transition-all"
               >
                 <div class="w-10 h-10 bg-brand-50 text-brand-600 rounded-xl flex items-center justify-center">
@@ -218,7 +293,6 @@ async function deleteCredential(id: string) {
             </div>
           </div>
 
-          <!-- Step 2: Fill Details -->
           <div v-else class="space-y-6">
             <div class="flex items-center justify-between bg-white p-4 rounded-2xl border border-slate-100">
               <div class="flex items-center gap-3">
@@ -227,17 +301,26 @@ async function deleteCredential(id: string) {
                 </div>
                 <div>
                   <h3 class="font-bold text-slate-900">{{ selectedType.displayName || selectedType.name }}</h3>
-                  <button @click="selectedType = null" class="text-xs font-bold text-brand-600 hover:text-brand-700">Change Type</button>
+                  <button @click="changeType" class="text-xs font-bold text-brand-600 hover:text-brand-700">Change Type</button>
                 </div>
               </div>
+            </div>
+
+            <div v-if="modalError" class="flex items-center gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              <XCircle class="w-4 h-4" />
+              {{ modalError }}
+            </div>
+            <div v-if="modalSuccess" class="flex items-center gap-2 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+              <CheckCircle2 class="w-4 h-4" />
+              {{ modalSuccess }}
             </div>
 
             <div class="space-y-4">
               <div>
                 <label class="block text-sm font-bold text-slate-700 mb-2">Credential Name</label>
-                <input 
+                <input
                   v-model="newCredentialName"
-                  type="text" 
+                  type="text"
                   placeholder="e.g. Production Database"
                   class="w-full px-4 py-3 bg-white border border-slate-200 focus:border-brand-500 rounded-xl text-sm font-medium transition-all outline-none"
                 />
@@ -245,13 +328,13 @@ async function deleteCredential(id: string) {
 
               <div v-for="(prop, idx) in selectedType.properties" :key="idx" class="pt-4 border-t border-slate-100">
                 <label class="block text-sm font-bold text-slate-700 mb-2">{{ prop.displayName }}</label>
-                <input 
+                <input
                   v-if="prop.type === 'string' || prop.type === 'text'"
                   v-model="newCredentialData[prop.name]"
-                  :type="prop.type === 'string' && prop.name.toLowerCase().includes('password') ? 'password' : 'text'" 
+                  :type="prop.type === 'string' && prop.name.toLowerCase().includes('password') ? 'password' : 'text'"
                   class="w-full px-4 py-3 bg-white border border-slate-200 focus:border-brand-500 rounded-xl text-sm font-medium transition-all outline-none"
                 />
-                <select 
+                <select
                   v-else-if="prop.type === 'options'"
                   v-model="newCredentialData[prop.name]"
                   class="w-full px-4 py-3 bg-white border border-slate-200 focus:border-brand-500 rounded-xl text-sm font-bold text-slate-800 transition-all outline-none"
@@ -266,12 +349,23 @@ async function deleteCredential(id: string) {
 
         <div class="px-8 py-6 border-t border-slate-100 bg-white flex justify-end gap-3">
           <button @click="isModalOpen = false" class="px-6 py-3 font-bold text-slate-500 hover:bg-slate-50 rounded-xl transition-colors">Cancel</button>
-          <button 
-            v-if="selectedType" 
-            @click="saveCredential"
-            :disabled="!newCredentialName"
-            class="px-8 py-3 font-bold text-white bg-slate-900 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-800 rounded-xl transition-all shadow-xl shadow-slate-900/10 hover:-translate-y-0.5 active:translate-y-0"
+          <button
+            v-if="selectedType"
+            @click="testCredential"
+            :disabled="testLoading"
+            class="px-6 py-3 font-bold text-slate-700 bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-200 rounded-xl transition-all flex items-center gap-2"
           >
+            <Loader2 v-if="testLoading" class="w-4 h-4 animate-spin" />
+            <FlaskConical v-else class="w-4 h-4" />
+            Test Credential
+          </button>
+          <button
+            v-if="selectedType"
+            @click="saveCredential"
+            :disabled="!newCredentialName || saveLoading || lastTestValid !== true"
+            class="px-8 py-3 font-bold text-white bg-slate-900 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-800 rounded-xl transition-all shadow-xl shadow-slate-900/10 hover:-translate-y-0.5 active:translate-y-0 flex items-center gap-2"
+          >
+            <Loader2 v-if="saveLoading" class="w-4 h-4 animate-spin" />
             Save Credential
           </button>
         </div>
