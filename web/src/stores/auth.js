@@ -17,7 +17,7 @@ export const useAuthStore = defineStore('auth', {
             try {
                 const response = await api.post('/login', credentials);
                 this.token = response.data.token;
-                this.user = response.data.user;
+                this.user = response.data.user ?? (response.data.user_id ? { id: response.data.user_id } : null);
                 localStorage.setItem('token', this.token);
                 return true;
             }
@@ -35,7 +35,7 @@ export const useAuthStore = defineStore('auth', {
             try {
                 const response = await api.post('/users', credentials);
                 this.token = response.data.token;
-                this.user = response.data.user;
+                this.user = response.data.user ?? (response.data.user_id ? { id: response.data.user_id } : null);
                 localStorage.setItem('token', this.token);
                 return true;
             }
