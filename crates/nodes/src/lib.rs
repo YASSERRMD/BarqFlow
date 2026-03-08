@@ -1,4 +1,5 @@
 pub mod code;
+pub mod credentials;
 pub mod deduplication;
 pub mod http;
 pub mod logic;
@@ -9,6 +10,10 @@ pub mod subworkflow;
 pub mod trigger;
 pub mod wait;
 pub mod integration;
+
+pub fn register_all_credentials(registry: &barqflow_registry::registry::CredentialRegistry) {
+    credentials::register_all_credentials(registry);
+}
 
 pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) {
     use barqflow_registry::registry::NodeInfo;
