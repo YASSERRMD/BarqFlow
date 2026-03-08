@@ -329,6 +329,16 @@ async function handleTestNode(node: any) {
   }
 }
 
+function handleDeleteNode(nodeId: string) {
+  nodes.value = nodes.value.filter((n) => String(n.id) !== nodeId)
+  edges.value = edges.value.filter((e) => String(e.source) !== nodeId && String(e.target) !== nodeId)
+  setNodes(nodes.value)
+  setEdges(edges.value)
+  if (selectedNode.value && String(selectedNode.value.id) === nodeId) {
+    selectedNode.value = null
+  }
+}
+
 onMounted(async () => {
   await nodeStore.fetchNodeTypes()
   if (!(route.params.id && route.params.id !== 'new')) return
@@ -473,6 +483,7 @@ function onDrop(event: DragEvent) {
       :test-state="nodeTestState"
       @close="selectedNode = null"
       @test-node="handleTestNode"
+      @delete-node="handleDeleteNode"
     />
   </div>
 </template>
