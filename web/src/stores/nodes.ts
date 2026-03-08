@@ -15,13 +15,19 @@ export const useNodeStore = defineStore('nodes', {
             this.error = null;
             try {
                 const response = await api.get('/nodes');
-                this.nodeTypes = response.data.map((node: any) => ({
-                    name: node.displayName,
-                    type: node.name.includes('Trigger') ? 'trigger' : (node.name.includes('Set') ? 'manipulation' : 'action'),
-                    description: node.description,
-                    icon: node.name.includes('HTTP') ? 'Globe' : 'Settings2',
-                    schema: node
-                }));
+                this.nodeTypes = response.data.map((node: any) => {
+                    let category = 'Integrations';
+                    if (node.name.includes('Trigger') || node.name.includes('webhook')) category = 'Triggers';
+                    else if (node.name.includes('n8n-nodes-base') || node.name === 'barqflow-nodes.executeWorkflow') category = 'Core Logic';
+
+                    return {
+                        name: node.display_name || node.name,
+                        type: node.name.includes('Trigger') ? 'trigger' : 'action',
+                        category,
+                        description: node.description,
+                        schema: node
+                    };
+                });
             } catch (err: any) {
                 this.error = err.response?.data?.message || 'Failed to load nodes';
             } finally {
