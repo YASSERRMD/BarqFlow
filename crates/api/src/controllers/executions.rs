@@ -36,6 +36,10 @@ pub fn execution_routes(state: AppState) -> Router {
         .route("/executions/{id}/stop", post(stop_execution))
         .route("/executions/{id}/resume/{resume_token}", post(resume_execution))
         .route("/executions/workflow/{workflow_id}", post(execute_workflow))
+        .route(
+            "/executions/workflow/{workflow_id}/test-node/{node_id}",
+            post(test_workflow_node),
+        )
         .with_state(state)
 }
 
@@ -129,6 +133,20 @@ async fn execute_workflow(
         payload.stop_at_node_id,
     )
     .await?;
+    Ok(Json(execution))
+}
+
+async fn test_workflow_node(
+    _claims: Claims,
+    State(state): State<AppState>,
+    Path((workflow_id, node_id)): Path<(uuid::Uuid, String)>,
+    payload: Option<Json<CreateExecutionRequest>>,
+) -> Result<Json<ExecutionEntity>, (StatusCode, String)> {
+    let manual = payload
+        .as_ref()
+        .and_then(|json| json.manual)
+        .unwrap_or(true);
+    let execution = run_workflow_execution(&state, workflow_id, manual, Some(node_id)).await?;
     Ok(Json(execution))
 }
 
