@@ -30,11 +30,8 @@ pub struct CryptoService {
 impl CryptoService {
     /// Initialize with a key from environment variables (BARQFLOW_ENCRYPTION_KEY)
     pub fn new() -> Result<Self, CryptoError> {
-        let key_str = env::var("BARQFLOW_ENCRYPTION_KEY").unwrap_or_else(|_| {
-            // For testing/development, fallback to a mocked static key.
-            // In production, this should panic or refuse to start.
-            "01234567890123456789012345678901".to_string()
-        });
+        let key_str = env::var("BARQFLOW_ENCRYPTION_KEY")
+            .map_err(|_| CryptoError::MissingKey("BARQFLOW_ENCRYPTION_KEY".into()))?;
 
         if key_str.len() != 32 {
             return Err(CryptoError::InvalidKey(
@@ -151,5 +148,12 @@ mod tests {
 
         let decrypted = crypto.decrypt_value(&encrypted).unwrap();
         assert_eq!(decrypted, secret_obj);
+    }
+
+    #[test]
+    fn test_missing_key_returns_error() {
+        env::remove_var("BARQFLOW_ENCRYPTION_KEY");
+        let result = CryptoService::new();
+        assert!(matches!(result, Err(CryptoError::MissingKey(_))));
     }
 }
