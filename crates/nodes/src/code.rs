@@ -42,8 +42,42 @@ impl INodeType for CodeNode {
         &self,
         context: &dyn IExecuteFunctions,
     ) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
-        let code_val = context.get_node_parameter("code", None).await?;
-        let code = code_val.as_str().unwrap_or("return items;").to_string();
+        let language = context
+            .get_node_parameter("language", None)
+            .await
+            .ok()
+            .and_then(|v| v.as_str().map(|s| s.to_lowercase()))
+            .unwrap_or_else(|| "javascript".to_string());
+
+        if language == "python" {
+            return Err(BarqError::NodeOperationError {
+                node_name: "Code".into(),
+                message:
+                    "Python mode is not supported yet in BarqFlow Code node. Use JavaScript mode and fill 'jsCode'."
+                        .into(),
+            });
+        }
+
+        let js_code = context
+            .get_node_parameter("jsCode", None)
+            .await
+            .ok()
+            .and_then(|v| v.as_str().map(|s| s.to_string()));
+        let legacy_code = context
+            .get_node_parameter("code", None)
+            .await
+            .ok()
+            .and_then(|v| v.as_str().map(|s| s.to_string()));
+        let code = js_code
+            .or(legacy_code)
+            .unwrap_or_else(|| "return items;".to_string());
+
+        if code.trim().is_empty() {
+            return Err(BarqError::NodeOperationError {
+                node_name: "Code".into(),
+                message: "Code cannot be empty.".into(),
+            });
+        }
 
         // We receive the previous items
         let previous_items = match context.get_input_data(0).await {
@@ -148,13 +182,13 @@ impl INodeType for CodeNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use barqflow_core::types::GenericValue;
     use barqflow_core::schema::INode;
-    use std::collections::HashMap;
+    use barqflow_core::types::GenericValue;
 
     // Mock Context for testing
     struct MockCodeContext {
-        code: String,
+        js_code: String,
+        language: String,
         inputs: Vec<INodeExecutionData>,
     }
 
@@ -165,13 +199,14 @@ mod tests {
             parameter_name: &str,
             _fallback: Option<GenericValue>,
         ) -> Result<GenericValue, BarqError> {
-            if parameter_name == "code" {
-                Ok(serde_json::json!(self.code))
-            } else {
-                Err(BarqError::NodeOperationError {
+            match parameter_name {
+                "language" => Ok(serde_json::json!(self.language)),
+                "jsCode" | "code" => Ok(serde_json::json!(self.js_code)),
+                "pythonCode" => Ok(serde_json::json!("items")),
+                _ => Err(BarqError::NodeOperationError {
                     node_name: "".into(),
                     message: "Param not found".into(),
-                })
+                }),
             }
         }
 
@@ -185,13 +220,15 @@ mod tests {
             _item_index: usize,
             fallback_value: Option<barqflow_core::types::GenericValue>,
         ) -> Result<barqflow_core::types::GenericValue, BarqError> {
-            self.get_node_parameter(parameter_name, fallback_value).await
+            self.get_node_parameter(parameter_name, fallback_value)
+                .await
         }
 
         async fn get_credentials(
             &self,
             _name: &str,
-        ) -> Result<std::collections::HashMap<String, barqflow_core::types::GenericValue>, BarqError> {
+        ) -> Result<std::collections::HashMap<String, barqflow_core::types::GenericValue>, BarqError>
+        {
             Ok(std::collections::HashMap::new())
         }
 
@@ -209,7 +246,7 @@ mod tests {
         let node = CodeNode::new();
 
         let ctx = MockCodeContext {
-            code: r#"
+            js_code: r#"
                 items[0].json.hello = "sandbox";
                 
                 let new_item = #{ json: #{ added: true } };
@@ -218,6 +255,7 @@ mod tests {
                 items
             "#
             .to_string(),
+            language: "javascript".to_string(),
             inputs: vec![INodeExecutionData::new(IDataObject::from(
                 json!({ "test": true }),
             ))],
@@ -244,13 +282,14 @@ mod tests {
 
         // This simulates a malicious loop trying to freeze the thread
         let ctx = MockCodeContext {
-            code: r#"
+            js_code: r#"
                 let i = 0;
                 loop {
                     i += 1;
                 }
             "#
             .to_string(),
+            language: "javascript".to_string(),
             inputs: vec![],
         };
 
@@ -270,9 +309,11 @@ mod tests {
 
         // Attempt to execute an OS command or access File system through typical Rhai/Rust bindings when not registered
         let ctx = MockCodeContext {
-            code: r#"
+            js_code: r#"
                 let f = open("test.txt");
-            "#.to_string(),
+            "#
+            .to_string(),
+            language: "javascript".to_string(),
             inputs: vec![],
         };
 
@@ -282,6 +323,25 @@ mod tests {
                 assert!(message.contains("Rhai execution error"));
                 // Must complain about 'open' being an unknown function since no OS package is mounted
                 assert!(message.contains("Function not found: open"));
+            }
+            _ => panic!("Expected NodeOperationError"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_python_mode_returns_clear_error() {
+        let node = CodeNode::new();
+
+        let ctx = MockCodeContext {
+            js_code: "items".to_string(),
+            language: "python".to_string(),
+            inputs: vec![],
+        };
+
+        let err = node.execute(&ctx).await.unwrap_err();
+        match err {
+            BarqError::NodeOperationError { message, .. } => {
+                assert!(message.contains("Python mode is not supported"));
             }
             _ => panic!("Expected NodeOperationError"),
         }

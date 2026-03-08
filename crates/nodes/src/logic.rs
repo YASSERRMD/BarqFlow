@@ -3,8 +3,76 @@ use barqflow_core::errors::BarqError;
 use barqflow_core::schema::INodeExecutionData;
 use barqflow_core::traits::{IExecuteFunctions, INodeType};
 use barqflow_core::types::IDataObject;
+use serde_json::Value;
+use std::collections::HashMap;
 
 pub struct IfNode;
+
+impl IfNode {
+    fn parse_conditions(value: &Value) -> Vec<Value> {
+        if value.is_null() {
+            return Vec::new();
+        }
+
+        if let Some(array) = value.as_array() {
+            return array.clone();
+        }
+
+        if let Some(object) = value.as_object() {
+            if let Some(array) = object.get("conditions").and_then(|v| v.as_array()) {
+                return array.clone();
+            }
+        }
+
+        if let Some(raw) = value.as_str() {
+            if let Ok(parsed) = serde_json::from_str::<Value>(raw) {
+                return Self::parse_conditions(&parsed);
+            }
+        }
+
+        Vec::new()
+    }
+
+    fn numeric_value(value: &Value) -> Option<f64> {
+        value
+            .as_f64()
+            .or_else(|| value.as_str().and_then(|s| s.parse::<f64>().ok()))
+    }
+
+    fn evaluate_condition(operation: &str, value1: &Value, value2: Option<&Value>) -> bool {
+        let value1_str = value1.as_str().unwrap_or("");
+        let value1_num = Self::numeric_value(value1);
+
+        match operation {
+            "exists" => !value1.is_null() && value1.as_str().map(|s| !s.is_empty()).unwrap_or(true),
+            "notExists" => {
+                value1.is_null() || value1.as_str().map(|s| s.is_empty()).unwrap_or(false)
+            }
+            "contains" => value2
+                .and_then(|v| v.as_str())
+                .map(|needle| value1_str.contains(needle))
+                .unwrap_or(false),
+            "larger" => value2
+                .and_then(Self::numeric_value)
+                .and_then(|rhs| value1_num.map(|lhs| lhs > rhs))
+                .unwrap_or(false),
+            "largerEqual" => value2
+                .and_then(Self::numeric_value)
+                .and_then(|rhs| value1_num.map(|lhs| lhs >= rhs))
+                .unwrap_or(false),
+            "smaller" => value2
+                .and_then(Self::numeric_value)
+                .and_then(|rhs| value1_num.map(|lhs| lhs < rhs))
+                .unwrap_or(false),
+            "smallerEqual" => value2
+                .and_then(Self::numeric_value)
+                .and_then(|rhs| value1_num.map(|lhs| lhs <= rhs))
+                .unwrap_or(false),
+            "notEquals" => value2.map(|v| value1 != v).unwrap_or(!value1.is_null()),
+            _ => value2.map(|v| value1 == v).unwrap_or(!value1.is_null()),
+        }
+    }
+}
 
 #[async_trait]
 impl INodeType for IfNode {
@@ -25,39 +93,67 @@ impl INodeType for IfNode {
             .await
             .map(|v| v.as_str().unwrap_or("equals").to_string())
             .unwrap_or_else(|_| "equals".to_string());
+        let combine_operation = context
+            .get_node_parameter("combineOperation", None)
+            .await
+            .map(|v| v.as_str().unwrap_or("all").to_string())
+            .unwrap_or_else(|_| "all".to_string());
 
         let mut true_branch = Vec::new();
         let mut false_branch = Vec::new();
 
         for (item_index, item) in input_data.iter().enumerate() {
-            let v1 = context
-                .get_node_parameter_at_item("value1", item_index, None)
+            let configured_conditions = context
+                .get_node_parameter_at_item("conditions", item_index, None)
                 .await
-                .unwrap_or(serde_json::Value::Null);
-            
-            let v1_str = v1.as_str().unwrap_or("");
-            let v1_num = v1.as_f64().or_else(|| v1_str.parse::<f64>().ok());
+                .ok()
+                .map(|v| IfNode::parse_conditions(&v))
+                .unwrap_or_default();
 
-            let matches = if let Ok(v2) = context.get_node_parameter_at_item("value2", item_index, None).await
-            {
-                let v2_str = v2.as_str().unwrap_or("");
-                let v2_num = v2.as_f64().or_else(|| v2_str.parse::<f64>().ok());
-                
-                match operation.as_str() {
-                    "equals" => v1 == v2 || (v1_num.is_some() && v1_num == v2_num),
-                    "notEquals" => v1 != v2 && (v1_num.is_none() || v1_num != v2_num),
-                    "contains" => v1_str.contains(v2_str),
-                    "larger" => v1_num.is_some() && v2_num.is_some() && v1_num.unwrap() > v2_num.unwrap(),
-                    "largerEqual" => v1_num.is_some() && v2_num.is_some() && v1_num.unwrap() >= v2_num.unwrap(),
-                    "smaller" => v1_num.is_some() && v2_num.is_some() && v1_num.unwrap() < v2_num.unwrap(),
-                    "smallerEqual" => v1_num.is_some() && v2_num.is_some() && v1_num.unwrap() <= v2_num.unwrap(),
-                    _ => v1 == v2,
-                }
+            let matches = if configured_conditions.is_empty() {
+                // Legacy single-condition parameters for backward compatibility.
+                let v1 = context
+                    .get_node_parameter_at_item("value1", item_index, None)
+                    .await
+                    .unwrap_or(Value::Null);
+                let v2 = context
+                    .get_node_parameter_at_item("value2", item_index, None)
+                    .await
+                    .ok();
+
+                IfNode::evaluate_condition(&operation, &v1, v2.as_ref())
             } else {
-                match operation.as_str() {
-                    "exists" => !v1.is_null() && (v1.as_str().map(|s| !s.is_empty()).unwrap_or(true)),
-                    "notExists" => v1.is_null() || (v1.as_str().map(|s| s.is_empty()).unwrap_or(false)),
-                    _ => !v1.is_null(),
+                let condition_results: Vec<bool> = configured_conditions
+                    .iter()
+                    .map(|condition| {
+                        let op = condition
+                            .get("operation")
+                            .and_then(|v| v.as_str())
+                            .or_else(|| {
+                                condition
+                                    .get("operator")
+                                    .and_then(|v| v.get("operation"))
+                                    .and_then(|v| v.as_str())
+                            })
+                            .unwrap_or("equals");
+
+                        let value1 = condition
+                            .get("value1")
+                            .or_else(|| condition.get("leftValue"))
+                            .cloned()
+                            .unwrap_or(Value::Null);
+                        let value2 = condition
+                            .get("value2")
+                            .or_else(|| condition.get("rightValue"));
+
+                        IfNode::evaluate_condition(op, &value1, value2)
+                    })
+                    .collect();
+
+                if combine_operation == "any" {
+                    condition_results.into_iter().any(|matched| matched)
+                } else {
+                    condition_results.into_iter().all(|matched| matched)
                 }
             };
 
@@ -135,6 +231,37 @@ impl INodeType for SwitchNode {
 
 pub struct MergeNode;
 
+impl MergeNode {
+    fn normalize_mode(mode: &str) -> &str {
+        match mode {
+            "merge" | "keepKeyMatches" => "merge",
+            "multiplex" => "multiplex",
+            _ => "append",
+        }
+    }
+
+    fn key_for_merge(value: &Value) -> String {
+        match value {
+            Value::String(v) => format!("s:{v}"),
+            Value::Number(v) => format!("n:{v}"),
+            Value::Bool(v) => format!("b:{v}"),
+            Value::Null => "null".to_string(),
+            _ => format!("j:{}", value),
+        }
+    }
+
+    fn merge_json_objects(
+        left: &serde_json::Map<String, Value>,
+        right: &serde_json::Map<String, Value>,
+    ) -> INodeExecutionData {
+        let mut combined = left.clone();
+        for (key, value) in right {
+            combined.insert(key.clone(), value.clone());
+        }
+        INodeExecutionData::new(IDataObject(combined))
+    }
+}
+
 #[async_trait]
 impl INodeType for MergeNode {
     fn get_description(&self) -> IDataObject {
@@ -148,42 +275,75 @@ impl INodeType for MergeNode {
         &self,
         context: &dyn IExecuteFunctions,
     ) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
-        let mode = context
+        let raw_mode = context
             .get_node_parameter("mode", None)
             .await
             .map(|v| v.as_str().unwrap_or("append").to_string())
             .unwrap_or_else(|_| "append".to_string());
+        let mode = MergeNode::normalize_mode(&raw_mode);
+
+        let input_1 = context.get_input_data(0).await.unwrap_or_default();
+        let input_2 = context.get_input_data(1).await.unwrap_or_default();
 
         let mut merged = Vec::new();
-
-        if mode == "append" {
-            for input_index in 0..2 {
-                if let Ok(input_data) = context.get_input_data(input_index).await {
-                    merged.extend(input_data.iter().cloned());
-                }
+        match mode {
+            "append" => {
+                merged.extend(input_1.iter().cloned());
+                merged.extend(input_2.iter().cloned());
             }
-        } else if mode == "keepKeyMatches" {
-            let prop_1 = context.get_node_parameter("property1", None).await.map(|v| v.as_str().unwrap_or("").to_string()).unwrap_or_default();
-            let prop_2 = context.get_node_parameter("property2", None).await.map(|v| v.as_str().unwrap_or("").to_string()).unwrap_or_default();
-            
-            if let (Ok(input1), Ok(input2)) = (
-                context.get_input_data(0).await,
-                context.get_input_data(1).await,
-            ) {
-                for item1 in input1 {
-                    let v1 = item1.json.0.get(&prop_1);
-                    for item2 in &input2 {
-                        let v2 = item2.json.0.get(&prop_2);
-                        if v1.is_some() && v1 == v2 {
-                            let mut combined = item1.json.0.clone();
-                            for (k, v) in &item2.json.0 {
-                                combined.insert(k.clone(), v.clone());
+            "merge" => {
+                let prop_1 = context
+                    .get_node_parameter("property1", None)
+                    .await
+                    .ok()
+                    .and_then(|v| v.as_str().map(|s| s.to_string()))
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or_else(|| "id".to_string());
+                let prop_2 = context
+                    .get_node_parameter("property2", None)
+                    .await
+                    .ok()
+                    .and_then(|v| v.as_str().map(|s| s.to_string()))
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or_else(|| "id".to_string());
+
+                let mut right_by_key: HashMap<String, Vec<serde_json::Map<String, Value>>> =
+                    HashMap::new();
+                for right_item in &input_2 {
+                    if let Some(right_value) = right_item.json.0.get(&prop_2) {
+                        right_by_key
+                            .entry(MergeNode::key_for_merge(right_value))
+                            .or_default()
+                            .push(right_item.json.0.clone());
+                    }
+                }
+
+                for left_item in &input_1 {
+                    if let Some(left_value) = left_item.json.0.get(&prop_1) {
+                        if let Some(matches) =
+                            right_by_key.get(&MergeNode::key_for_merge(left_value))
+                        {
+                            for right_json in matches {
+                                merged.push(MergeNode::merge_json_objects(
+                                    &left_item.json.0,
+                                    right_json,
+                                ));
                             }
-                            merged.push(INodeExecutionData::new(IDataObject(combined)));
                         }
                     }
                 }
             }
+            "multiplex" => {
+                for left_item in &input_1 {
+                    for right_item in &input_2 {
+                        merged.push(MergeNode::merge_json_objects(
+                            &left_item.json.0,
+                            &right_item.json.0,
+                        ));
+                    }
+                }
+            }
+            _ => {}
         }
 
         Ok(vec![merged])
@@ -220,7 +380,7 @@ mod tests {
                 },
             }
         }
-        
+
         fn add_param(&mut self, key: &str, value: serde_json::Value) {
             self.params.insert(key.to_string(), value);
         }
@@ -251,14 +411,18 @@ mod tests {
             _item_index: usize,
             fallback_value: Option<GenericValue>,
         ) -> Result<GenericValue, BarqError> {
-            self.get_node_parameter(parameter_name, fallback_value).await
+            self.get_node_parameter(parameter_name, fallback_value)
+                .await
         }
 
         fn get_node(&self) -> &INode {
             &self.node
         }
 
-        async fn get_input_data(&self, input_index: usize) -> Result<Vec<INodeExecutionData>, BarqError> {
+        async fn get_input_data(
+            &self,
+            input_index: usize,
+        ) -> Result<Vec<INodeExecutionData>, BarqError> {
             self.input_data
                 .get(input_index)
                 .cloned()
@@ -268,7 +432,10 @@ mod tests {
                 })
         }
 
-        async fn get_credentials(&self, _name: &str) -> Result<std::collections::HashMap<String, GenericValue>, BarqError> {
+        async fn get_credentials(
+            &self,
+            _name: &str,
+        ) -> Result<std::collections::HashMap<String, GenericValue>, BarqError> {
             Ok(std::collections::HashMap::new())
         }
 
@@ -281,17 +448,40 @@ mod tests {
             INodeExecutionData::new(IDataObject::from(serde_json::json!({"val": 10}))),
             INodeExecutionData::new(IDataObject::from(serde_json::json!({"val": 5}))),
         ];
-        
+
         let mut context = MockContext::new(vec![input]);
         context.add_param("operation", serde_json::json!("larger"));
         context.add_param("value1", serde_json::json!(10));
         context.add_param("value2", serde_json::json!(8));
-        
+
         let node = IfNode;
         let result = node.execute(&context).await.unwrap();
-        
+
         assert_eq!(result.len(), 2);
-        assert_eq!(result[0].len(), 2); // Both items pass because value1(10) > value2(8)
+        assert_eq!(result[0].len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_if_node_conditions_any_mode() {
+        let input = vec![INodeExecutionData::new(IDataObject::from(
+            serde_json::json!({"id": 1}),
+        ))];
+
+        let mut context = MockContext::new(vec![input]);
+        context.add_param("combineOperation", serde_json::json!("any"));
+        context.add_param(
+            "conditions",
+            serde_json::json!([
+                { "value1": 5, "operation": "larger", "value2": 10 },
+                { "value1": "hello", "operation": "contains", "value2": "ell" }
+            ]),
+        );
+
+        let node = IfNode;
+        let result = node.execute(&context).await.unwrap();
+
+        assert_eq!(result[0].len(), 1);
+        assert_eq!(result[1].len(), 0);
     }
 
     #[tokio::test]
@@ -301,34 +491,91 @@ mod tests {
             INodeExecutionData::new(IDataObject::from(serde_json::json!({"route": "B"}))),
             INodeExecutionData::new(IDataObject::from(serde_json::json!({"route": "C"}))),
         ];
-        
+
         let mut context = MockContext::new(vec![input]);
         context.add_param("dataProperty", serde_json::json!("route"));
         context.add_param("case0", serde_json::json!("A"));
         context.add_param("case1", serde_json::json!("B"));
         context.add_param("fallbackOutput", serde_json::json!(2));
-        
+
         let node = SwitchNode;
         let result = node.execute(&context).await.unwrap();
-        
+
         assert_eq!(result.len(), 10);
-        assert_eq!(result[0].len(), 1); // "A" routed to case0
-        assert_eq!(result[1].len(), 1); // "B" routed to case1
-        assert_eq!(result[2].len(), 1); // "C" routed to fallback (index 2)
+        assert_eq!(result[0].len(), 1);
+        assert_eq!(result[1].len(), 1);
+        assert_eq!(result[2].len(), 1);
     }
 
     #[tokio::test]
     async fn test_merge_node_append() {
-        let input1 = vec![INodeExecutionData::new(IDataObject::from(serde_json::json!({"id": 1})))];
-        let input2 = vec![INodeExecutionData::new(IDataObject::from(serde_json::json!({"id": 2})))];
-        
+        let input1 = vec![INodeExecutionData::new(IDataObject::from(
+            serde_json::json!({"id": 1}),
+        ))];
+        let input2 = vec![INodeExecutionData::new(IDataObject::from(
+            serde_json::json!({"id": 2}),
+        ))];
+
         let mut context = MockContext::new(vec![input1, input2]);
         context.add_param("mode", serde_json::json!("append"));
-        
+
         let node = MergeNode;
         let result = node.execute(&context).await.unwrap();
-        
+
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_merge_node_merge_alias() {
+        let input1 = vec![INodeExecutionData::new(IDataObject::from(
+            serde_json::json!({"id": 1, "left": true}),
+        ))];
+        let input2 = vec![
+            INodeExecutionData::new(IDataObject::from(
+                serde_json::json!({"id": 1, "right": true}),
+            )),
+            INodeExecutionData::new(IDataObject::from(
+                serde_json::json!({"id": 2, "right": false}),
+            )),
+        ];
+
+        let mut context = MockContext::new(vec![input1, input2]);
+        context.add_param("mode", serde_json::json!("merge"));
+        context.add_param("property1", serde_json::json!("id"));
+        context.add_param("property2", serde_json::json!("id"));
+
+        let node = MergeNode;
+        let result = node.execute(&context).await.unwrap();
+
+        assert_eq!(result[0].len(), 1);
+        assert_eq!(
+            result[0][0].json.0.get("left").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            result[0][0].json.0.get("right").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_merge_node_multiplex_mode() {
+        let input1 = vec![
+            INodeExecutionData::new(IDataObject::from(serde_json::json!({"left": 1}))),
+            INodeExecutionData::new(IDataObject::from(serde_json::json!({"left": 2}))),
+        ];
+        let input2 = vec![
+            INodeExecutionData::new(IDataObject::from(serde_json::json!({"right": "A"}))),
+            INodeExecutionData::new(IDataObject::from(serde_json::json!({"right": "B"}))),
+        ];
+
+        let mut context = MockContext::new(vec![input1, input2]);
+        context.add_param("mode", serde_json::json!("multiplex"));
+
+        let node = MergeNode;
+        let result = node.execute(&context).await.unwrap();
+
+        assert_eq!(result[0].len(), 4);
     }
 }

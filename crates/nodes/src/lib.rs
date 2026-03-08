@@ -2,6 +2,7 @@ pub mod code;
 pub mod credentials;
 pub mod deduplication;
 pub mod http;
+pub mod integration;
 pub mod logic;
 pub mod manipulation;
 pub mod sandbox;
@@ -9,7 +10,6 @@ pub mod scheduler;
 pub mod subworkflow;
 pub mod trigger;
 pub mod wait;
-pub mod integration;
 
 pub fn register_all_credentials(registry: &barqflow_registry::registry::CredentialRegistry) {
     credentials::register_all_credentials(registry);
@@ -52,8 +52,8 @@ mod tests {
 }
 
 pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) {
-    use barqflow_registry::registry::NodeInfo;
     use barqflow_core::properties::INodeProperties;
+    use barqflow_registry::registry::NodeInfo;
     use std::sync::Arc;
 
     let empty_props = INodeProperties {
@@ -62,23 +62,297 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
         required_values: None,
     };
 
+    let mut http_props = empty_props.clone();
+    http_props.properties = vec![
+        barqflow_core::properties::INodeProperty {
+            name: "url".into(),
+            display_name: "URL".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: Some(serde_json::json!("https://example.com")),
+            description: Some("Target URL for the request.".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "method".into(),
+            display_name: "Method".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("GET")),
+            description: Some("HTTP method.".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "GET".into(),
+                    value: serde_json::json!("GET"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "POST".into(),
+                    value: serde_json::json!("POST"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "PUT".into(),
+                    value: serde_json::json!("PUT"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "PATCH".into(),
+                    value: serde_json::json!("PATCH"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "DELETE".into(),
+                    value: serde_json::json!("DELETE"),
+                    description: None,
+                },
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "headers".into(),
+            display_name: "Headers".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Collection,
+            default: Some(serde_json::json!([])),
+            description: Some("Request headers as JSON array/object.".into()),
+            hint: Some(r#"[{"name":"Authorization","value":"Bearer ..."}]"#.into()),
+            required: false,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "queryParameters".into(),
+            display_name: "Query Parameters".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Collection,
+            default: Some(serde_json::json!([])),
+            description: Some("Query parameters as JSON array/object.".into()),
+            hint: Some(r#"[{"name":"q","value":"search"}]"#.into()),
+            required: false,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "body".into(),
+            display_name: "Body".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Text,
+            default: Some(serde_json::json!("")),
+            description: Some("Request body (text or JSON string).".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "authentication".into(),
+            display_name: "Authentication".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("none")),
+            description: Some("Authentication mode.".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "None".into(),
+                    value: serde_json::json!("none"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Bearer Token".into(),
+                    value: serde_json::json!("bearer"),
+                    description: None,
+                },
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "authToken".into(),
+            display_name: "Bearer Token".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: Some(serde_json::json!("")),
+            description: Some("Token used when Authentication is Bearer.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "authentication".into(),
+                    values: vec![serde_json::json!("bearer")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "responseFormat".into(),
+            display_name: "Response Format".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("autodetect")),
+            description: Some("How response body should be parsed.".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Auto Detect".into(),
+                    value: serde_json::json!("autodetect"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "JSON".into(),
+                    value: serde_json::json!("json"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Text".into(),
+                    value: serde_json::json!("text"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "File".into(),
+                    value: serde_json::json!("file"),
+                    description: None,
+                },
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "timeout".into(),
+            display_name: "Timeout (ms)".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Number,
+            default: Some(serde_json::json!(30000)),
+            description: Some("Request timeout in milliseconds.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+    ];
+
     let _ = registry.register_node(NodeInfo {
         name: "n8n-nodes-base.httpRequest".into(),
         display_name: "HTTP Request".into(),
         version: 1.0,
         description: "Make an HTTP request".into(),
-        properties: empty_props.clone(),
+        properties: http_props,
         is_trigger: false,
         max_inputs: 1,
         node_impl: Arc::new(crate::http::HttpRequestNode::new()),
     });
+
+    let mut if_props = empty_props.clone();
+    if_props.properties = vec![
+        barqflow_core::properties::INodeProperty {
+            name: "combineOperation".into(),
+            display_name: "Combine".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("all")),
+            description: Some("How multiple conditions are combined.".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "All".into(),
+                    value: serde_json::json!("all"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Any".into(),
+                    value: serde_json::json!("any"),
+                    description: None,
+                },
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "conditions".into(),
+            display_name: "Conditions".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Collection,
+            default: Some(serde_json::json!([])),
+            description: Some("JSON array of conditions.".into()),
+            hint: Some(
+                r#"[{"value1":"={{$json.count}}","operation":"larger","value2":10}]"#.into(),
+            ),
+            required: false,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "operation".into(),
+            display_name: "Operation".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("equals")),
+            description: Some("Legacy single-condition operation.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Equals".into(),
+                    value: serde_json::json!("equals"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Not Equals".into(),
+                    value: serde_json::json!("notEquals"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Contains".into(),
+                    value: serde_json::json!("contains"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Larger".into(),
+                    value: serde_json::json!("larger"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Smaller".into(),
+                    value: serde_json::json!("smaller"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Exists".into(),
+                    value: serde_json::json!("exists"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Not Exists".into(),
+                    value: serde_json::json!("notExists"),
+                    description: None,
+                },
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "value1".into(),
+            display_name: "Value 1".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: Some(serde_json::json!("")),
+            description: Some("Legacy single-condition left value.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "value2".into(),
+            display_name: "Value 2".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: Some(serde_json::json!("")),
+            description: Some("Legacy single-condition right value.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+    ];
 
     let _ = registry.register_node(NodeInfo {
         name: "n8n-nodes-base.if".into(),
         display_name: "If".into(),
         version: 1.0,
         description: "Split flow conditionally".into(),
-        properties: empty_props.clone(),
+        properties: if_props,
         is_trigger: false,
         max_inputs: 1,
         node_impl: Arc::new(crate::logic::IfNode),
@@ -100,18 +374,108 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
         display_name: "Merge".into(),
         version: 1.0,
         description: "Merge two branches".into(),
-        properties: empty_props.clone(),
+        properties: INodeProperties {
+            properties: vec![
+                barqflow_core::properties::INodeProperty {
+                    name: "mode".into(),
+                    display_name: "Mode".into(),
+                    r#type: barqflow_core::properties::NodePropertyType::Options,
+                    default: Some(serde_json::json!("append")),
+                    description: Some("Merge strategy.".into()),
+                    hint: None,
+                    required: true,
+                    display_options: None,
+                    options: Some(vec![
+                        barqflow_core::properties::NodePropertyOption {
+                            name: "Append".into(),
+                            value: serde_json::json!("append"),
+                            description: None,
+                        },
+                        barqflow_core::properties::NodePropertyOption {
+                            name: "Merge By Fields".into(),
+                            value: serde_json::json!("merge"),
+                            description: None,
+                        },
+                        barqflow_core::properties::NodePropertyOption {
+                            name: "Multiplex".into(),
+                            value: serde_json::json!("multiplex"),
+                            description: None,
+                        },
+                    ]),
+                },
+                barqflow_core::properties::INodeProperty {
+                    name: "property1".into(),
+                    display_name: "Input 1 Field".into(),
+                    r#type: barqflow_core::properties::NodePropertyType::String,
+                    default: Some(serde_json::json!("id")),
+                    description: Some("Join field from input 1 for merge mode.".into()),
+                    hint: None,
+                    required: false,
+                    display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                        r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                            property: "mode".into(),
+                            values: vec![serde_json::json!("merge")],
+                        }),
+                    }),
+                    options: None,
+                },
+                barqflow_core::properties::INodeProperty {
+                    name: "property2".into(),
+                    display_name: "Input 2 Field".into(),
+                    r#type: barqflow_core::properties::NodePropertyType::String,
+                    default: Some(serde_json::json!("id")),
+                    description: Some("Join field from input 2 for merge mode.".into()),
+                    hint: None,
+                    required: false,
+                    display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                        r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                            property: "mode".into(),
+                            values: vec![serde_json::json!("merge")],
+                        }),
+                    }),
+                    options: None,
+                },
+            ],
+            display_name: None,
+            required_values: None,
+        },
         is_trigger: false,
         max_inputs: 2,
         node_impl: Arc::new(crate::logic::MergeNode),
     });
+
+    let mut set_props = empty_props.clone();
+    set_props.properties = vec![
+        barqflow_core::properties::INodeProperty {
+            name: "keepOnlySet".into(),
+            display_name: "Keep Only Set".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Boolean,
+            default: Some(serde_json::json!(false)),
+            description: Some("Discard incoming fields and keep only configured values.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "values".into(),
+            display_name: "Values".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Collection,
+            default: Some(serde_json::json!([])),
+            description: Some("JSON array of assignments: {name,value,type}.".into()),
+            hint: Some(r#"[{"name":"result","value":"ok","type":"string"}]"#.into()),
+            required: false,
+            display_options: None,
+            options: None,
+        },
+    ];
 
     let _ = registry.register_node(NodeInfo {
         name: "n8n-nodes-base.set".into(),
         display_name: "Set".into(),
         version: 1.0,
         description: "Set values".into(),
-        properties: empty_props.clone(),
+        properties: set_props,
         is_trigger: false,
         max_inputs: 1,
         node_impl: Arc::new(crate::manipulation::SetNode),
@@ -133,18 +497,144 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
         display_name: "Item Lists".into(),
         version: 1.0,
         description: "Split items into batches or combine items".into(),
-        properties: empty_props.clone(),
+        properties: INodeProperties {
+            properties: vec![
+                barqflow_core::properties::INodeProperty {
+                    name: "mode".into(),
+                    display_name: "Mode".into(),
+                    r#type: barqflow_core::properties::NodePropertyType::Options,
+                    default: Some(serde_json::json!("splitInBatches")),
+                    description: Some("Item list operation mode.".into()),
+                    hint: None,
+                    required: true,
+                    display_options: None,
+                    options: Some(vec![
+                        barqflow_core::properties::NodePropertyOption {
+                            name: "Split In Batches".into(),
+                            value: serde_json::json!("splitInBatches"),
+                            description: None,
+                        },
+                        barqflow_core::properties::NodePropertyOption {
+                            name: "No Op".into(),
+                            value: serde_json::json!("passthrough"),
+                            description: None,
+                        },
+                    ]),
+                },
+                barqflow_core::properties::INodeProperty {
+                    name: "batchSize".into(),
+                    display_name: "Batch Size".into(),
+                    r#type: barqflow_core::properties::NodePropertyType::Number,
+                    default: Some(serde_json::json!(1)),
+                    description: Some("Items per batch when splitting.".into()),
+                    hint: None,
+                    required: false,
+                    display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                        r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                            property: "mode".into(),
+                            values: vec![serde_json::json!("splitInBatches")],
+                        }),
+                    }),
+                    options: None,
+                },
+            ],
+            display_name: None,
+            required_values: None,
+        },
         is_trigger: false,
         max_inputs: 1,
         node_impl: Arc::new(crate::manipulation::ItemListsNode),
     });
 
     let _ = registry.register_node(NodeInfo {
+        name: "n8n-nodes-base.splitInBatches".into(),
+        display_name: "Split In Batches".into(),
+        version: 1.0,
+        description: "Split incoming items into configured batches".into(),
+        properties: INodeProperties {
+            properties: vec![barqflow_core::properties::INodeProperty {
+                name: "batchSize".into(),
+                display_name: "Batch Size".into(),
+                r#type: barqflow_core::properties::NodePropertyType::Number,
+                default: Some(serde_json::json!(1)),
+                description: Some("Items per batch.".into()),
+                hint: None,
+                required: true,
+                display_options: None,
+                options: None,
+            }],
+            display_name: None,
+            required_values: None,
+        },
+        is_trigger: false,
+        max_inputs: 1,
+        node_impl: Arc::new(crate::manipulation::ItemListsNode),
+    });
+
+    let mut code_props = empty_props.clone();
+    code_props.properties = vec![
+        barqflow_core::properties::INodeProperty {
+            name: "language".into(),
+            display_name: "Language".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("javascript")),
+            description: Some("Script language.".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "JavaScript".into(),
+                    value: serde_json::json!("javascript"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Python".into(),
+                    value: serde_json::json!("python"),
+                    description: None,
+                },
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "jsCode".into(),
+            display_name: "JavaScript Code".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Text,
+            default: Some(serde_json::json!("items[0].json.result = \"ok\";\nitems")),
+            description: Some("Script body for JavaScript mode.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "language".into(),
+                    values: vec![serde_json::json!("javascript")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "pythonCode".into(),
+            display_name: "Python Code".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Text,
+            default: Some(serde_json::json!("items")),
+            description: Some("Script body for Python mode.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "language".into(),
+                    values: vec![serde_json::json!("python")],
+                }),
+            }),
+            options: None,
+        },
+    ];
+
+    let _ = registry.register_node(NodeInfo {
         name: "n8n-nodes-base.code".into(),
         display_name: "Code".into(),
         version: 1.0,
         description: "Run custom script".into(),
-        properties: empty_props.clone(),
+        properties: code_props,
         is_trigger: false,
         max_inputs: 1,
         node_impl: Arc::new(crate::code::CodeNode),
@@ -362,13 +852,11 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
             hint: None,
             required: true,
             display_options: None,
-            options: Some(vec![
-                barqflow_core::properties::NodePropertyOption {
-                    name: "Execute Query".into(),
-                    value: serde_json::json!("executeQuery"),
-                    description: None,
-                }
-            ]),
+            options: Some(vec![barqflow_core::properties::NodePropertyOption {
+                name: "Execute Query".into(),
+                value: serde_json::json!("executeQuery"),
+                description: None,
+            }]),
         },
         barqflow_core::properties::INodeProperty {
             name: "query".into(),
@@ -380,7 +868,7 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
             required: true,
             display_options: None,
             options: None,
-        }
+        },
     ];
 
     let _ = registry.register_node(NodeInfo {
@@ -405,13 +893,11 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
             hint: None,
             required: true,
             display_options: None,
-            options: Some(vec![
-                barqflow_core::properties::NodePropertyOption {
-                    name: "Chat Completion".into(),
-                    value: serde_json::json!("chatCompletion"),
-                    description: None,
-                }
-            ]),
+            options: Some(vec![barqflow_core::properties::NodePropertyOption {
+                name: "Chat Completion".into(),
+                value: serde_json::json!("chatCompletion"),
+                description: None,
+            }]),
         },
         barqflow_core::properties::INodeProperty {
             name: "model".into(),
@@ -434,7 +920,7 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
             required: true,
             display_options: None,
             options: None,
-        }
+        },
     ];
 
     let _ = registry.register_node(NodeInfo {
@@ -470,13 +956,11 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
             hint: None,
             required: true,
             display_options: None,
-            options: Some(vec![
-                barqflow_core::properties::NodePropertyOption {
-                    name: "Generate Text".into(),
-                    value: serde_json::json!("generate"),
-                    description: None,
-                }
-            ]),
+            options: Some(vec![barqflow_core::properties::NodePropertyOption {
+                name: "Generate Text".into(),
+                value: serde_json::json!("generate"),
+                description: None,
+            }]),
         },
         barqflow_core::properties::INodeProperty {
             name: "model".into(),
@@ -499,7 +983,7 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
             required: true,
             display_options: None,
             options: None,
-        }
+        },
     ];
 
     let _ = registry.register_node(NodeInfo {
@@ -538,7 +1022,7 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
             required: true,
             display_options: None,
             options: None,
-        }
+        },
     ];
 
     let _ = registry.register_node(NodeInfo {
@@ -575,7 +1059,7 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
             required: true,
             display_options: None,
             options: None,
-        }
+        },
     ];
 
     let _ = registry.register_node(NodeInfo {
@@ -612,7 +1096,7 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
             required: true,
             display_options: None,
             options: None,
-        }
+        },
     ];
 
     let _ = registry.register_node(NodeInfo {
@@ -649,7 +1133,7 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
             required: true,
             display_options: None,
             options: None,
-        }
+        },
     ];
 
     let _ = registry.register_node(NodeInfo {
@@ -688,7 +1172,7 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
             required: true,
             display_options: None,
             options: None,
-        }
+        },
     ];
 
     let _ = registry.register_node(NodeInfo {
@@ -703,19 +1187,17 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
     });
 
     let mut notion_props = empty_props.clone();
-    notion_props.properties = vec![
-        barqflow_core::properties::INodeProperty {
-            name: "databaseId".into(),
-            display_name: "Database ID".into(),
-            r#type: barqflow_core::properties::NodePropertyType::String,
-            default: None,
-            description: Some("Notion Database ID".into()),
-            hint: None,
-            required: true,
-            display_options: None,
-            options: None,
-        }
-    ];
+    notion_props.properties = vec![barqflow_core::properties::INodeProperty {
+        name: "databaseId".into(),
+        display_name: "Database ID".into(),
+        r#type: barqflow_core::properties::NodePropertyType::String,
+        default: None,
+        description: Some("Notion Database ID".into()),
+        hint: None,
+        required: true,
+        display_options: None,
+        options: None,
+    }];
 
     let _ = registry.register_node(NodeInfo {
         name: "barqflow-nodes.notion".into(),
@@ -751,7 +1233,7 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
             required: true,
             display_options: None,
             options: None,
-        }
+        },
     ];
 
     let _ = registry.register_node(NodeInfo {
@@ -766,19 +1248,17 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
     });
 
     let mut mysql_props = empty_props.clone();
-    mysql_props.properties = vec![
-        barqflow_core::properties::INodeProperty {
-            name: "query".into(),
-            display_name: "Query".into(),
-            r#type: barqflow_core::properties::NodePropertyType::Text,
-            default: None,
-            description: Some("SQL query to execute".into()),
-            hint: None,
-            required: true,
-            display_options: None,
-            options: None,
-        }
-    ];
+    mysql_props.properties = vec![barqflow_core::properties::INodeProperty {
+        name: "query".into(),
+        display_name: "Query".into(),
+        r#type: barqflow_core::properties::NodePropertyType::Text,
+        default: None,
+        description: Some("SQL query to execute".into()),
+        hint: None,
+        required: true,
+        display_options: None,
+        options: None,
+    }];
 
     let _ = registry.register_node(NodeInfo {
         name: "barqflow-nodes.mysql".into(),
@@ -812,7 +1292,7 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
                     name: "Set".into(),
                     value: serde_json::json!("set"),
                     description: None,
-                }
+                },
             ]),
         },
         barqflow_core::properties::INodeProperty {
@@ -825,7 +1305,7 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
             required: true,
             display_options: None,
             options: None,
-        }
+        },
     ];
 
     let _ = registry.register_node(NodeInfo {
@@ -864,7 +1344,7 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
             required: true,
             display_options: None,
             options: None,
-        }
+        },
     ];
 
     let _ = registry.register_node(NodeInfo {
@@ -879,19 +1359,17 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
     });
 
     let mut google_drive_props = empty_props.clone();
-    google_drive_props.properties = vec![
-        barqflow_core::properties::INodeProperty {
-            name: "fileId".into(),
-            display_name: "File ID".into(),
-            r#type: barqflow_core::properties::NodePropertyType::String,
-            default: None,
-            description: Some("Google Drive File ID".into()),
-            hint: None,
-            required: true,
-            display_options: None,
-            options: None,
-        }
-    ];
+    google_drive_props.properties = vec![barqflow_core::properties::INodeProperty {
+        name: "fileId".into(),
+        display_name: "File ID".into(),
+        r#type: barqflow_core::properties::NodePropertyType::String,
+        default: None,
+        description: Some("Google Drive File ID".into()),
+        hint: None,
+        required: true,
+        display_options: None,
+        options: None,
+    }];
 
     let _ = registry.register_node(NodeInfo {
         name: "barqflow-nodes.googleDrive".into(),
@@ -905,19 +1383,17 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
     });
 
     let mut jira_props = empty_props.clone();
-    jira_props.properties = vec![
-        barqflow_core::properties::INodeProperty {
-            name: "issueKey".into(),
-            display_name: "Issue Key".into(),
-            r#type: barqflow_core::properties::NodePropertyType::String,
-            default: None,
-            description: Some("Jira Issue Key (e.g. PROJ-123)".into()),
-            hint: None,
-            required: true,
-            display_options: None,
-            options: None,
-        }
-    ];
+    jira_props.properties = vec![barqflow_core::properties::INodeProperty {
+        name: "issueKey".into(),
+        display_name: "Issue Key".into(),
+        r#type: barqflow_core::properties::NodePropertyType::String,
+        default: None,
+        description: Some("Jira Issue Key (e.g. PROJ-123)".into()),
+        hint: None,
+        required: true,
+        display_options: None,
+        options: None,
+    }];
 
     let _ = registry.register_node(NodeInfo {
         name: "barqflow-nodes.jira".into(),
@@ -931,30 +1407,28 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
     });
 
     let mut stripe_props = empty_props.clone();
-    stripe_props.properties = vec![
-        barqflow_core::properties::INodeProperty {
-            name: "resource".into(),
-            display_name: "Resource".into(),
-            r#type: barqflow_core::properties::NodePropertyType::Options,
-            default: Some(serde_json::json!("customer")),
-            description: Some("Stripe Resource".into()),
-            hint: None,
-            required: true,
-            display_options: None,
-            options: Some(vec![
-                barqflow_core::properties::NodePropertyOption {
-                    name: "Customer".into(),
-                    value: serde_json::json!("customer"),
-                    description: None,
-                },
-                barqflow_core::properties::NodePropertyOption {
-                    name: "Charge".into(),
-                    value: serde_json::json!("charge"),
-                    description: None,
-                }
-            ]),
-        }
-    ];
+    stripe_props.properties = vec![barqflow_core::properties::INodeProperty {
+        name: "resource".into(),
+        display_name: "Resource".into(),
+        r#type: barqflow_core::properties::NodePropertyType::Options,
+        default: Some(serde_json::json!("customer")),
+        description: Some("Stripe Resource".into()),
+        hint: None,
+        required: true,
+        display_options: None,
+        options: Some(vec![
+            barqflow_core::properties::NodePropertyOption {
+                name: "Customer".into(),
+                value: serde_json::json!("customer"),
+                description: None,
+            },
+            barqflow_core::properties::NodePropertyOption {
+                name: "Charge".into(),
+                value: serde_json::json!("charge"),
+                description: None,
+            },
+        ]),
+    }];
 
     let _ = registry.register_node(NodeInfo {
         name: "barqflow-nodes.stripe".into(),
@@ -1001,7 +1475,7 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
             required: true,
             display_options: None,
             options: None,
-        }
+        },
     ];
 
     let _ = registry.register_node(NodeInfo {
@@ -1038,7 +1512,7 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
                     name: "Account".into(),
                     value: serde_json::json!("account"),
                     description: None,
-                }
+                },
             ]),
         },
         barqflow_core::properties::INodeProperty {
@@ -1060,9 +1534,9 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
                     name: "Create".into(),
                     value: serde_json::json!("create"),
                     description: None,
-                }
+                },
             ]),
-        }
+        },
     ];
 
     let _ = registry.register_node(NodeInfo {
@@ -1077,35 +1551,33 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
     });
 
     let mut hubspot_props = empty_props.clone();
-    hubspot_props.properties = vec![
-        barqflow_core::properties::INodeProperty {
-            name: "resource".into(),
-            display_name: "Resource".into(),
-            r#type: barqflow_core::properties::NodePropertyType::Options,
-            default: Some(serde_json::json!("contact")),
-            description: Some("HubSpot Resource".into()),
-            hint: None,
-            required: true,
-            display_options: None,
-            options: Some(vec![
-                barqflow_core::properties::NodePropertyOption {
-                    name: "Contact".into(),
-                    value: serde_json::json!("contact"),
-                    description: None,
-                },
-                barqflow_core::properties::NodePropertyOption {
-                    name: "Company".into(),
-                    value: serde_json::json!("company"),
-                    description: None,
-                },
-                barqflow_core::properties::NodePropertyOption {
-                    name: "Deal".into(),
-                    value: serde_json::json!("deal"),
-                    description: None,
-                }
-            ]),
-        }
-    ];
+    hubspot_props.properties = vec![barqflow_core::properties::INodeProperty {
+        name: "resource".into(),
+        display_name: "Resource".into(),
+        r#type: barqflow_core::properties::NodePropertyType::Options,
+        default: Some(serde_json::json!("contact")),
+        description: Some("HubSpot Resource".into()),
+        hint: None,
+        required: true,
+        display_options: None,
+        options: Some(vec![
+            barqflow_core::properties::NodePropertyOption {
+                name: "Contact".into(),
+                value: serde_json::json!("contact"),
+                description: None,
+            },
+            barqflow_core::properties::NodePropertyOption {
+                name: "Company".into(),
+                value: serde_json::json!("company"),
+                description: None,
+            },
+            barqflow_core::properties::NodePropertyOption {
+                name: "Deal".into(),
+                value: serde_json::json!("deal"),
+                description: None,
+            },
+        ]),
+    }];
 
     let _ = registry.register_node(NodeInfo {
         name: "barqflow-nodes.hubspot".into(),
@@ -1152,7 +1624,7 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
             required: true,
             display_options: None,
             options: None,
-        }
+        },
     ];
 
     let _ = registry.register_node(NodeInfo {
@@ -1189,7 +1661,7 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
             required: true,
             display_options: None,
             options: None,
-        }
+        },
     ];
 
     let _ = registry.register_node(NodeInfo {
@@ -1237,7 +1709,7 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
             required: true,
             display_options: None,
             options: None,
-        }
+        },
     ];
 
     let _ = registry.register_node(NodeInfo {
