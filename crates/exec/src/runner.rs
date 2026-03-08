@@ -630,32 +630,26 @@ impl WorkflowRunner {
             workflow_cache,
         );
 
-        // Execute the node safely, catching any unexpected panics
-        use std::panic::AssertUnwindSafe;
-        use futures::FutureExt;
-        
-        // We use AssertUnwindSafe because we are just discarding the panic payload 
-        // and returning an error, so unwind safety is not strictly a concern for data structures here.
-        let execute_future = AssertUnwindSafe(node_info.node_impl.execute(&exec_context)).catch_unwind();
-        
-        let execute_result = match execute_future.await {
-            Ok(Ok(outputs)) => Ok(outputs),
-            Ok(Err(e)) => Err(e),
-            Err(panic_err) => {
-                let panic_msg = if let Some(s) = panic_err.downcast_ref::<&str>() {
-                    s.to_string()
-                } else if let Some(s) = panic_err.downcast_ref::<String>() {
-                    s.clone()
-                } else {
-                    "Unknown panic".to_string()
-                };
-                
-                Err(BarqError::NodeOperationError {
-                    node_name: node.name.clone(),
-                    message: format!("Node execution panicked: {}", panic_msg),
-                })
-            }
-        };
+        let node_continue_on_fail = inode.parameters.0.get("continueOnFail")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+            
+        let max_retries = inode.parameters.0.get("retryOnFail")
+            .and_then(|v| v.as_bool())
+            .and_then(|b| if b { inode.parameters.0.get("maxTries").and_then(|v| v.as_u64()).map(|v| v as u32) } else { None })
+            .unwrap_or(0);
+            
+        let retry_interval_ms = inode.parameters.0.get("waitBetweenTries")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+
+        let error_handler = crate::error_handler::ErrorHandler::new(
+            self.config.continue_on_fail || node_continue_on_fail
+        ).with_retries(max_retries, retry_interval_ms);
+
+        let execute_result = error_handler.execute_isolated_async(&node.name, || {
+            node_info.node_impl.execute(&exec_context)
+        }).await;
 
         match execute_result {
             Ok(outputs) => {
@@ -674,11 +668,7 @@ impl WorkflowRunner {
             Err(e) => {
                 error!("Node {} failed: {}", node.name, e);
                 
-                let node_continue_on_fail = inode.parameters.0.get("continueOnFail")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
-                    
-                if self.config.continue_on_fail || node_continue_on_fail {
+                if error_handler.continue_on_fail {
                     Ok(NodeExecutionResult {
                         node_name: node.name.clone(),
                         outputs: vec![],
