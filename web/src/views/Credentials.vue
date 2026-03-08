@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { Plus, Search, Shield, Key, Lock, MoreVertical, ExternalLink, X } from 'lucide-vue-next'
+import { computed, onMounted, ref } from 'vue'
+import { Plus, Search, Shield, Key, Lock, X, Trash2 } from 'lucide-vue-next'
 import api from '../api'
 
 const credentials = ref<any[]>([])
@@ -8,12 +8,28 @@ const credentialTypes = ref<any[]>([])
 
 const categories = ['All', 'Database', 'Messaging', 'AI', 'Marketing', 'Storage']
 const activeCategory = ref('All')
+const searchTerm = ref('')
 
 // Modal State
 const isModalOpen = ref(false)
 const selectedType = ref<any>(null)
 const newCredentialData = ref<any>({})
 const newCredentialName = ref('')
+
+const filteredCredentials = computed(() => {
+  const query = searchTerm.value.trim().toLowerCase()
+  return credentials.value.filter((cred) => {
+    const type = (cred.credential_type || '').toLowerCase()
+    const name = (cred.name || '').toLowerCase()
+    const matchesCategory =
+      activeCategory.value === 'All' ||
+      type.includes(activeCategory.value.toLowerCase())
+    const matchesQuery =
+      query.length === 0 || name.includes(query) || type.includes(query)
+
+    return matchesCategory && matchesQuery
+  })
+})
 
 onMounted(async () => {
   await fetchCredentials()
@@ -53,6 +69,18 @@ async function saveCredential() {
     await fetchCredentials(); // Refresh list
   } catch (err) {
     console.error("Failed to save credential", err)
+  }
+}
+
+async function deleteCredential(id: string) {
+  const confirmed = window.confirm('Delete this credential?')
+  if (!confirmed) return
+
+  try {
+    await api.delete(`/credentials/${id}`)
+    credentials.value = credentials.value.filter((c) => c.id !== id)
+  } catch (err) {
+    console.error('Failed to delete credential', err)
   }
 }
 </script>
@@ -95,6 +123,7 @@ async function saveCredential() {
         <div class="flex-1 relative group w-full md:w-auto">
           <Search class="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-brand-500 transition-colors" />
           <input 
+            v-model="searchTerm"
             type="text" 
             placeholder="Search credentials..." 
             class="w-full pl-12 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500 transition-all font-medium" 
@@ -115,11 +144,11 @@ async function saveCredential() {
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
-            <tr v-for="cred in credentials" :key="cred.id" class="hover:bg-slate-50/50 transition-colors group">
+            <tr v-for="cred in filteredCredentials" :key="cred.id" class="hover:bg-slate-50/50 transition-colors group">
               <td class="px-8 py-6">
                 <div class="flex items-center gap-4">
                   <div class="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-500 group-hover:bg-brand-50 group-hover:text-brand-600 transition-colors">
-                    <Key v-if="cred.type !== 'Database'" class="w-5 h-5" />
+                    <Key v-if="cred.credential_type !== 'Database'" class="w-5 h-5" />
                     <Shield v-else class="w-5 h-5" />
                   </div>
                   <span class="font-bold text-slate-800 group-hover:text-brand-600 transition-colors">{{ cred.name }}</span>
@@ -139,7 +168,7 @@ async function saveCredential() {
               </td>
               <td class="px-8 py-6 text-right">
                 <div class="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button class="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"><Trash2 class="w-4 h-4" /></button>
+                  <button @click="deleteCredential(cred.id)" class="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"><Trash2 class="w-4 h-4" /></button>
                 </div>
               </td>
             </tr>
