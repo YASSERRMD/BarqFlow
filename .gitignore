@@ -5,3 +5,12 @@ plan2.md
 target/
 node_modules/
 web/node_modules/
+web/dist/
+web/src/**/*.vue.js
+web/src/**/*.vue.js.map
+web/src/**/*.js.map
+web/src/main.js
+web/src/router/index.js
+web/src/api/index.js
+web/src/stores/*.js
+web/src/utils/nodeVisuals.js
