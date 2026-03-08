@@ -15,43 +15,136 @@ import { v4 as uuidv4 } from 'uuid';
 const route = useRoute();
 const workflowStore = useWorkflowStore();
 const nodeStore = useNodeStore();
-const { onConnect, addEdges, toObject, setNodes, setEdges } = useVueFlow();
+const { onConnect, addEdges, toObject, setNodes, setEdges, screenToFlowCoordinate } = useVueFlow();
 const nodes = ref([]);
 const edges = ref([]);
 const selectedNode = ref(null);
 const showNodeCreator = ref(false);
+function buildDefaultProperties(schema) {
+    const defaults = {};
+    if (schema?.properties) {
+        schema.properties.forEach((p) => {
+            if (p.default !== undefined)
+                defaults[p.name] = p.default;
+        });
+    }
+    return defaults;
+}
+function findTypeEntry(typeName) {
+    return nodeStore.nodeTypes.find((n) => n.schema?.name === typeName) || null;
+}
+function makeUniqueNodeLabel(baseName) {
+    const existing = new Set(nodes.value.map((n) => n?.data?.label));
+    if (!existing.has(baseName))
+        return baseName;
+    let i = 2;
+    while (existing.has(`${baseName} ${i}`))
+        i += 1;
+    return `${baseName} ${i}`;
+}
+function toCanvasNode(inode) {
+    const nodeType = inode.type || '';
+    const typeEntry = findTypeEntry(nodeType);
+    const schema = typeEntry?.schema || null;
+    const positionArray = Array.isArray(inode.position) ? inode.position : [0, 0];
+    const properties = {
+        ...buildDefaultProperties(schema),
+        ...(inode.parameters || {}),
+    };
+    return {
+        id: inode.id,
+        type: 'custom',
+        position: {
+            x: Number(positionArray[0] ?? 0),
+            y: Number(positionArray[1] ?? 0),
+        },
+        data: {
+            type: nodeType,
+            kind: typeEntry?.kind || (schema?.is_trigger ? 'trigger' : 'action'),
+            isTrigger: !!(typeEntry?.isTrigger || schema?.is_trigger),
+            label: inode.name,
+            description: typeEntry?.description || schema?.description || '',
+            status: null,
+            schema,
+            properties,
+        },
+    };
+}
+function toWorkflowNode(flowNode) {
+    const nodeType = flowNode?.data?.schema?.name || flowNode?.data?.type;
+    return {
+        id: String(flowNode.id),
+        name: flowNode?.data?.label || String(flowNode.id),
+        type: nodeType,
+        typeVersion: 1.0,
+        position: [
+            Number(flowNode?.position?.x ?? 0),
+            Number(flowNode?.position?.y ?? 0),
+        ],
+        parameters: flowNode?.data?.properties || {},
+        disabled: false,
+    };
+}
+function buildWorkflowConnections(flowNodes, flowEdges) {
+    const byId = new Map(flowNodes.map((n) => [String(n.id), n]));
+    const connections = {};
+    flowEdges.forEach((edge) => {
+        const sourceNode = byId.get(String(edge.source));
+        const targetNode = byId.get(String(edge.target));
+        if (!sourceNode || !targetNode)
+            return;
+        const sourceName = sourceNode?.data?.label || String(sourceNode.id);
+        const targetName = targetNode?.data?.label || String(targetNode.id);
+        if (!connections[sourceName])
+            connections[sourceName] = { main: [[]] };
+        connections[sourceName].main[0].push({
+            node: targetName,
+            type: 'main',
+            index: 0,
+        });
+    });
+    return connections;
+}
+function buildCanvasEdges(loadedNodes, rawConnections) {
+    const byName = new Map(loadedNodes.map((n) => [n?.data?.label, n]));
+    const loadedEdges = [];
+    Object.keys(rawConnections || {}).forEach((sourceName) => {
+        const sourceConn = rawConnections[sourceName];
+        const outputGroups = sourceConn?.main || sourceConn?.Main || [];
+        outputGroups.forEach((targets) => {
+            ;
+            (targets || []).forEach((target) => {
+                const sourceNode = byName.get(sourceName);
+                const targetNode = byName.get(target?.node);
+                if (!sourceNode || !targetNode)
+                    return;
+                loadedEdges.push({
+                    id: `e-${sourceNode.id}-${targetNode.id}-${loadedEdges.length}`,
+                    source: sourceNode.id,
+                    target: targetNode.id,
+                    animated: true,
+                    style: { stroke: '#0ea5e9', strokeWidth: 2 },
+                });
+            });
+        });
+    });
+    return loadedEdges;
+}
 // Load Nodes and Workflow on Mount
 onMounted(async () => {
     await nodeStore.fetchNodeTypes();
-    if (route.params.id && route.params.id !== 'new') {
-        await workflowStore.fetchWorkflow(route.params.id);
-        const activeWf = workflowStore.activeWorkflow;
-        if (activeWf && activeWf.nodes) {
-            // Reconstitute nodes mapping backend IWorkflow structure to VueFlow structure
-            const loadedNodes = [];
-            const loadedEdges = [];
-            // Backend IWorkflow nodes are an array of node objects, connections are a map Object
-            if (Array.isArray(activeWf.nodes)) {
-                activeWf.nodes.forEach((n) => loadedNodes.push(n));
-            }
-            if (activeWf.connections) {
-                Object.keys(activeWf.connections).forEach(sourceNodeName => {
-                    const targets = activeWf.connections[sourceNodeName].main[0] || [];
-                    targets.forEach((t) => {
-                        const sourceNode = loadedNodes.find(n => n.data.label === sourceNodeName);
-                        const targetNode = loadedNodes.find(n => n.data.label === t.node);
-                        if (sourceNode && targetNode) {
-                            loadedEdges.push({ id: `e-${sourceNode.id}-${targetNode.id}`, source: sourceNode.id, target: targetNode.id, animated: true, style: { stroke: '#0ea5e9', strokeWidth: 2 } });
-                        }
-                    });
-                });
-            }
-            setNodes(loadedNodes);
-            setEdges(loadedEdges);
-            nodes.value = loadedNodes;
-            edges.value = loadedEdges;
-        }
-    }
+    if (!(route.params.id && route.params.id !== 'new'))
+        return;
+    await workflowStore.fetchWorkflow(route.params.id);
+    const activeWf = workflowStore.activeWorkflow;
+    if (!activeWf || !Array.isArray(activeWf.nodes))
+        return;
+    const loadedNodes = activeWf.nodes.map((n) => toCanvasNode(n));
+    const loadedEdges = buildCanvasEdges(loadedNodes, activeWf.connections || {});
+    setNodes(loadedNodes);
+    setEdges(loadedEdges);
+    nodes.value = loadedNodes;
+    edges.value = loadedEdges;
 });
 onConnect((params) => {
     addEdges([{
@@ -65,6 +158,8 @@ function onNodeClick({ node }) {
 }
 async function handleExecute() {
     if (workflowStore.loading)
+        return;
+    if (route.params.id === 'new')
         return;
     nodes.value.forEach(n => n.data.status = 'running');
     try {
@@ -86,28 +181,14 @@ async function handleExecute() {
 }
 async function handleSave() {
     const flow = toObject();
-    // Translate VueFlow topology to internal BarqFlow JSON schemas
-    const payloadConnections = {};
-    flow.edges.forEach(edge => {
-        const sourceNode = flow.nodes.find(n => n.id === edge.source);
-        const targetNode = flow.nodes.find(n => n.id === edge.target);
-        if (sourceNode && targetNode) {
-            if (!payloadConnections[sourceNode.data.label]) {
-                payloadConnections[sourceNode.data.label] = { main: [[]] };
-            }
-            payloadConnections[sourceNode.data.label].main[0].push({
-                node: targetNode.data.label,
-                type: "main",
-                index: 0
-            });
-        }
-    });
+    const payloadNodes = flow.nodes.map((n) => toWorkflowNode(n));
+    const payloadConnections = buildWorkflowConnections(flow.nodes, flow.edges);
     const payloadStr = {
         id: route.params.id !== 'new' ? route.params.id : undefined,
         name: workflowStore.activeWorkflow?.name || 'My New Workflow',
-        nodes: flow.nodes,
+        nodes: payloadNodes,
         connections: payloadConnections,
-        settings: {}
+        settings: workflowStore.activeWorkflow?.settings || {}
     };
     await workflowStore.saveWorkflow(payloadStr);
 }
@@ -123,25 +204,25 @@ function onDrop(event) {
         return;
     const nodeSchema = JSON.parse(nodeDataStr);
     // Calculate drag position taking into account the canvas bounding box and scale
-    const position = { x: event.offsetX, y: event.offsetY };
+    const position = screenToFlowCoordinate({ x: event.clientX, y: event.clientY });
+    const typeName = nodeSchema.schema?.name || nodeSchema.type || '';
+    const typeEntry = findTypeEntry(typeName);
+    const schema = nodeSchema.schema || typeEntry?.schema || null;
     // Set default properties based on schema if not exist
-    const propertiesObj = {};
-    if (nodeSchema.schema && nodeSchema.schema.properties) {
-        nodeSchema.schema.properties.forEach((p) => {
-            if (p.default !== undefined)
-                propertiesObj[p.name] = p.default;
-        });
-    }
+    const propertiesObj = buildDefaultProperties(schema);
+    const label = makeUniqueNodeLabel(nodeSchema.name || schema?.display_name || typeName);
     const newNode = {
         id: uuidv4(),
         type: 'custom',
         position,
         data: {
-            type: nodeSchema.type,
-            label: nodeSchema.name, // Usually needs to be unique per node class
-            description: nodeSchema.description,
+            type: typeName,
+            kind: typeEntry?.kind || nodeSchema.kind || (schema?.is_trigger ? 'trigger' : 'action'),
+            isTrigger: !!(typeEntry?.isTrigger || nodeSchema.isTrigger || schema?.is_trigger),
+            label,
+            description: nodeSchema.description || schema?.description || '',
             status: null,
-            schema: nodeSchema.schema,
+            schema,
             properties: propertiesObj
         }
     };
