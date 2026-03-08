@@ -12,6 +12,7 @@ use crate::repositories::credential::CredentialRepository;
 use barqflow_db::models::ExecutionEntity;
 use serde::Deserialize;
 use std::sync::Arc;
+use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -25,6 +26,7 @@ pub fn execution_routes(state: AppState) -> Router {
     Router::new()
         .route("/executions", get(list_executions))
         .route("/executions/{id}", get(get_execution).delete(delete_execution))
+        .route("/executions/{id}/retry", post(retry_execution))
         .route("/executions/workflow/{workflow_id}", post(execute_workflow))
         .with_state(state)
 }
@@ -108,8 +110,33 @@ async fn execute_workflow(
     _claims: Claims,
     State(state): State<AppState>,
     Path(workflow_id): Path<uuid::Uuid>,
-    Json(_payload): Json<CreateExecutionRequest>,
+    Json(payload): Json<CreateExecutionRequest>,
 ) -> Result<Json<ExecutionEntity>, (StatusCode, String)> {
+    let execution = run_workflow_execution(&state, workflow_id, payload.manual.unwrap_or(true)).await?;
+    Ok(Json(execution))
+}
+
+async fn retry_execution(
+    _claims: Claims,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<ExecutionEntity>, (StatusCode, String)> {
+    let execution = state
+        .execution_repo
+        .find_by_id(id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Execution not found".into()))?;
+
+    let retried = run_workflow_execution(&state, execution.workflow_id, true).await?;
+    Ok(Json(retried))
+}
+
+async fn run_workflow_execution(
+    state: &AppState,
+    workflow_id: Uuid,
+    manual: bool,
+) -> Result<ExecutionEntity, (StatusCode, String)> {
     use barqflow_exec::runner::{WorkflowRunner, ExecutionConfig, WorkflowRunContext};
     use barqflow_core::types::RunId;
 
@@ -150,7 +177,7 @@ async fn execute_workflow(
         run_id,
         workflow: core_wf,
         static_data: None,
-        manual: true,
+        manual,
     };
 
     // Save initial state
@@ -193,5 +220,5 @@ async fn execute_workflow(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .unwrap();
 
-    Ok(Json(updated_exec))
+    Ok(updated_exec)
 }
