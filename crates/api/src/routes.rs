@@ -45,6 +45,7 @@ pub fn create_router(state: AppState) -> Router {
             execution_repo: Arc::clone(&state.exec_repo),
             workflow_repo: Arc::clone(&state.workflow_repo),
             node_registry: Arc::clone(&state.node_registry),
+            credential_repo: Arc::clone(&state.credential_repo),
         }))
         .merge(credential_routes(CredState {
             credential_repo: Arc::clone(&state.credential_repo),
@@ -61,6 +62,7 @@ pub fn create_router(state: AppState) -> Router {
         workflow_repo: Arc::clone(&state.workflow_repo),
         webhook_registry: Arc::clone(&state.webhook_registry),
         node_registry: Arc::clone(&state.node_registry),
+        credential_repo: Arc::clone(&state.credential_repo),
     });
 
     Router::new()

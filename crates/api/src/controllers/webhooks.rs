@@ -12,6 +12,7 @@ use barqflow_core::{
 };
 use barqflow_exec::runner::{ExecutionConfig, WorkflowRunContext, WorkflowRunner};
 use barqflow_registry::registry::NodeRegistry;
+use crate::repositories::credential::CredentialRepository;
 use crate::repositories::workflow::WorkflowRepository;
 use serde_json::json;
 use std::{
@@ -42,6 +43,7 @@ pub struct WebhookState {
     pub workflow_repo: Arc<WorkflowRepository>,
     pub webhook_registry: WebhookRegistry,
     pub node_registry: Arc<NodeRegistry>,
+    pub credential_repo: Arc<CredentialRepository>,
 }
 
 pub fn webhook_routes(state: WebhookState) -> Router {
@@ -134,7 +136,11 @@ async fn handle_webhook(
         settings,
     };
 
-    let runner = WorkflowRunner::new(state.node_registry.clone(), ExecutionConfig::default());
+    let credential_provider = Arc::new(crate::credentials_provider::RepositoryCredentialProvider::new(
+        Arc::clone(&state.credential_repo),
+    ));
+    let runner = WorkflowRunner::new(state.node_registry.clone(), ExecutionConfig::default())
+        .with_credential_provider(credential_provider);
     let run_id = RunId::new();
 
     // Inject the trigger output as static data for the webhook node
@@ -164,6 +170,7 @@ mod tests {
     use serde_json::json;
     use sqlx::PgPool;
     use tower::ServiceExt;
+    use crate::repositories::credential::CredentialRepository;
 
     #[sqlx::test(migrations = "./migrations")]
     async fn test_dynamic_webhook_routing(pool: PgPool) {
@@ -192,6 +199,7 @@ mod tests {
             workflow_repo: repo,
             webhook_registry: registry,
             node_registry: Arc::new(NodeRegistry::new()), // Empty mock
+            credential_repo: Arc::new(CredentialRepository::new(pool)),
         };
 
         let app = webhook_routes(state);

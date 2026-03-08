@@ -14,7 +14,6 @@ use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
 use std::sync::Arc;
 use futures::FutureExt;
-use petgraph::visit::EdgeRef;
 use tracing::{debug, error, info, instrument};
 
 /// Configuration for workflow execution.
@@ -72,6 +71,8 @@ pub struct WorkflowRunner {
     registry: Arc<NodeRegistry>,
     /// Execution configuration
     config: ExecutionConfig,
+    /// Optional runtime credential resolver
+    credential_provider: Option<Arc<dyn crate::context::CredentialProvider>>,
 }
 
 impl WorkflowRunner {
@@ -81,7 +82,19 @@ impl WorkflowRunner {
     /// * `registry` - Node registry for resolving node types
     /// * `config` - Execution configuration
     pub fn new(registry: Arc<NodeRegistry>, config: ExecutionConfig) -> Self {
-        Self { registry, config }
+        Self {
+            registry,
+            config,
+            credential_provider: None,
+        }
+    }
+
+    pub fn with_credential_provider(
+        mut self,
+        credential_provider: Arc<dyn crate::context::CredentialProvider>,
+    ) -> Self {
+        self.credential_provider = Some(credential_provider);
+        self
     }
 
     /// Execute a workflow.
@@ -532,16 +545,11 @@ impl WorkflowRunner {
             .map(|n| WorkflowNode::from(n.clone()))
             .collect();
 
-        let connections: std::collections::HashMap<
-            String,
-            barqflow_core::schema::INodeConnections,
-        > = std::collections::HashMap::new();
-
         WorkflowDef {
             id: workflow.id.0.to_string(),
             name: workflow.name.clone(),
             nodes,
-            connections,
+            connections: workflow.connections.clone(),
             settings: Some(workflow.settings.clone()),
             static_data: None,
             pin_data: None,
@@ -622,12 +630,13 @@ impl WorkflowRunner {
             })?;
 
         // Create execution context
-        let exec_context = crate::context::NodeExecutionContext::new(
+        let exec_context = crate::context::NodeExecutionContext::new_with_credentials(
             inode.clone(),
             input_data,
             context.static_data.clone(),
             context.run_id.0,
             workflow_cache,
+            self.credential_provider.clone(),
         );
 
         let node_continue_on_fail = inode.parameters.0.get("continueOnFail")
@@ -689,6 +698,7 @@ pub use barqflow_flow::graph::WorkflowToGraphParser;
 #[cfg(test)]
 mod tests {
     use async_trait::async_trait;
+    use barqflow_core::schema::{IConnection, NodeConnectionType};
     use barqflow_core::traits::IExecuteFunctions;
     use barqflow_core::types::WorkflowId;
 
@@ -743,6 +753,7 @@ mod tests {
         };
 
         registry.register_node(node_info).unwrap();
+
         registry
     }
 
@@ -840,5 +851,58 @@ mod tests {
 
         assert!(!context.manual);
         assert_eq!(context.workflow.name, "Test Workflow");
+    }
+
+    #[tokio::test]
+    async fn test_convert_workflow_preserves_connections() {
+        let registry = create_mock_registry();
+        let runner = WorkflowRunner::new(registry, ExecutionConfig::default());
+
+        let source = INode {
+            id: NodeId::new("source"),
+            name: "Source".to_string(),
+            r#type: "mockPassThrough".to_string(),
+            type_version: 1.0,
+            position: [0.0, 0.0],
+            parameters: INodeParameters::default(),
+            disabled: false,
+        };
+        let sink = INode {
+            id: NodeId::new("sink"),
+            name: "Sink".to_string(),
+            r#type: "mockPassThrough".to_string(),
+            type_version: 1.0,
+            position: [100.0, 0.0],
+            parameters: INodeParameters::default(),
+            disabled: false,
+        };
+
+        let mut connections = HashMap::new();
+        connections.insert(
+            "Source".to_string(),
+            barqflow_core::schema::INodeConnections(HashMap::from([(
+                NodeConnectionType::Main,
+                vec![vec![IConnection {
+                    node: "Sink".to_string(),
+                    r#type: NodeConnectionType::Main,
+                    index: 0,
+                }]],
+            )])),
+        );
+
+        let core = CoreWorkflowDef {
+            id: WorkflowId::new(),
+            name: "Connected Workflow".to_string(),
+            nodes: vec![source, sink],
+            connections,
+            active: true,
+            settings: IWorkflowSettings::default(),
+        };
+
+        let flow = runner.convert_workflow(&core);
+        assert_eq!(flow.connections.len(), 1);
+
+        let parsed = WorkflowToGraphParser::parse(&flow).expect("workflow should parse");
+        assert_eq!(parsed.graph.edge_count(), 1);
     }
 }
