@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { X, Play, Trash2, Info, ExternalLink, Settings2 } from 'lucide-vue-next'
 import { useNodeStore } from '../stores/nodes'
+import api from '../api'
 
 const nodeStore = useNodeStore()
 
@@ -23,6 +24,21 @@ const emit = defineEmits<{
 }>()
 
 const localNotice = ref<string | null>(null)
+const credentialOptions = ref<Record<string, any[]>>({})
+const credentialsLoading = ref(false)
+const credentialsError = ref<string | null>(null)
+
+const FALLBACK_NODE_CREDENTIALS: Record<
+  string,
+  Array<{ credentialType: string; displayName: string; required: boolean }>
+> = {
+  'barqflow-nodes.openai': [
+    { credentialType: 'openAiApi', displayName: 'OpenAI API', required: true },
+  ],
+  'barqflow-nodes.postgres': [
+    { credentialType: 'postgresApi', displayName: 'Postgres', required: true },
+  ],
+}
 
 const nodeSchema = computed(() => {
   if (!props.node) return null
@@ -39,6 +55,66 @@ const documentationUrl = computed(() => {
   const schema = nodeSchema.value as any
   return schema?.documentation_url || schema?.documentationUrl || null
 })
+
+const nodeCredentialRefs = computed(() => {
+  const schemaRefs = Array.isArray((nodeSchema.value as any)?.credentials)
+    ? (nodeSchema.value as any).credentials
+    : []
+
+  if (schemaRefs.length > 0) {
+    return schemaRefs.map((ref: any) => ({
+      credentialType: String(ref?.credentialType || ref?.credential_type || ''),
+      displayName: String(ref?.displayName || ref?.display_name || ref?.credentialType || ''),
+      required: ref?.required !== false,
+    }))
+  }
+
+  const nodeType = props.node?.data?.schema?.name || props.node?.data?.type
+  return FALLBACK_NODE_CREDENTIALS[nodeType] || []
+})
+
+function ensureNodeCredentialMap() {
+  if (!props.node) return
+  if (!props.node.data.credentials || typeof props.node.data.credentials !== 'object') {
+    props.node.data.credentials = {}
+  }
+}
+
+async function loadCredentialOptions() {
+  if (!props.node) return
+  ensureNodeCredentialMap()
+  credentialOptions.value = {}
+  credentialsError.value = null
+
+  if (nodeCredentialRefs.value.length === 0) return
+
+  credentialsLoading.value = true
+  try {
+    await Promise.all(
+      nodeCredentialRefs.value.map(async (refInfo: any) => {
+        const response = await api.get('/credentials', {
+          params: { type: refInfo.credentialType },
+        })
+        credentialOptions.value[refInfo.credentialType] = response.data || []
+      }),
+    )
+  } catch (err: any) {
+    credentialsError.value = err?.response?.data || err?.message || 'Failed to load credentials.'
+  } finally {
+    credentialsLoading.value = false
+  }
+}
+
+watch(
+  () =>
+    `${String(props.node?.id || '')}:${nodeCredentialRefs.value
+      .map((r: any) => r.credentialType)
+      .join(',')}`,
+  () => {
+    loadCredentialOptions()
+  },
+  { immediate: true },
+)
 
 function getCategoryColor(type: string) {
   switch (type) {
@@ -197,6 +273,40 @@ function onDeleteNode() {
 
           <div v-else-if="(node.data.kind || node.data.type) === 'action'" class="space-y-4">
             <p class="text-xs text-amber-600 bg-amber-50 p-2 rounded border border-amber-200">No dynamic schema available from backend. Using fallback rendering.</p>
+          </div>
+        </div>
+
+        <div v-if="nodeCredentialRefs.length > 0" class="space-y-5 bg-white border border-slate-200 rounded-lg p-5">
+          <h3 class="font-semibold text-slate-800 mb-4">Credentials</h3>
+          <div v-if="credentialsError" class="text-xs text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+            {{ credentialsError }}
+          </div>
+          <div class="space-y-4">
+            <div v-for="ref in nodeCredentialRefs" :key="ref.credentialType">
+              <label class="block text-sm font-medium text-slate-700 mb-1.5">
+                {{ ref.displayName }}
+              </label>
+              <select
+                v-model="node.data.credentials[ref.credentialType]"
+                :disabled="credentialsLoading"
+                class="w-full px-3 py-2 bg-white border border-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500 rounded-md text-sm text-slate-900 shadow-sm disabled:opacity-70"
+              >
+                <option value="">Select credential</option>
+                <option
+                  v-for="cred in credentialOptions[ref.credentialType] || []"
+                  :key="cred.id"
+                  :value="cred.id"
+                >
+                  {{ cred.name }}
+                </option>
+              </select>
+              <p
+                v-if="ref.required && !node.data.credentials[ref.credentialType]"
+                class="mt-1 text-xs text-amber-600"
+              >
+                This credential is required.
+              </p>
+            </div>
           </div>
         </div>
 

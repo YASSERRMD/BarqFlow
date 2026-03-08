@@ -27,9 +27,53 @@ const showNodeCreator = ref(false)
 const executionNotice = ref<{ type: 'success' | 'error'; message: string; showCredentialsAction?: boolean } | null>(null)
 const nodeTestState = ref<{ nodeId: string; status: 'running' | 'success' | 'error'; message: string } | null>(null)
 
-const NODE_CREDENTIAL_REQUIREMENTS: Record<string, { credType: string; label: string }> = {
-  'barqflow-nodes.openai': { credType: 'openAiApi', label: 'OpenAI API credential' },
-  'barqflow-nodes.postgres': { credType: 'postgresApi', label: 'Postgres credential' },
+const NODE_CREDENTIAL_REQUIREMENTS: Record<
+  string,
+  Array<{ credentialType: string; displayName: string; required: boolean }>
+> = {
+  'barqflow-nodes.openai': [
+    { credentialType: 'openAiApi', displayName: 'OpenAI API', required: true },
+  ],
+  'barqflow-nodes.postgres': [
+    { credentialType: 'postgresApi', displayName: 'Postgres', required: true },
+  ],
+}
+
+function normalizeNodeCredentials(rawCredentials: any, nodeId: string): Record<string, string> {
+  const normalized: Record<string, string> = {}
+  if (!Array.isArray(rawCredentials)) return normalized
+
+  rawCredentials.forEach((binding: any) => {
+    const bindingNodeId = String(binding?.nodeId || binding?.node_id || '')
+    const bindingType = String(binding?.credentialType || binding?.credential_type || '')
+    const bindingCredentialId = String(binding?.credentialId || binding?.credential_id || '')
+    if (bindingType && bindingCredentialId && (!bindingNodeId || bindingNodeId === nodeId)) {
+      normalized[bindingType] = bindingCredentialId
+    }
+  })
+
+  return normalized
+}
+
+function nodeCredentialReferences(node: any): Array<{
+  credentialType: string
+  displayName: string
+  required: boolean
+}> {
+  const schemaRefs = Array.isArray(node?.data?.schema?.credentials)
+    ? node.data.schema.credentials
+    : []
+
+  if (schemaRefs.length > 0) {
+    return schemaRefs.map((ref: any) => ({
+      credentialType: String(ref?.credentialType || ref?.credential_type || ''),
+      displayName: String(ref?.displayName || ref?.display_name || ref?.credentialType || ''),
+      required: ref?.required !== false,
+    }))
+  }
+
+  const nodeType = node?.data?.schema?.name || node?.data?.type
+  return NODE_CREDENTIAL_REQUIREMENTS[nodeType] || []
 }
 
 function buildDefaultProperties(schema: any): Record<string, any> {
@@ -86,15 +130,25 @@ function toCanvasNode(inode: any): any {
       status: null,
       schema,
       properties,
+      credentials: normalizeNodeCredentials(inode.credentials, String(inode.id)),
     },
   }
 }
 
 function toWorkflowNode(flowNode: any): any {
   const nodeType = flowNode?.data?.schema?.name || flowNode?.data?.type
+  const nodeId = String(flowNode.id)
+  const credentialBindings = Object.entries(flowNode?.data?.credentials || {})
+    .filter(([credentialType, credentialId]) => !!credentialType && !!credentialId)
+    .map(([credentialType, credentialId]) => ({
+      nodeId,
+      credentialType,
+      credentialId,
+    }))
+
   return {
-    id: String(flowNode.id),
-    name: flowNode?.data?.label || String(flowNode.id),
+    id: nodeId,
+    name: flowNode?.data?.label || nodeId,
     type: nodeType,
     typeVersion: 1.0,
     position: [
@@ -102,6 +156,7 @@ function toWorkflowNode(flowNode: any): any {
       Number(flowNode?.position?.y ?? 0),
     ],
     parameters: flowNode?.data?.properties || {},
+    credentials: credentialBindings,
     disabled: false,
   }
 }
@@ -180,6 +235,8 @@ function isCredentialErrorMessage(message: string): boolean {
   const text = message.toLowerCase()
   return (
     text.includes('no credential found') ||
+    text.includes('credential binding missing') ||
+    text.includes('select a credential') ||
     text.includes('missing openai api key') ||
     text.includes('missing postgres credential fields') ||
     text.includes('go to /credentials')
@@ -187,34 +244,64 @@ function isCredentialErrorMessage(message: string): boolean {
 }
 
 async function ensureRequiredCredentialsPresent(): Promise<{ ok: boolean; message?: string }> {
-  const needed = new Map<string, string>()
+  const requiredByNode: Array<{
+    nodeId: string
+    nodeLabel: string
+    credentialType: string
+    displayName: string
+  }> = []
 
   nodes.value.forEach((node: any) => {
-    const nodeType = node?.data?.schema?.name || node?.data?.type
-    const requirement = NODE_CREDENTIAL_REQUIREMENTS[nodeType]
-    if (requirement) {
-      needed.set(requirement.credType, requirement.label)
-    }
+    const refs = nodeCredentialReferences(node)
+    refs
+      .filter((ref) => ref.required)
+      .forEach((ref) =>
+        requiredByNode.push({
+          nodeId: String(node?.id || ''),
+          nodeLabel: String(node?.data?.label || node?.id || 'Node'),
+          credentialType: ref.credentialType,
+          displayName: ref.displayName || ref.credentialType,
+        }),
+      )
   })
 
-  if (needed.size === 0) {
+  if (requiredByNode.length === 0) {
     return { ok: true }
   }
 
   try {
     const response = await api.get('/credentials')
-    const available = new Set(
-      (response.data || []).map((cred: any) => cred?.cred_type || cred?.credential_type),
-    )
+    const availableByType = new Map<string, Set<string>>()
+    ;(response.data || []).forEach((cred: any) => {
+      const type = String(cred?.cred_type || cred?.credential_type || '')
+      const id = String(cred?.id || '')
+      if (!type || !id) return
+      if (!availableByType.has(type)) {
+        availableByType.set(type, new Set<string>())
+      }
+      availableByType.get(type)!.add(id)
+    })
 
-    const missing = Array.from(needed.entries())
-      .filter(([credType]) => !available.has(credType))
-      .map(([_, label]) => label)
+    const missing: string[] = []
+    requiredByNode.forEach((required) => {
+      const node = nodes.value.find((n: any) => String(n.id) === required.nodeId)
+      const selectedCredentialId = String(node?.data?.credentials?.[required.credentialType] || '')
+      const availableSet = availableByType.get(required.credentialType)
+
+      if (!selectedCredentialId) {
+        missing.push(`${required.nodeLabel} -> ${required.displayName}`)
+        return
+      }
+
+      if (!availableSet || !availableSet.has(selectedCredentialId)) {
+        missing.push(`${required.nodeLabel} -> ${required.displayName}`)
+      }
+    })
 
     if (missing.length > 0) {
       return {
         ok: false,
-        message: `Missing required credentials: ${missing.join(', ')}. Open Credentials to add them.`,
+        message: `Missing credential bindings: ${missing.join(', ')}. Open the node panel and select credentials.`,
       }
     }
 
@@ -501,6 +588,7 @@ function onDrop(event: DragEvent) {
       status: null,
       schema,
       properties: propertiesObj,
+      credentials: {},
     },
   }
 
