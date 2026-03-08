@@ -7,6 +7,7 @@ use axum::{
 };
 use barqflow_db::users::UserRepo;
 use serde::{Deserialize, Serialize};
+use sqlx::Error as SqlxError;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -66,7 +67,7 @@ async fn register_user(
             "user", // default role
         )
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(map_register_error)?;
 
     let token = generate_jwt(&new_user.id.to_string(), &new_user.global_role)
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "JWT logic failed".into()))?;
@@ -80,6 +81,19 @@ async fn register_user(
             role: new_user.global_role,
         },
     }))
+}
+
+fn map_register_error(err: SqlxError) -> (StatusCode, String) {
+    if let Some(db_err) = err.as_database_error() {
+        if db_err.code().as_deref() == Some("23505") {
+            return (
+                StatusCode::CONFLICT,
+                "Email is already registered. Please log in or use another email.".to_string(),
+            );
+        }
+    }
+
+    (StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
 }
 
 async fn login_user(
@@ -143,4 +157,44 @@ async fn get_profile(
         email: user.email,
         role: user.global_role,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{body::Body, http::Request};
+    use serde_json::json;
+    use sqlx::PgPool;
+    use tower::ServiceExt;
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn register_user_returns_conflict_for_duplicate_email(pool: PgPool) {
+        let app = user_routes(AppState {
+            user_repo: std::sync::Arc::new(UserRepo::new(pool)),
+        });
+
+        let payload = json!({
+            "email": "duplicate@example.com",
+            "password": "StrongPass123!"
+        })
+        .to_string();
+
+        let first = Request::builder()
+            .uri("/users")
+            .method("POST")
+            .header("content-type", "application/json")
+            .body(Body::from(payload.clone()))
+            .unwrap();
+        let first_response = app.clone().oneshot(first).await.unwrap();
+        assert_eq!(first_response.status(), StatusCode::OK);
+
+        let second = Request::builder()
+            .uri("/users")
+            .method("POST")
+            .header("content-type", "application/json")
+            .body(Body::from(payload))
+            .unwrap();
+        let second_response = app.oneshot(second).await.unwrap();
+        assert_eq!(second_response.status(), StatusCode::CONFLICT);
+    }
 }

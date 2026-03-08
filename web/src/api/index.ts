@@ -7,6 +7,15 @@ const api = axios.create({
     },
 });
 
+function redirectToLoginWithoutReload() {
+    if (window.location.pathname === '/login') {
+        return;
+    }
+
+    window.history.pushState({}, '', '/login');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+}
+
 // Add a request interceptor to include the JWT token
 api.interceptors.request.use(
     (config) => {
@@ -29,7 +38,7 @@ api.interceptors.response.use(
     (error) => {
         if (error.response && error.response.status === 401) {
             localStorage.removeItem('token');
-            window.location.href = '/login';
+            redirectToLoginWithoutReload();
         }
         return Promise.reject(error);
     }
