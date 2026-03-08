@@ -425,6 +425,46 @@ function extractNodeError(result: any, nodeLabel?: string): string {
   return 'Execution failed'
 }
 
+function truncatePreview(text: string, maxLength = 160): string {
+  const normalized = text.replace(/\s+/g, ' ').trim()
+  if (normalized.length <= maxLength) return normalized
+  return `${normalized.slice(0, maxLength - 3)}...`
+}
+
+function extractNodeOutputPreview(nodeResult: any): string | null {
+  const firstBranch = Array.isArray(nodeResult?.outputs) ? nodeResult.outputs[0] : null
+  const firstItem = Array.isArray(firstBranch) ? firstBranch[0] : null
+  const firstJson = firstItem?.json && typeof firstItem.json === 'object' ? firstItem.json : null
+  if (!firstJson) return null
+
+  const responseText = [
+    firstJson?.responseText,
+    firstJson?.text,
+    firstJson?.output,
+    firstJson?.body?.responseText,
+    firstJson?.body,
+  ].find((value) => typeof value === 'string' && String(value).trim().length > 0)
+
+  if (typeof responseText === 'string') {
+    return `Preview: ${truncatePreview(responseText)}`
+  }
+
+  if (Array.isArray(firstJson?.models) && firstJson.models.length > 0) {
+    const modelNames = firstJson.models
+      .slice(0, 3)
+      .map((model: any) => String(model))
+      .join(', ')
+    return `Models: ${modelNames}`
+  }
+
+  const keys = Object.keys(firstJson || {})
+  if (keys.length > 0) {
+    return `Output keys: ${keys.slice(0, 4).join(', ')}`
+  }
+
+  return null
+}
+
 async function handleSave() {
   const flow = toObject()
   const payloadNodes = flow.nodes.map((n: any) => toWorkflowNode(n))
@@ -587,13 +627,20 @@ async function handleTestNode(node: any) {
     const nodeResult = result?.data?.[node.data.label]
 
     if (nodeResult?.success) {
-      const outputsCount = Array.isArray(nodeResult.outputs)
-        ? nodeResult.outputs.length
+      const outputsCount = Array.isArray(nodeResult?.outputs)
+        ? nodeResult.outputs.reduce(
+            (count: number, branch: any) => count + (Array.isArray(branch) ? branch.length : 0),
+            0,
+          )
         : 0
+      const preview = extractNodeOutputPreview(nodeResult)
       nodeTestState.value = {
         nodeId: node.id,
         status: 'success',
-        message: `Test passed. Outputs: ${outputsCount}`,
+        message:
+          preview || outputsCount > 0
+            ? `Test passed. ${preview || `Outputs: ${outputsCount}`}`
+            : 'Test passed. No output items returned.',
       }
     } else {
       const message = extractNodeError(result, node.data.label)
