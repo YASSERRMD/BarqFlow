@@ -215,6 +215,7 @@ mod tests {
                     type_version: 1.0,
                     position: [0.0, 0.0],
                     parameters: INodeParameters(std::collections::HashMap::new()),
+                    credentials: vec![],
                     disabled: false,
                 },
             }

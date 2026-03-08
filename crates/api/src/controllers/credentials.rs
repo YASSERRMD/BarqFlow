@@ -1,7 +1,7 @@
 use crate::auth::Claims;
 use axum::http::StatusCode;
 use axum::{
-    extract::{Json, Path, State},
+    extract::{Json, Path, Query, State},
     routing::{get, post},
     Router,
 };
@@ -75,15 +75,29 @@ pub struct TestCredentialRequest {
     pub data: std::collections::HashMap<String, barqflow_core::types::GenericValue>,
 }
 
+#[derive(Deserialize)]
+pub struct CredentialListQuery {
+    pub r#type: Option<String>,
+}
+
 async fn get_credentials(
     _claims: Claims,
     State(state): State<AppState>,
+    Query(query): Query<CredentialListQuery>,
 ) -> Result<Json<Vec<CredentialResponse>>, (StatusCode, String)> {
-    let creds = state
-        .credential_repo
-        .find_all()
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let creds = if let Some(cred_type) = query.r#type {
+        state
+            .credential_repo
+            .find_by_type(&cred_type)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    } else {
+        state
+            .credential_repo
+            .find_all()
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    };
 
     Ok(Json(creds.into_iter().map(CredentialResponse::from).collect()))
 }

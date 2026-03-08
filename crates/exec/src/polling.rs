@@ -297,6 +297,7 @@ mod tests {
                 type_version: 1.0,
                 position: [0.0, 0.0],
                 parameters: INodeParameters(HashMap::new()),
+                credentials: vec![],
                 disabled: false,
             }],
             connections: HashMap::new(),

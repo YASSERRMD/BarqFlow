@@ -77,6 +77,26 @@ impl CredentialRepository {
         Ok(entity_opt)
     }
 
+    pub async fn find_by_type(&self, cred_type: &str) -> Result<Vec<CredentialEntity>> {
+        let mut entities = sqlx::query_as::<_, CredentialEntity>(
+            r#"
+            SELECT id, name, cred_type, data, created_at, updated_at
+            FROM credentials
+            WHERE cred_type = $1
+            ORDER BY name ASC
+            "#,
+        )
+        .bind(cred_type)
+        .fetch_all(&self.pool)
+        .await?;
+
+        for e in &mut entities {
+            self.decrypt_entity_data(e);
+        }
+
+        Ok(entities)
+    }
+
     pub async fn find_latest_by_type(&self, cred_type: &str) -> Result<Option<CredentialEntity>> {
         let mut entity_opt = sqlx::query_as::<_, CredentialEntity>(
             r#"

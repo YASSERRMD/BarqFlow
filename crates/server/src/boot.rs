@@ -81,6 +81,13 @@ pub async fn run_boot_sequence(
                         let connections: HashMap<String, INodeConnections> = serde_json::from_value(wf.connections.clone()).unwrap_or_default();
                         let settings: IWorkflowSettings = serde_json::from_value(wf.settings.clone()).unwrap_or_default();
 
+                        let credential_provider = std::sync::Arc::new(
+                            RepositoryCredentialProvider::new(
+                                std::sync::Arc::clone(&state.credential_repo),
+                                &nodes,
+                            )
+                        );
+
                         let workflow_def = WorkflowDef {
                             id: WorkflowId(wf.id),
                             name: wf.name.clone(),
@@ -90,9 +97,6 @@ pub async fn run_boot_sequence(
                             settings,
                         };
 
-                        let credential_provider = std::sync::Arc::new(
-                            RepositoryCredentialProvider::new(std::sync::Arc::clone(&state.credential_repo))
-                        );
                         let runner = WorkflowRunner::new(state.node_registry.clone(), ExecutionConfig::default())
                             .with_credential_provider(credential_provider);
                         let ctx = WorkflowRunContext {

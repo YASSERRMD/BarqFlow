@@ -17,7 +17,8 @@ use tracing::{debug, span, Level};
 pub trait CredentialProvider: Send + Sync {
     async fn get_credentials(
         &self,
-        name: &str,
+        node_id: &str,
+        credential_type: &str,
     ) -> Result<HashMap<String, GenericValue>, BarqError>;
 }
 
@@ -258,14 +259,17 @@ impl IExecuteFunctions for NodeExecutionContext {
             BarqError::NodeOperationError {
                 node_name: self.node.name.clone(),
                 message: format!(
-                    "Credential provider is not configured; cannot resolve '{}'",
-                    name
+                    "Credential provider is not configured; cannot resolve '{}' for node '{}'",
+                    name, self.node.id
                 ),
             }
         })?;
 
-        let creds = provider.get_credentials(name).await?;
-        self.log(&format!("Resolved credentials for '{}'", name));
+        let creds = provider.get_credentials(&self.node.id.0, name).await?;
+        self.log(&format!(
+            "Resolved credentials for '{}' on node '{}'",
+            name, self.node.id
+        ));
         Ok(creds)
     }
 
@@ -442,6 +446,7 @@ mod tests {
             type_version: 1.0,
             position: [0.0, 0.0],
             parameters: barqflow_core::schema::INodeParameters(params),
+            credentials: vec![],
             disabled: false,
         }
     }
@@ -452,6 +457,7 @@ mod tests {
     impl CredentialProvider for MockCredentialProvider {
         async fn get_credentials(
             &self,
+            _node_id: &str,
             name: &str,
         ) -> Result<HashMap<String, GenericValue>, BarqError> {
             if name != "openAiApi" {
@@ -564,7 +570,7 @@ mod tests {
             Arc::new(RwLock::new(HashMap::new())),
         );
 
-        let input = context.get_input_data(0).unwrap();
+        let input = context.get_input_data(0).await.unwrap();
         assert_eq!(input.len(), 1);
     }
 
@@ -605,6 +611,7 @@ mod tests {
             type_version: 1.0,
             position: [0.0, 0.0],
             parameters: barqflow_core::schema::INodeParameters(params),
+            credentials: vec![],
             disabled: false,
         };
 

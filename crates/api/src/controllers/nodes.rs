@@ -4,6 +4,7 @@ use axum::{
     routing::get,
     Json, Router,
 };
+use barqflow_core::schema::CredentialReference;
 use barqflow_nodes::is_node_ui_exposed;
 use barqflow_registry::registry::NodeRegistry;
 use serde::Serialize;
@@ -22,6 +23,7 @@ pub struct NodeSchema {
     pub description: String,
     pub is_trigger: bool,
     pub properties: Vec<barqflow_core::properties::INodeProperty>,
+    pub credentials: Vec<CredentialReference>,
     pub defaults: Option<Value>,
 }
 
@@ -41,16 +43,34 @@ async fn list_node_schemas(State(state): State<AppState>) -> impl IntoResponse {
         }
 
         if let Some(info) = state.node_registry.get_latest_node(&name) {
+            let node_name = info.name.clone();
             schemas.push(NodeSchema {
-                name: info.name,
+                name: node_name.clone(),
                 display_name: info.display_name,
                 description: info.description,
                 is_trigger: info.is_trigger,
                 properties: info.properties.properties.clone(),
+                credentials: node_credential_references(&node_name),
                 defaults: None, // We can populate this if we parse the defaults from the schema
             });
         }
     }
 
     Json(schemas)
+}
+
+fn node_credential_references(node_name: &str) -> Vec<CredentialReference> {
+    match node_name {
+        "barqflow-nodes.openai" => vec![CredentialReference {
+            credential_type: "openAiApi".to_string(),
+            required: true,
+            display_name: "OpenAI API".to_string(),
+        }],
+        "barqflow-nodes.postgres" => vec![CredentialReference {
+            credential_type: "postgresApi".to_string(),
+            required: true,
+            display_name: "Postgres".to_string(),
+        }],
+        _ => vec![],
+    }
 }
