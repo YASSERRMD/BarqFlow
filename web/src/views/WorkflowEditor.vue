@@ -319,6 +319,40 @@ function validateRequiredParameters(scopeNodeIds?: Set<string>): { ok: boolean; 
   return { ok: true }
 }
 
+function collectExecutionScopeForTarget(targetNodeId: string): Set<string> {
+  const scope = new Set<string>()
+  const targetId = String(targetNodeId || '')
+  if (!targetId) return scope
+
+  const inboundByTarget = new Map<string, string[]>()
+  edges.value.forEach((edge: any) => {
+    const source = String(edge?.source || '')
+    const target = String(edge?.target || '')
+    if (!source || !target) return
+
+    if (!inboundByTarget.has(target)) {
+      inboundByTarget.set(target, [])
+    }
+    inboundByTarget.get(target)!.push(source)
+  })
+
+  const stack = [targetId]
+  while (stack.length > 0) {
+    const current = stack.pop()!
+    if (scope.has(current)) continue
+    scope.add(current)
+
+    const parents = inboundByTarget.get(current) || []
+    parents.forEach((parentId) => {
+      if (!scope.has(parentId)) {
+        stack.push(parentId)
+      }
+    })
+  }
+
+  return scope
+}
+
 async function ensureRequiredCredentialsPresent(
   scopeNodeIds?: Set<string>,
 ): Promise<{ ok: boolean; message?: string }> {
@@ -598,7 +632,10 @@ async function handleTestNode(node: any) {
     return
   }
 
-  const scopedNodes = new Set<string>([String(node.id)])
+  const scopedNodes = collectExecutionScopeForTarget(String(node.id))
+  if (!scopedNodes.has(String(node.id))) {
+    scopedNodes.add(String(node.id))
+  }
   const requiredParams = validateRequiredParameters(scopedNodes)
   if (!requiredParams.ok) {
     const message = requiredParams.message || 'Missing required parameters.'
