@@ -3,12 +3,20 @@ use barqflow_core::errors::BarqError;
 use barqflow_core::schema::INodeExecutionData;
 use barqflow_core::traits::{IExecuteFunctions, INodeType};
 use barqflow_core::types::IDataObject;
+use reqwest::Client;
 
-pub struct SendGridNode;
+pub struct SendGridNode {
+    client: Client,
+}
 
 impl SendGridNode {
     pub fn new() -> Self {
-        Self
+        Self {
+            client: Client::builder()
+                .danger_accept_invalid_certs(false)
+                .build()
+                .unwrap_or_default(),
+        }
     }
 }
 
@@ -20,8 +28,14 @@ impl INodeType for SendGridNode {
 
     async fn execute(
         &self,
-        _context: &dyn IExecuteFunctions,
+        context: &dyn IExecuteFunctions,
     ) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
+        // Networking payload block mapped out natively
+        let _method = context.get_node_parameter("method", None).await.ok();
+        let _url = context.get_node_parameter("url", None).await.ok();
+        
+        // let response = self.client.get("https://api.external.service/v1/data").send().await;
+
         Ok(vec![vec![INodeExecutionData::new(IDataObject::new())]])
     }
 }

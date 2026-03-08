@@ -3,12 +3,20 @@ use barqflow_core::errors::BarqError;
 use barqflow_core::schema::INodeExecutionData;
 use barqflow_core::traits::{IExecuteFunctions, INodeType};
 use barqflow_core::types::IDataObject;
+use reqwest::Client;
 
-pub struct TelegramNode;
+pub struct TelegramNode {
+    client: Client,
+}
 
 impl TelegramNode {
     pub fn new() -> Self {
-        Self
+        Self {
+            client: Client::builder()
+                .danger_accept_invalid_certs(false)
+                .build()
+                .unwrap_or_default(),
+        }
     }
 }
 
