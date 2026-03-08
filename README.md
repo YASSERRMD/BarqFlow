@@ -90,7 +90,7 @@ Ensure PostgreSQL is running locally.
 # Create a valid .env file in the repository root
 echo 'DATABASE_URL=postgres://postgres:postgres@localhost:5432/barqflow' > .env
 echo 'JWT_SECRET=super_secret_temporary_key_for_dev_only' >> .env
-echo 'ENCRYPTION_KEY=super_secret_32_byte_aes_gcm_development_key!!' >> .env
+echo 'BARQFLOW_ENCRYPTION_KEY=this_is_a_32_byte_dev_secret_key' >> .env
 
 # Install sqlx-cli to handle migrations
 cargo install sqlx-cli --no-default-features --features rustls,postgres

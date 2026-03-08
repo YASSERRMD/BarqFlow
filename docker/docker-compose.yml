@@ -26,7 +26,7 @@ services:
     environment:
       - DATABASE_URL=postgres://postgres:postgrespassword@db:5432/barqflow
       - JWT_SECRET=barqflow_production_jwt_secret_change_me_in_prod
-      - ENCRYPTION_KEY=super_secret_32_byte_aes_gcm_production_key_!!
+      - BARQFLOW_ENCRYPTION_KEY=this_is_a_32_byte_production_key
       - RUST_LOG=info,barqflow=debug
       - PORT=3000
     depends_on:
