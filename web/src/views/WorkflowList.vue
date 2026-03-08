@@ -10,6 +10,43 @@ const searchTerm = ref('')
 const statusFilter = ref('all')
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 
+function formatRelativeTime(iso?: string | null): string {
+  if (!iso) return 'Unknown'
+
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return 'Unknown'
+
+  const diffSeconds = Math.floor((date.getTime() - Date.now()) / 1000)
+  const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' })
+  const absSeconds = Math.abs(diffSeconds)
+
+  if (absSeconds < 60) return rtf.format(diffSeconds, 'second')
+
+  const diffMinutes = Math.floor(diffSeconds / 60)
+  if (Math.abs(diffMinutes) < 60) return rtf.format(diffMinutes, 'minute')
+
+  const diffHours = Math.floor(diffMinutes / 60)
+  if (Math.abs(diffHours) < 24) return rtf.format(diffHours, 'hour')
+
+  const diffDays = Math.floor(diffHours / 24)
+  if (Math.abs(diffDays) < 30) return rtf.format(diffDays, 'day')
+
+  return date.toLocaleDateString()
+}
+
+function workflowRelativeUpdatedAt(wf: any): string {
+  return formatRelativeTime(wf?.updated_at || wf?.created_at)
+}
+
+function workflowTimestampTitle(wf: any): string {
+  const iso = wf?.updated_at || wf?.created_at
+  if (!iso) return 'Unknown'
+
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return 'Unknown'
+  return date.toLocaleString()
+}
+
 function buildListParams() {
   return {
     search: searchTerm.value.trim() || undefined,
@@ -164,7 +201,10 @@ async function createWorkflow() {
           <div class="flex items-center justify-between mt-6 relative z-10 border-t border-slate-100 pt-4">
             <div class="flex items-center gap-4">
               <span class="flex items-center gap-1.5 text-xs font-bold text-slate-400 bg-slate-50 px-2.5 py-1 rounded-lg">
-                <Calendar class="w-3.5 h-3.5" /> 2h ago
+                <Calendar class="w-3.5 h-3.5" />
+                <span :title="workflowTimestampTitle(wf)">
+                  {{ workflowRelativeUpdatedAt(wf) }}
+                </span>
               </span>
               <span
                 :class="[
