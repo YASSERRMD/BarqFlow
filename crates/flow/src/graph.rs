@@ -155,8 +155,7 @@ impl GraphTraversal {
         node: NodeIndex,
     ) -> Vec<NodeIndex> {
         graph
-            .edges(node)
-            .filter(|e| e.target() == node)
+            .edges_directed(node, petgraph::Direction::Incoming)
             .map(|e| e.source())
             .collect()
     }
@@ -166,8 +165,7 @@ impl GraphTraversal {
         node: NodeIndex,
     ) -> Vec<NodeIndex> {
         graph
-            .edges(node)
-            .filter(|e| e.source() == node)
+            .edges_directed(node, petgraph::Direction::Outgoing)
             .map(|e| e.target())
             .collect()
     }
@@ -260,6 +258,7 @@ impl GraphTraversal {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use barqflow_core::schema::{IConnection, NodeConnectionType};
 
     fn create_test_node(id: &str, name: &str, node_type: &str) -> WorkflowNode {
         WorkflowNode {
@@ -383,6 +382,38 @@ mod tests {
 
     #[test]
     fn test_get_parents_and_children() {
+        let connections = HashMap::from([
+            (
+                "A".to_string(),
+                INodeConnections(HashMap::from([(
+                    NodeConnectionType::Main,
+                    vec![vec![
+                        IConnection {
+                            node: "B".to_string(),
+                            r#type: NodeConnectionType::Main,
+                            index: 0,
+                        },
+                        IConnection {
+                            node: "C".to_string(),
+                            r#type: NodeConnectionType::Main,
+                            index: 0,
+                        },
+                    ]],
+                )])),
+            ),
+            (
+                "B".to_string(),
+                INodeConnections(HashMap::from([(
+                    NodeConnectionType::Main,
+                    vec![vec![IConnection {
+                        node: "C".to_string(),
+                        r#type: NodeConnectionType::Main,
+                        index: 0,
+                    }]],
+                )])),
+            ),
+        ]);
+
         let workflow = WorkflowDef {
             id: "test-parents".to_string(),
             name: "Parents Test".to_string(),
@@ -391,7 +422,7 @@ mod tests {
                 create_test_node("B", "B", "set"),
                 create_test_node("C", "C", "set"),
             ],
-            connections: HashMap::new(),
+            connections,
             settings: None,
             static_data: None,
             pin_data: None,
@@ -400,10 +431,21 @@ mod tests {
 
         let parsed = WorkflowToGraphParser::parse(&workflow).unwrap();
 
-        if let Some(b_idx) = parsed.node_indices.get(&NodeId::new("B")) {
-            let parents = GraphTraversal::get_parents(&parsed.graph, *b_idx);
-            let children = GraphTraversal::get_children(&parsed.graph, *b_idx);
-            println!("Parents of B: {:?}, Children of B: {:?}", parents, children);
-        }
+        let a_idx = *parsed.node_indices.get(&NodeId::new("A")).unwrap();
+        let b_idx = *parsed.node_indices.get(&NodeId::new("B")).unwrap();
+        let c_idx = *parsed.node_indices.get(&NodeId::new("C")).unwrap();
+
+        let b_parents = GraphTraversal::get_parents(&parsed.graph, b_idx);
+        assert_eq!(b_parents, vec![a_idx]);
+
+        let c_parents = GraphTraversal::get_parents(&parsed.graph, c_idx);
+        assert_eq!(c_parents.len(), 2);
+        assert!(c_parents.contains(&a_idx));
+        assert!(c_parents.contains(&b_idx));
+
+        let a_children = GraphTraversal::get_children(&parsed.graph, a_idx);
+        assert_eq!(a_children.len(), 2);
+        assert!(a_children.contains(&b_idx));
+        assert!(a_children.contains(&c_idx));
     }
 }
