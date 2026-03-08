@@ -9,6 +9,7 @@ use std::sync::Arc;
 use barqflow_registry::registry::NodeRegistry;
 use barqflow_registry::registry::CredentialRegistry;
 use barqflow_api::controllers::webhooks::{WebhookRegistry, new_webhook_registry};
+use barqflow_api::active_workflows::ActiveCronJobs;
 use tokio_cron_scheduler::JobScheduler;
 use barqflow_api::routes::ActiveExecutionManager;
 
@@ -25,6 +26,7 @@ pub struct AppState {
     pub webhook_registry: WebhookRegistry,
     pub job_scheduler: JobScheduler,
     pub active_executions: ActiveExecutionManager,
+    pub active_cron_jobs: ActiveCronJobs,
 }
 
 impl AppState {
@@ -39,6 +41,7 @@ impl AppState {
         // Setup Scheduler and active execution map
         let job_scheduler = JobScheduler::new().await?;
         let active_executions = Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+        let active_cron_jobs = Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
 
         Ok(Self {
             db_pool: pool.clone(),
@@ -52,6 +55,7 @@ impl AppState {
             webhook_registry: new_webhook_registry(),
             job_scheduler,
             active_executions,
+            active_cron_jobs,
         })
     }
 
@@ -66,6 +70,7 @@ impl AppState {
             webhook_registry: Arc::clone(&self.webhook_registry),
             job_scheduler: self.job_scheduler.clone(),
             active_executions: Arc::clone(&self.active_executions),
+            active_cron_jobs: Arc::clone(&self.active_cron_jobs),
         }
     }
 }
