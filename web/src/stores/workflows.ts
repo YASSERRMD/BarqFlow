@@ -61,6 +61,21 @@ export const useWorkflowStore = defineStore('workflows', {
                 throw err;
             }
         },
+        async toggleWorkflowActive(id: string, active: boolean) {
+            try {
+                const response = await api.put(`/workflows/${id}/activate`, { active });
+                this.workflows = this.workflows.map((wf) =>
+                    wf.id === id ? response.data : wf
+                );
+                if (this.activeWorkflow?.id === id) {
+                    this.activeWorkflow = response.data;
+                }
+                return response.data;
+            } catch (err: any) {
+                this.error = err.message;
+                throw err;
+            }
+        },
         async executeWorkflow(workflowId: string, payload: any = {}) {
             this.loading = true;
             try {
