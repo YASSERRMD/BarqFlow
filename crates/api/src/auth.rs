@@ -8,7 +8,8 @@ use axum::{
 };
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
-use std::env;
+use std::{env, sync::OnceLock};
+use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
@@ -19,6 +20,8 @@ pub struct Claims {
 
 #[derive(Debug)]
 pub struct AuthError;
+
+static JWT_SECRET_CACHE: OnceLock<String> = OnceLock::new();
 
 pub fn hash_password(password: &str) -> Result<String, AuthError> {
     let salt = SaltString::generate(&mut OsRng);
@@ -37,8 +40,46 @@ pub fn verify_password(hash: &str, password: &str) -> Result<bool, AuthError> {
         .is_ok())
 }
 
+fn resolve_jwt_secret(
+    jwt_secret_env: Option<String>,
+    barqflow_env: Option<String>,
+) -> Result<String, &'static str> {
+    if let Some(secret) = jwt_secret_env {
+        let trimmed = secret.trim();
+        if !trimmed.is_empty() {
+            return Ok(trimmed.to_string());
+        }
+    }
+
+    let runtime_env = barqflow_env
+        .unwrap_or_else(|| "development".to_string())
+        .to_lowercase();
+    if runtime_env == "production" {
+        return Err("JWT_SECRET must be set when BARQFLOW_ENV=production");
+    }
+
+    let generated = format!(
+        "dev-jwt-{}{}",
+        Uuid::new_v4().simple(),
+        Uuid::new_v4().simple()
+    );
+    eprintln!(
+        "WARNING: JWT_SECRET is not set. Using an ephemeral development secret for this process."
+    );
+    Ok(generated)
+}
+
+fn jwt_secret() -> &'static str {
+    JWT_SECRET_CACHE
+        .get_or_init(|| {
+            resolve_jwt_secret(env::var("JWT_SECRET").ok(), env::var("BARQFLOW_ENV").ok())
+                .unwrap_or_else(|message| panic!("{message}"))
+        })
+        .as_str()
+}
+
 pub fn generate_jwt(user_id: &str, role: &str) -> Result<String, AuthError> {
-    let secret = env::var("JWT_SECRET").unwrap_or_else(|_| "SUPER_SECRET_TEMP_KEY".to_string());
+    let secret = jwt_secret();
 
     let expiration = chrono::Utc::now()
         .checked_add_signed(chrono::Duration::hours(24))
@@ -73,8 +114,7 @@ where
 
         if let Some(auth_header) = auth_header {
             if let Some(token) = auth_header.strip_prefix("Bearer ") {
-                let secret =
-                    env::var("JWT_SECRET").unwrap_or_else(|_| "SUPER_SECRET_TEMP_KEY".to_string());
+                let secret = jwt_secret();
 
                 let token_data = decode::<Claims>(
                     token,
@@ -91,5 +131,33 @@ where
             StatusCode::UNAUTHORIZED,
             "Missing or invalid authorization header",
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_jwt_secret;
+
+    #[test]
+    fn resolve_jwt_secret_prefers_env_value() {
+        let secret = resolve_jwt_secret(
+            Some("my-explicit-secret".to_string()),
+            Some("production".to_string()),
+        )
+        .unwrap();
+        assert_eq!(secret, "my-explicit-secret");
+    }
+
+    #[test]
+    fn resolve_jwt_secret_generates_ephemeral_secret_in_dev() {
+        let secret = resolve_jwt_secret(None, Some("development".to_string())).unwrap();
+        assert!(secret.starts_with("dev-jwt-"));
+        assert!(secret.len() > "dev-jwt-".len() + 10);
+    }
+
+    #[test]
+    fn resolve_jwt_secret_rejects_missing_secret_in_production() {
+        let error = resolve_jwt_secret(None, Some("production".to_string())).unwrap_err();
+        assert_eq!(error, "JWT_SECRET must be set when BARQFLOW_ENV=production");
     }
 }
