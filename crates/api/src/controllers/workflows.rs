@@ -2,7 +2,7 @@ use crate::auth::Claims;
 use axum::http::StatusCode;
 use axum::{
     extract::{Json, Path, Query, State},
-    routing::{get, put},
+    routing::{get, post, put},
     Router,
 };
 use barqflow_db::models::WorkflowEntity;
@@ -23,6 +23,7 @@ pub fn workflow_routes(state: AppState) -> Router {
             get(get_workflow).put(update_workflow).delete(delete_workflow),
         )
         .route("/workflows/{id}/activate", put(toggle_workflow_active))
+        .route("/workflows/{id}/duplicate", post(duplicate_workflow))
         .with_state(state)
 }
 
@@ -167,4 +168,30 @@ async fn delete_workflow(
     } else {
         Err((StatusCode::NOT_FOUND, "Workflow not found".into()))
     }
+}
+
+async fn duplicate_workflow(
+    _claims: Claims,
+    State(state): State<AppState>,
+    Path(id): Path<uuid::Uuid>,
+) -> Result<Json<WorkflowEntity>, (StatusCode, String)> {
+    let workflow = state
+        .workflow_repo
+        .find_by_id(id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Workflow not found".into()))?;
+
+    let duplicated = state
+        .workflow_repo
+        .create(
+            &format!("{} (copy)", workflow.name),
+            workflow.nodes.clone(),
+            workflow.connections.clone(),
+            workflow.settings.clone(),
+        )
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(duplicated))
 }
