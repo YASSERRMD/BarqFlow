@@ -27,7 +27,7 @@ pub struct NodeExecutionContext {
     /// Run ID for tracing
     run_id: uuid::Uuid,
     /// Execution output cache from previous nodes
-    workflow_cache: Arc<HashMap<String, Vec<serde_json::Value>>>,
+    workflow_cache: Arc<RwLock<HashMap<String, Vec<serde_json::Value>>>>,
 }
 
 impl NodeExecutionContext {
@@ -43,7 +43,7 @@ impl NodeExecutionContext {
         input_data: ITaskDataConnections,
         static_data: Option<IDataObject>,
         run_id: uuid::Uuid,
-        workflow_cache: Arc<HashMap<String, Vec<serde_json::Value>>>,
+        workflow_cache: Arc<RwLock<HashMap<String, Vec<serde_json::Value>>>>,
     ) -> Self {
         Self {
             node,
@@ -112,6 +112,11 @@ impl NodeExecutionContext {
 
                 // Perform the evaluation in a strict scope so non-Send types are dropped
                 let eval_result = {
+                    let cache_snapshot = {
+                        let cache = self.workflow_cache.read().await;
+                        (*cache).clone()
+                    };
+
                     let engine =
                         barqflow_flow::expression::ExpressionEngine::new().with_custom_functions();
 
@@ -119,7 +124,7 @@ impl NodeExecutionContext {
                         json_data,
                         binary_keys: vec![], // Binary streams mapping skipped for simplified phase 21
                         parameters: params_map,
-                        workflow_cache: (*self.workflow_cache).clone(),
+                        workflow_cache: cache_snapshot,
                     };
 
                     engine.eval_with_context(&stripped_expr, &expr_ctx)
@@ -324,7 +329,7 @@ pub struct NodeExecutionContextBuilder {
     input_data: Option<ITaskDataConnections>,
     static_data: Option<IDataObject>,
     run_id: Option<uuid::Uuid>,
-    workflow_cache: Option<Arc<HashMap<String, Vec<serde_json::Value>>>>,
+    workflow_cache: Option<Arc<RwLock<HashMap<String, Vec<serde_json::Value>>>>>,
 }
 
 impl Default for NodeExecutionContextBuilder {
@@ -366,7 +371,7 @@ impl NodeExecutionContextBuilder {
 
     pub fn with_workflow_cache(
         mut self,
-        workflow_cache: Arc<HashMap<String, Vec<serde_json::Value>>>,
+        workflow_cache: Arc<RwLock<HashMap<String, Vec<serde_json::Value>>>>,
     ) -> Self {
         self.workflow_cache = Some(workflow_cache);
         self
@@ -379,7 +384,7 @@ impl NodeExecutionContextBuilder {
             self.static_data,
             self.run_id.unwrap_or_else(uuid::Uuid::new_v4),
             self.workflow_cache
-                .unwrap_or_else(|| Arc::new(HashMap::new())),
+                .unwrap_or_else(|| Arc::new(RwLock::new(HashMap::new()))),
         ))
     }
 }
@@ -413,7 +418,7 @@ mod tests {
             ITaskDataConnections::default(),
             None,
             uuid::Uuid::new_v4(),
-            Arc::new(HashMap::new()),
+            Arc::new(RwLock::new(HashMap::new())),
         );
 
         assert_eq!(context.node.name, "TestNode");
@@ -427,7 +432,7 @@ mod tests {
             ITaskDataConnections::default(),
             None,
             uuid::Uuid::new_v4(),
-            Arc::new(HashMap::new()),
+            Arc::new(RwLock::new(HashMap::new())),
         );
 
         let result = context.get_node_parameter("testParam", None).await.unwrap();
@@ -443,7 +448,7 @@ mod tests {
             ITaskDataConnections::default(),
             None,
             uuid::Uuid::new_v4(),
-            Arc::new(HashMap::new()),
+            Arc::new(RwLock::new(HashMap::new())),
         );
 
         let fallback = json!("fallbackValue");
@@ -463,7 +468,7 @@ mod tests {
             ITaskDataConnections::default(),
             None,
             uuid::Uuid::new_v4(),
-            Arc::new(HashMap::new()),
+            Arc::new(RwLock::new(HashMap::new())),
         );
 
         let result = context.get_node_parameter("nonExistentParam", None).await;
@@ -479,7 +484,7 @@ mod tests {
             ITaskDataConnections::default(),
             None,
             uuid::Uuid::new_v4(),
-            Arc::new(HashMap::new()),
+            Arc::new(RwLock::new(HashMap::new())),
         );
 
         let retrieved_node = context.get_node();
@@ -532,7 +537,7 @@ mod tests {
             ITaskDataConnections::default(),
             None,
             uuid::Uuid::new_v4(),
-            Arc::new(HashMap::new()),
+            Arc::new(RwLock::new(HashMap::new())),
         );
         let mut new_data = ITaskDataConnections::new();
         new_data.push(
@@ -556,7 +561,7 @@ mod tests {
             ITaskDataConnections::default(),
             None,
             uuid::Uuid::new_v4(),
-            Arc::new(HashMap::new()),
+            Arc::new(RwLock::new(HashMap::new())),
         );
 
         let mut new_data = ITaskDataConnections::new();

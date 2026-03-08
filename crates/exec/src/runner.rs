@@ -128,6 +128,7 @@ impl WorkflowRunner {
         // Execute nodes in order
         let mut results = HashMap::new();
         let mut data_cache: HashMap<NodeId, NodeExecutionResult> = HashMap::new();
+        let workflow_cache = Arc::new(tokio::sync::RwLock::new(HashMap::new()));
 
         for node_index in execution_order {
             let node = &parsed.graph[node_index];
@@ -177,21 +178,8 @@ impl WorkflowRunner {
                 }
             }
 
-            // Build workflow_cache for this node execution
-            let mut workflow_cache_map = HashMap::new();
-            for (_, res) in &data_cache {
-                if let Some(first_output) = res.outputs.first() {
-                    let json_items: Vec<serde_json::Value> = first_output
-                        .iter()
-                        .map(|item| serde_json::Value::Object(item.json.0.clone()))
-                        .collect();
-                    workflow_cache_map.insert(res.node_name.clone(), json_items);
-                }
-            }
-            let workflow_cache = Arc::new(workflow_cache_map);
-
             // Execute the node
-            let execute_result = self.run_node(&context, node, input_data.clone(), &parsed, workflow_cache).await;
+            let execute_result = self.run_node(&context, node, input_data.clone(), &parsed, Arc::clone(&workflow_cache)).await;
             
             let result = match execute_result {
                 Ok(res) => res,
@@ -241,6 +229,15 @@ impl WorkflowRunner {
 
             let node_id = node.id.clone();
             let node_name = node.name.clone();
+            
+            if let Some(first_output) = result.outputs.first() {
+                let json_items: Vec<serde_json::Value> = first_output
+                    .iter()
+                    .map(|item| serde_json::Value::Object(item.json.0.clone()))
+                    .collect();
+                workflow_cache.write().await.insert(node_name.clone(), json_items);
+            }
+            
             data_cache.insert(node_id, result.clone());
             results.insert(node_name, result);
         }
@@ -272,6 +269,7 @@ impl WorkflowRunner {
 
         let mut results = HashMap::new();
         let mut data_cache: HashMap<NodeId, NodeExecutionResult> = HashMap::new();
+        let workflow_cache = Arc::new(tokio::sync::RwLock::new(HashMap::new()));
 
         let mut resume_started = false;
 
@@ -305,6 +303,15 @@ impl WorkflowRunner {
                         success: true,
                         error: None,
                     };
+                    
+                    if let Some(first_output) = res.outputs.first() {
+                        let json_items: Vec<serde_json::Value> = first_output
+                            .iter()
+                            .map(|item| serde_json::Value::Object(item.json.0.clone()))
+                            .collect();
+                        workflow_cache.write().await.insert(res.node_name.clone(), json_items);
+                    }
+                    
                     data_cache.insert(node.id.clone(), res.clone());
                     results.insert(node.name.clone(), res);
                 }
@@ -330,19 +337,7 @@ impl WorkflowRunner {
                 }
             }
 
-            let mut workflow_cache_map = HashMap::new();
-            for (_, res) in &data_cache {
-                if let Some(first_output) = res.outputs.first() {
-                    let json_items: Vec<serde_json::Value> = first_output
-                        .iter()
-                        .map(|item| serde_json::Value::Object(item.json.0.clone()))
-                        .collect();
-                    workflow_cache_map.insert(res.node_name.clone(), json_items);
-                }
-            }
-            let workflow_cache = Arc::new(workflow_cache_map);
-
-            let execute_result = self.run_node(&context, node, input_data.clone(), &parsed, workflow_cache).await;
+            let execute_result = self.run_node(&context, node, input_data.clone(), &parsed, Arc::clone(&workflow_cache)).await;
             
             let result = match execute_result {
                 Ok(res) => res,
@@ -412,6 +407,14 @@ impl WorkflowRunner {
                     return Err(e);
                 },
             };
+
+            if let Some(first_output) = result.outputs.first() {
+                let json_items: Vec<serde_json::Value> = first_output
+                    .iter()
+                    .map(|item| serde_json::Value::Object(item.json.0.clone()))
+                    .collect();
+                workflow_cache.write().await.insert(node.name.clone(), json_items);
+            }
 
             data_cache.insert(node.id.clone(), result.clone());
             results.insert(node.name.clone(), result);
@@ -491,7 +494,7 @@ impl WorkflowRunner {
         node: &WorkflowNode,
         input_data: ITaskDataConnections,
         _parsed: &ParsedGraph,
-        workflow_cache: Arc<HashMap<String, Vec<serde_json::Value>>>,
+        workflow_cache: Arc<tokio::sync::RwLock<HashMap<String, Vec<serde_json::Value>>>>,
     ) -> Result<NodeExecutionResult, BarqError> {
         debug!("Executing node: {} (type: {})", node.name, node.type_);
 
