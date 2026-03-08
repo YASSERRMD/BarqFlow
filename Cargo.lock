@@ -365,6 +365,7 @@ dependencies = [
  "barqflow-core",
  "barqflow-registry",
  "base64",
+ "futures-util",
  "mockito",
  "reqwest",
  "rhai",
