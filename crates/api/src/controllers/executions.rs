@@ -10,6 +10,7 @@ use axum::{
 use crate::repositories::execution::ExecutionRepository;
 use crate::repositories::workflow::WorkflowRepository;
 use crate::repositories::credential::CredentialRepository;
+use crate::subworkflow_executor::RepositorySubWorkflowExecutor;
 use barqflow_db::models::ExecutionEntity;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -272,6 +273,14 @@ async fn run_workflow_execution(
         Arc::clone(&state.credential_repo),
         &nodes,
     ));
+    let subworkflow_executor = Arc::new(
+        RepositorySubWorkflowExecutor::new(
+            Arc::clone(&state.workflow_repo),
+            Arc::clone(&state.credential_repo),
+            Arc::clone(&state.node_registry),
+        )
+        .with_execution_repo(Arc::clone(&state.execution_repo)),
+    );
 
     let core_wf = barqflow_core::schema::WorkflowDef {
         id: barqflow_core::types::WorkflowId(wf_entity.id),
@@ -289,7 +298,8 @@ async fn run_workflow_execution(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     let runner = WorkflowRunner::new(state.node_registry.clone(), ExecutionConfig::default())
-        .with_credential_provider(credential_provider);
+        .with_credential_provider(credential_provider)
+        .with_subworkflow_executor(subworkflow_executor);
     let run_id = RunId::new();
     let cancellation_token = CancellationToken::new();
     let ctx = WorkflowRunContext {

@@ -12,7 +12,7 @@ impl INodeType for ExecuteWorkflowNode {
         IDataObject::from(serde_json::json!({
             "name": "executeWorkflow",
             "displayName": "Execute Workflow",
-            "description": "Execute another workflow"
+            "description": "Execute another workflow and pass through its output"
         }))
     }
 
@@ -33,13 +33,35 @@ impl INodeType for ExecuteWorkflowNode {
             });
         }
 
-        // We fetch the current input data that triggered this node, assuming index 0.
-        // IExecuteFunctions needs to be able to fetch "all items from input index 0" or we can just 
-        // rely on the Runner loop data injection for ExecuteSubWorkflow.
-        let items = context.get_input_data(0).await.unwrap_or_default();
-        let input_data = serde_json::to_value(&items).unwrap_or(serde_json::Value::Null);
+        let _mode = context
+            .get_node_parameter("mode", Some(serde_json::json!("wait")))
+            .await
+            .ok()
+            .and_then(|v| v.as_str().map(|s| s.to_string()))
+            .unwrap_or_else(|| "wait".to_string());
 
-        // Throw specialized error to trap execution and force runner to process sub workflow
+        let default_input_items = context.get_input_data(0).await.unwrap_or_default();
+        let default_input =
+            serde_json::to_value(&default_input_items).unwrap_or(serde_json::Value::Null);
+
+        let input_data = match context.get_node_parameter("inputData", None).await {
+            Ok(custom) => {
+                if custom.is_null() {
+                    default_input
+                } else if let Some(raw) = custom.as_str() {
+                    let trimmed = raw.trim();
+                    if trimmed.is_empty() {
+                        default_input
+                    } else {
+                        serde_json::from_str(trimmed).unwrap_or_else(|_| custom.clone())
+                    }
+                } else {
+                    custom
+                }
+            }
+            Err(_) => default_input,
+        };
+
         Err(BarqError::ExecuteSubWorkflow {
             workflow_id,
             input_data,
