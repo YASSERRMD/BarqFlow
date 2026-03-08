@@ -42,7 +42,7 @@ impl INodeType for HttpRequestNode {
         &self,
         context: &dyn barqflow_core::traits::IExecuteFunctions,
     ) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
-        let input_data = context.get_input_data(0)?;
+        let input_data = context.get_input_data(0).await?;
         let mut output_items = Vec::new();
 
         for (item_index, _item) in input_data.iter().enumerate() {
@@ -255,11 +255,14 @@ mod tests {
             &self.node
         }
 
-        fn get_input_data(&self, input_index: usize) -> Result<&Vec<INodeExecutionData>, BarqError> {
-            self.input_data.get(input_index).ok_or(BarqError::NodeOperationError {
-                node_name: self.node.name.clone(),
-                message: format!("No input data at index {}", input_index),
-            })
+        async fn get_input_data(&self, input_index: usize) -> Result<Vec<INodeExecutionData>, BarqError> {
+            self.input_data
+                .get(input_index)
+                .cloned()
+                .ok_or(BarqError::NodeOperationError {
+                    node_name: self.node.name.clone(),
+                    message: format!("No input data at index {}", input_index),
+                })
         }
 
         async fn get_credentials(&self, _name: &str) -> Result<std::collections::HashMap<String, GenericValue>, BarqError> {

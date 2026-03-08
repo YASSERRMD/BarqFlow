@@ -26,7 +26,7 @@ pub trait IExecuteFunctions: Send + Sync {
     fn get_node(&self) -> &INode;
 
     /// Read data from incoming branches
-    fn get_input_data(&self, input_index: usize) -> Result<&Vec<INodeExecutionData>, BarqError>;
+    async fn get_input_data(&self, input_index: usize) -> Result<Vec<INodeExecutionData>, BarqError>;
     /// Extract decrypted credentials supplied by the user configuration for this node
     async fn get_credentials(&self, name: &str) -> Result<HashMap<String, crate::types::GenericValue>, BarqError>;
 

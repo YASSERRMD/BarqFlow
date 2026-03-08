@@ -239,25 +239,15 @@ impl IExecuteFunctions for NodeExecutionContext {
         &self.node
     }
 
-    fn get_input_data(&self, input_index: usize) -> Result<&Vec<INodeExecutionData>, BarqError> {
-        // We know we're in a synchronous context when this is called from the node
-        // The RwLock is a blocking lock here because we only read from it
-        let data = self.input_data.blocking_read();
-
-        let slice = unsafe {
-            // SAFE: We are extending the lifetime of the borrow to match the traits requirements.
-            // The underlying data is stored in the WorkflowRunner and lives for the entire execution.
-            // When executing, the node only reads the data sequentially, so no concurrent mutable access occurs.
-            std::mem::transmute::<&Vec<INodeExecutionData>, &'static Vec<INodeExecutionData>>(
-                data.0
-                    .get(&input_index)
-                    .ok_or_else(|| BarqError::NodeOperationError {
-                        node_name: self.node.name.clone(),
-                        message: format!("Input branch {} not found", input_index),
-                    })?,
-            )
-        };
-        Ok(slice)
+    async fn get_input_data(&self, input_index: usize) -> Result<Vec<INodeExecutionData>, BarqError> {
+        let data = self.input_data.read().await;
+        data.0
+            .get(&input_index)
+            .cloned()
+            .ok_or_else(|| BarqError::NodeOperationError {
+                node_name: self.node.name.clone(),
+                message: format!("Input branch {} not found", input_index),
+            })
     }
 
     async fn get_credentials(
@@ -436,8 +426,10 @@ impl NodeExecutionContextBuilder {
 mod tests {
     use super::*;
     use async_trait::async_trait;
+    use barqflow_core::traits::IExecuteFunctions;
     use barqflow_core::types::NodeId;
     use serde_json::json;
+    use tokio::runtime::Builder;
 
     fn create_test_node(name: &str) -> INode {
         let mut params = HashMap::new();
@@ -671,5 +663,61 @@ mod tests {
         assert!(err
             .to_string()
             .contains("Credential provider is not configured"));
+    }
+
+    #[test]
+    fn context_module_disallows_blocking_runtime_calls() {
+        let source = include_str!("context.rs");
+        let thread_spawn = format!("{}{}", "std::thread::", "spawn");
+        let block_in_place = format!("{}{}", "tokio::task::", "block_in_place");
+
+        assert!(
+            !source.contains(&thread_spawn),
+            "context module must not spawn OS threads directly"
+        );
+        assert!(
+            !source.contains(&block_in_place),
+            "context module must not block the runtime executor"
+        );
+    }
+
+    #[test]
+    fn concurrent_get_input_data_is_panic_free_on_multithread_runtime() {
+        let rt = Builder::new_multi_thread()
+            .worker_threads(4)
+            .enable_all()
+            .build()
+            .expect("runtime should build");
+
+        rt.block_on(async {
+            let node = create_test_node("ConcurrentNode");
+            let mut input_data = ITaskDataConnections::new();
+            input_data.push(
+                0,
+                vec![INodeExecutionData::new(IDataObject::from(json!({ "id": 1 })))],
+            );
+
+            let context = Arc::new(NodeExecutionContext::new(
+                node,
+                input_data,
+                None,
+                uuid::Uuid::new_v4(),
+                Arc::new(RwLock::new(HashMap::new())),
+            ));
+
+            let mut tasks = Vec::new();
+            for _ in 0..10 {
+                let context = Arc::clone(&context);
+                tasks.push(tokio::spawn(async move {
+                    let items = context.get_input_data(0).await?;
+                    Ok::<usize, BarqError>(items.len())
+                }));
+            }
+
+            for task in tasks {
+                let item_count = task.await.expect("task should not panic").expect("context read should succeed");
+                assert_eq!(item_count, 1);
+            }
+        });
     }
 }

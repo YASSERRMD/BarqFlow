@@ -19,7 +19,7 @@ impl INodeType for IfNode {
         &self,
         context: &dyn IExecuteFunctions,
     ) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
-        let input_data = context.get_input_data(0)?;
+        let input_data = context.get_input_data(0).await?;
         let operation = context
             .get_node_parameter("operation", None)
             .await
@@ -87,7 +87,7 @@ impl INodeType for SwitchNode {
         &self,
         context: &dyn IExecuteFunctions,
     ) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
-        let input_data = context.get_input_data(0)?;
+        let input_data = context.get_input_data(0).await?;
         let data_property = context
             .get_node_parameter("dataProperty", None)
             .await
@@ -158,7 +158,7 @@ impl INodeType for MergeNode {
 
         if mode == "append" {
             for input_index in 0..2 {
-                if let Ok(input_data) = context.get_input_data(input_index) {
+                if let Ok(input_data) = context.get_input_data(input_index).await {
                     merged.extend(input_data.iter().cloned());
                 }
             }
@@ -166,10 +166,13 @@ impl INodeType for MergeNode {
             let prop_1 = context.get_node_parameter("property1", None).await.map(|v| v.as_str().unwrap_or("").to_string()).unwrap_or_default();
             let prop_2 = context.get_node_parameter("property2", None).await.map(|v| v.as_str().unwrap_or("").to_string()).unwrap_or_default();
             
-            if let (Ok(input1), Ok(input2)) = (context.get_input_data(0), context.get_input_data(1)) {
+            if let (Ok(input1), Ok(input2)) = (
+                context.get_input_data(0).await,
+                context.get_input_data(1).await,
+            ) {
                 for item1 in input1 {
                     let v1 = item1.json.0.get(&prop_1);
-                    for item2 in input2 {
+                    for item2 in &input2 {
                         let v2 = item2.json.0.get(&prop_2);
                         if v1.is_some() && v1 == v2 {
                             let mut combined = item1.json.0.clone();
@@ -193,7 +196,6 @@ mod tests {
 
     use barqflow_core::schema::{INode, INodeParameters};
     use barqflow_core::types::{GenericValue, NodeId};
-    use std::sync::Arc;
 
     struct MockContext {
         input_data: Vec<Vec<INodeExecutionData>>,
@@ -211,13 +213,9 @@ mod tests {
                     name: "Test Node".into(),
                     r#type: "test".into(),
                     type_version: 1.0,
-                    position: vec![0.0, 0.0],
-                    parameters: INodeParameters(serde_json::Map::new()),
-                    credentials: None,
+                    position: [0.0, 0.0],
+                    parameters: INodeParameters(std::collections::HashMap::new()),
                     disabled: false,
-                    notes: None,
-                    notes_in_flow: None,
-                    webhook_id: None,
                 },
             }
         }
@@ -259,11 +257,14 @@ mod tests {
             &self.node
         }
 
-        fn get_input_data(&self, input_index: usize) -> Result<&Vec<INodeExecutionData>, BarqError> {
-            self.input_data.get(input_index).ok_or(BarqError::NodeOperationError {
-                node_name: self.node.name.clone(),
-                message: format!("No input data at index {}", input_index),
-            })
+        async fn get_input_data(&self, input_index: usize) -> Result<Vec<INodeExecutionData>, BarqError> {
+            self.input_data
+                .get(input_index)
+                .cloned()
+                .ok_or(BarqError::NodeOperationError {
+                    node_name: self.node.name.clone(),
+                    message: format!("No input data at index {}", input_index),
+                })
         }
 
         async fn get_credentials(&self, _name: &str) -> Result<std::collections::HashMap<String, GenericValue>, BarqError> {

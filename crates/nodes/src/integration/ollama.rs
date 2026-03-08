@@ -36,7 +36,7 @@ impl INodeType for OllamaNode {
         &self,
         context: &dyn barqflow_core::traits::IExecuteFunctions,
     ) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
-        let input_data = context.get_input_data(0)?;
+        let input_data = context.get_input_data(0).await?;
         let mut output_items = Vec::new();
 
         for (item_index, _item) in input_data.iter().enumerate() {

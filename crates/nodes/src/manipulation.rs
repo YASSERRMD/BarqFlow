@@ -19,7 +19,7 @@ impl INodeType for SetNode {
         &self,
         context: &dyn IExecuteFunctions,
     ) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
-        let input_data = context.get_input_data(0)?;
+        let input_data = context.get_input_data(0).await?;
         let mut output_items = Vec::new();
 
         let keep_only_set = context
@@ -98,7 +98,7 @@ impl INodeType for FilterNode {
         &self,
         context: &dyn IExecuteFunctions,
     ) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
-        let input_data = context.get_input_data(0)?;
+        let input_data = context.get_input_data(0).await?;
 
         let operation = context
             .get_node_parameter("operation", None)
@@ -156,7 +156,7 @@ impl INodeType for ItemListsNode {
         &self,
         context: &dyn IExecuteFunctions,
     ) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
-        let input_data = context.get_input_data(0)?;
+        let input_data = context.get_input_data(0).await?;
 
         let mode = context
             .get_node_parameter("mode", None)
@@ -252,8 +252,8 @@ mod tests {
             &self.node
         }
 
-        fn get_input_data(&self, _input_index: usize) -> Result<&Vec<INodeExecutionData>, BarqError> {
-            Ok(&self.input_data)
+        async fn get_input_data(&self, _input_index: usize) -> Result<Vec<INodeExecutionData>, BarqError> {
+            Ok(self.input_data.clone())
         }
 
         async fn get_credentials(&self, _name: &str) -> Result<std::collections::HashMap<String, GenericValue>, BarqError> {
