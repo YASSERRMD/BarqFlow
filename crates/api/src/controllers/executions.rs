@@ -1,7 +1,7 @@
 use crate::auth::Claims;
 use axum::http::StatusCode;
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     response::IntoResponse,
     routing::{get, post},
     Json,
@@ -24,14 +24,52 @@ pub struct AppState {
 
 pub fn execution_routes(state: AppState) -> Router {
     Router::new()
+        .route("/executions", get(list_executions))
         .route("/executions/{id}", get(get_execution))
         .route("/executions/workflow/{workflow_id}", post(execute_workflow))
         .with_state(state)
 }
 
 #[derive(Deserialize)]
+pub struct ExecutionListQuery {
+    pub workflow_id: Option<uuid::Uuid>,
+    pub status: Option<String>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Deserialize)]
 pub struct CreateExecutionRequest {
     pub manual: Option<bool>,
+}
+
+async fn list_executions(
+    _claims: Claims,
+    State(state): State<AppState>,
+    Query(query): Query<ExecutionListQuery>,
+) -> Result<Json<Vec<ExecutionEntity>>, (StatusCode, String)> {
+    let mut executions = if let Some(workflow_id) = query.workflow_id {
+        state
+            .execution_repo
+            .find_by_workflow_id(workflow_id)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    } else {
+        state
+            .execution_repo
+            .find_all()
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    };
+
+    if let Some(status) = query.status {
+        executions.retain(|e| e.status.eq_ignore_ascii_case(&status));
+    }
+
+    if let Some(limit) = query.limit {
+        executions.truncate(limit);
+    }
+
+    Ok(Json(executions))
 }
 
 async fn get_execution(
