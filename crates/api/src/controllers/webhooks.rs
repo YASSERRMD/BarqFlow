@@ -2,7 +2,7 @@ use axum::{
     body::Bytes,
     extract::{Path, State},
     http::{HeaderMap, Method, StatusCode},
-    response::IntoResponse,
+    response::{IntoResponse, Response},
     routing::any,
     Json, Router,
 };
@@ -10,7 +10,7 @@ use barqflow_core::{
     schema::{INode, INodeConnections, IWorkflowSettings, WorkflowDef},
     types::{IDataObject, RunId, WorkflowId},
 };
-use barqflow_exec::runner::{ExecutionConfig, WorkflowRunContext, WorkflowRunner};
+use barqflow_exec::runner::{ExecutionConfig, NodeExecutionResult, WorkflowRunContext, WorkflowRunner};
 use barqflow_registry::registry::NodeRegistry;
 use crate::repositories::credential::CredentialRepository;
 use crate::repositories::workflow::WorkflowRepository;
@@ -39,6 +39,85 @@ pub fn new_webhook_registry() -> WebhookRegistry {
     Arc::new(RwLock::new(HashMap::new()))
 }
 
+fn find_webhook_node<'a>(nodes: &'a [INode], endpoint: &WebhookEndpoint) -> Option<&'a INode> {
+    nodes
+        .iter()
+        .find(|node| node.id.0 == endpoint.node_id || node.id.to_string() == endpoint.node_id)
+}
+
+fn webhook_response_mode(node: Option<&INode>) -> String {
+    node.and_then(|n| n.parameters.0.get("responseMode"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("onReceived")
+        .to_string()
+}
+
+fn parse_response_code(value: &serde_json::Value) -> Option<u16> {
+    let parsed = value
+        .as_u64()
+        .and_then(|n| u16::try_from(n).ok())
+        .or_else(|| value.as_str().and_then(|s| s.parse::<u16>().ok()))?;
+    if (100..=599).contains(&parsed) {
+        Some(parsed)
+    } else {
+        None
+    }
+}
+
+fn webhook_response_status(node: Option<&INode>) -> StatusCode {
+    let status = node
+        .and_then(|n| n.parameters.0.get("responseCode"))
+        .and_then(parse_response_code)
+        .unwrap_or(200);
+    StatusCode::from_u16(status).unwrap_or(StatusCode::OK)
+}
+
+fn configured_response_payload(node: Option<&INode>) -> Option<serde_json::Value> {
+    let raw = node.and_then(|n| n.parameters.0.get("responseData"))?;
+    if raw.is_null() {
+        return None;
+    }
+
+    if let Some(value) = raw.as_str() {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+
+        return Some(
+            serde_json::from_str(trimmed).unwrap_or_else(|_| serde_json::json!({ "data": trimmed })),
+        );
+    }
+
+    Some(raw.clone())
+}
+
+fn summarize_node_results_for_webhook(
+    results: HashMap<String, NodeExecutionResult>,
+) -> serde_json::Value {
+    let mut summary = serde_json::Map::new();
+    let mut all_success = true;
+
+    for (node, result) in results {
+        if !result.success {
+            all_success = false;
+        }
+        summary.insert(
+            node,
+            serde_json::json!({
+                "success": result.success,
+                "error": result.error,
+                "outputs": result.outputs
+            }),
+        );
+    }
+
+    serde_json::json!({
+        "success": all_success,
+        "results": summary
+    })
+}
+
 #[derive(Clone)]
 pub struct WebhookState {
     pub workflow_repo: Arc<WorkflowRepository>,
@@ -59,7 +138,7 @@ async fn handle_webhook(
     method: Method,
     headers: HeaderMap,
     body: Bytes,
-) -> Result<impl IntoResponse, (StatusCode, String)> {
+) -> Result<Response, (StatusCode, String)> {
     // 1. Look up the webhook path in the registry
     let endpoint = {
         let registry = state
@@ -121,6 +200,10 @@ async fn handle_webhook(
 
     let nodes: Vec<INode> = serde_json::from_value(wf_entity.nodes.clone())
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Malformed workflow nodes: {}", e)))?;
+    let webhook_node = find_webhook_node(&nodes, &endpoint);
+    let response_mode = webhook_response_mode(webhook_node);
+    let response_status = webhook_response_status(webhook_node);
+    let configured_payload = configured_response_payload(webhook_node);
 
     let connections: HashMap<String, INodeConnections> =
         serde_json::from_value(wf_entity.connections.clone()).unwrap_or_default();
@@ -163,26 +246,82 @@ async fn handle_webhook(
         stop_after_node_id: None,
     };
 
-    // Fire and forget — webhook responses should be fast
+    if response_mode.eq_ignore_ascii_case("lastNode") {
+        let result = runner.run_workflow(ctx).await;
+        return match result {
+            Ok(node_results) => {
+                let payload = configured_payload
+                    .clone()
+                    .unwrap_or_else(|| summarize_node_results_for_webhook(node_results));
+                Ok((response_status, Json(payload)).into_response())
+            }
+            Err(err) => Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Webhook execution failed: {}", err),
+            )),
+        };
+    }
+
+    // Fire and forget for async response mode
     tokio::spawn(async move {
         let _ = runner.run_workflow(ctx).await;
     });
 
-    Ok(Json(json!({
+    let payload = configured_payload.unwrap_or_else(|| json!({
         "success": true,
         "message": "Webhook accepted",
         "workflow_id": endpoint.workflow_id.to_string(),
-    })))
+    }));
+    Ok((response_status, Json(payload)).into_response())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use axum::{body::Body, http::Request};
+    use barqflow_core::schema::INodeParameters;
+    use barqflow_core::types::NodeId;
     use serde_json::json;
     use sqlx::PgPool;
     use tower::ServiceExt;
     use crate::repositories::credential::CredentialRepository;
+
+    fn webhook_node_with_parameters(params: serde_json::Value) -> INode {
+        INode {
+            id: NodeId("webhook1".to_string()),
+            name: "Webhook".to_string(),
+            r#type: "barqflow-nodes.webhook".to_string(),
+            type_version: 1.0,
+            position: [0.0, 0.0],
+            parameters: INodeParameters(
+                params
+                    .as_object()
+                    .cloned()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .collect(),
+            ),
+            credentials: vec![],
+            disabled: false,
+        }
+    }
+
+    #[test]
+    fn webhook_payload_parses_json_string_response_data() {
+        let node = webhook_node_with_parameters(json!({
+            "responseData": "{\"ok\":true}"
+        }));
+        let payload = configured_response_payload(Some(&node)).unwrap();
+        assert_eq!(payload, json!({ "ok": true }));
+    }
+
+    #[test]
+    fn webhook_status_uses_valid_response_code() {
+        let node = webhook_node_with_parameters(json!({
+            "responseCode": "202"
+        }));
+        assert_eq!(webhook_response_status(Some(&node)), StatusCode::ACCEPTED);
+    }
 
     #[sqlx::test(migrations = "./migrations")]
     async fn test_dynamic_webhook_routing(pool: PgPool) {
