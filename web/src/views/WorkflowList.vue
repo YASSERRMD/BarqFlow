@@ -1,14 +1,41 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Plus, Search, MoreVertical, Calendar, Trash2, Edit2, Loader2, Workflow, Power } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { useWorkflowStore } from '../stores/workflows'
 
 const router = useRouter()
 const workflowStore = useWorkflowStore()
+const searchTerm = ref('')
+const statusFilter = ref('all')
+let searchTimer: ReturnType<typeof setTimeout> | null = null
 
-onMounted(async () => {
-  await workflowStore.fetchWorkflows()
+function buildListParams() {
+  return {
+    search: searchTerm.value.trim() || undefined,
+    active:
+      statusFilter.value === 'all'
+        ? undefined
+        : statusFilter.value === 'active',
+    limit: 200,
+  }
+}
+
+async function fetchWorkflows() {
+  await workflowStore.fetchWorkflows(buildListParams())
+}
+
+onMounted(fetchWorkflows)
+
+watch([searchTerm, statusFilter], () => {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    fetchWorkflows()
+  }, 250)
+})
+
+onBeforeUnmount(() => {
+  if (searchTimer) clearTimeout(searchTimer)
 })
 
 function editWorkflow(id: string) {
@@ -29,6 +56,9 @@ async function deleteWorkflow(id: string) {
 async function toggleWorkflowActive(id: string, current: boolean) {
   try {
     await workflowStore.toggleWorkflowActive(id, !current)
+    if (statusFilter.value !== 'all') {
+      await fetchWorkflows()
+    }
   } catch (err) {
     console.error('Failed to update workflow activation', err)
   }
@@ -65,16 +95,17 @@ async function createWorkflow() {
         <div class="flex-1 relative group">
           <Search class="w-5 h-5 absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-brand-500 transition-colors" />
           <input 
+            v-model="searchTerm"
             type="text" 
             placeholder="Search workflows by name or tags..." 
             class="w-full pl-14 pr-4 py-3.5 bg-white/50 backdrop-blur-sm shadow-inner rounded-xl text-sm focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500 outline-none border border-white transition-all font-medium text-slate-900" 
           />
         </div>
         <div class="flex gap-3">
-          <select class="bg-white/50 backdrop-blur-sm border border-white shadow-inner rounded-xl text-sm font-bold text-slate-700 px-6 focus:ring-4 focus:ring-brand-500/10 outline-none transition-all">
-            <option>All Workflows</option>
-            <option>Active</option>
-            <option>Inactive</option>
+          <select v-model="statusFilter" class="bg-white/50 backdrop-blur-sm border border-white shadow-inner rounded-xl text-sm font-bold text-slate-700 px-6 focus:ring-4 focus:ring-brand-500/10 outline-none transition-all">
+            <option value="all">All Workflows</option>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
           </select>
         </div>
       </div>
