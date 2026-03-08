@@ -151,6 +151,7 @@ async fn handle_webhook(
         static_data: Some(trigger_output),
         manual: false,
         execution_id: None,
+        parent_execution_id: None,
         cancellation_token: None,
     };
 

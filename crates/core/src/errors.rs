@@ -50,6 +50,13 @@ pub enum BarqError {
         workflow_id: String,
         input_data: serde_json::Value,
     },
+
+    /// Raised when a child workflow execution fails while running from Execute Workflow node.
+    #[error("Subworkflow execution failed (child execution '{child_execution_id}'): {message}")]
+    SubworkflowError {
+        child_execution_id: String,
+        message: String,
+    },
 }
 
 #[cfg(test)]

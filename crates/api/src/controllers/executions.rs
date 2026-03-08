@@ -298,6 +298,7 @@ async fn run_workflow_execution(
         static_data: None,
         manual,
         execution_id: Some(new_exec.id),
+        parent_execution_id: None,
         cancellation_token: Some(cancellation_token.clone()),
     };
 

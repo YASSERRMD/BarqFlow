@@ -64,6 +64,8 @@ pub struct WorkflowRunContext {
     pub manual: bool,
     /// Optional execution id persisted in DB for status updates.
     pub execution_id: Option<uuid::Uuid>,
+    /// Optional parent execution id for nested/sub-workflow runs.
+    pub parent_execution_id: Option<uuid::Uuid>,
     /// Optional cancellation token for runtime stop requests.
     pub cancellation_token: Option<CancellationToken>,
 }
@@ -78,6 +80,8 @@ pub struct WorkflowRunner {
     config: ExecutionConfig,
     /// Optional runtime credential resolver
     credential_provider: Option<Arc<dyn crate::context::CredentialProvider>>,
+    /// Optional sub-workflow executor used by Execute Workflow nodes.
+    subworkflow_executor: Option<Arc<dyn crate::subworkflow::SubWorkflowExecutor>>,
 }
 
 impl WorkflowRunner {
@@ -108,6 +112,7 @@ impl WorkflowRunner {
             registry,
             config,
             credential_provider: None,
+            subworkflow_executor: None,
         }
     }
 
@@ -116,6 +121,14 @@ impl WorkflowRunner {
         credential_provider: Arc<dyn crate::context::CredentialProvider>,
     ) -> Self {
         self.credential_provider = Some(credential_provider);
+        self
+    }
+
+    pub fn with_subworkflow_executor(
+        mut self,
+        subworkflow_executor: Arc<dyn crate::subworkflow::SubWorkflowExecutor>,
+    ) -> Self {
+        self.subworkflow_executor = Some(subworkflow_executor);
         self
     }
 
@@ -312,6 +325,17 @@ impl WorkflowRunner {
 
                         // For now, break the loop and return what we have computed so far.
                         return Ok(results);
+                    },
+                    Err((n_idx, in_data, BarqError::ExecuteSubWorkflow { workflow_id, input_data })) => {
+                        self.handle_subworkflow_execution(
+                            &context,
+                            &parsed,
+                            n_idx,
+                            &in_data,
+                            workflow_id,
+                            input_data,
+                        )
+                        .await?
                     },
                     Err((_n_idx, _in_data, e)) => {
                         if let Some(error_workflow_id) = context.workflow.settings.error_workflow.clone() {
@@ -523,34 +547,16 @@ impl WorkflowRunner {
                         }
                         return Ok(results);
                     },
-                    Err((n_idx, in_data, BarqError::ExecuteSubWorkflow { workflow_id, input_data: _ })) => {
-                        info!("Execution suspended to call sub-workflow '{}'", workflow_id);
-                        
-                        let config = crate::checkpoint::WaitConfig {
-                            wait_type: crate::checkpoint::WaitType::SubWorkflow,
-                            duration_ms: None,
-                            webhook_path: None,
-                            external_id: Some(workflow_id.clone()),
-                        };
-                            
-                        let mut manager = crate::checkpoint::CheckpointManager::with_filesystem(
-                            std::env::temp_dir().join("barqflow_checkpoints")
-                        );
-                        
-                        use crate::checkpoint::ExecutionCheckpointBuilder;
-                        let checkpoint = ExecutionCheckpointBuilder::new()
-                            .with_run_id(context.run_id)
-                            .with_workflow_id(context.workflow.id.0.to_string())
-                            .with_node_index(n_idx.index())
-                            .with_node_data(serde_json::to_value(&in_data).unwrap_or(serde_json::Value::Null))
-                            .with_wait_config(config)
-                            .build();
-                            
-                        if let Ok(cp) = checkpoint {
-                            let _ = manager.save_checkpoint(cp).await;
-                        }
-
-                        return Err(BarqError::ExecuteSubWorkflow { workflow_id, input_data: serde_json::Value::Null });
+                    Err((n_idx, in_data, BarqError::ExecuteSubWorkflow { workflow_id, input_data })) => {
+                        self.handle_subworkflow_execution(
+                            &context,
+                            &parsed,
+                            n_idx,
+                            &in_data,
+                            workflow_id,
+                            input_data,
+                        )
+                        .await?
                     },
                     Err((_n_idx, _in_data, e)) => {
                         if let Some(error_workflow_id) = context.workflow.settings.error_workflow.clone() {
@@ -581,6 +587,117 @@ impl WorkflowRunner {
 
         info!("Resumed workflow execution completed");
         Ok(results)
+    }
+
+    fn fallback_subworkflow_input(input: &ITaskDataConnections) -> Vec<INodeExecutionData> {
+        if let Some(items) = input.0.get(&0) {
+            return items.clone();
+        }
+
+        let mut merged = Vec::new();
+        for items in input.0.values() {
+            merged.extend(items.clone());
+        }
+        merged
+    }
+
+    fn materialize_subworkflow_input(
+        &self,
+        node_name: &str,
+        raw_input_data: serde_json::Value,
+        fallback_input: &ITaskDataConnections,
+    ) -> Result<Vec<INodeExecutionData>, BarqError> {
+        if raw_input_data.is_null() {
+            return Ok(Self::fallback_subworkflow_input(fallback_input));
+        }
+
+        if let Ok(items) = serde_json::from_value::<Vec<INodeExecutionData>>(raw_input_data.clone()) {
+            return Ok(items);
+        }
+
+        if let Ok(streams) = serde_json::from_value::<Vec<Vec<INodeExecutionData>>>(raw_input_data) {
+            let merged = streams.into_iter().flatten().collect::<Vec<_>>();
+            return Ok(merged);
+        }
+
+        Err(BarqError::NodeOperationError {
+            node_name: node_name.to_string(),
+            message: "Invalid subworkflow inputData payload. Expected array of execution items."
+                .to_string(),
+        })
+    }
+
+    async fn handle_subworkflow_execution(
+        &self,
+        context: &WorkflowRunContext,
+        parsed: &ParsedGraph,
+        node_index: NodeIndex,
+        node_input: &ITaskDataConnections,
+        workflow_id: String,
+        raw_input_data: serde_json::Value,
+    ) -> Result<(NodeIndex, NodeExecutionResult), BarqError> {
+        let node = &parsed.graph[node_index];
+
+        let child_workflow_id = uuid::Uuid::parse_str(workflow_id.as_str()).map_err(|_| {
+            BarqError::NodeOperationError {
+                node_name: node.name.clone(),
+                message: format!(
+                    "Invalid workflowId '{}'. Expected UUID from existing workflow.",
+                    workflow_id
+                ),
+            }
+        })?;
+
+        let child_input =
+            self.materialize_subworkflow_input(node.name.as_str(), raw_input_data, node_input)?;
+        let child_outputs = self
+            .execute_subworkflow(context, child_workflow_id, child_input)
+            .await?;
+
+        Ok((
+            node_index,
+            NodeExecutionResult {
+                node_name: node.name.clone(),
+                outputs: child_outputs,
+                success: true,
+                error: None,
+            },
+        ))
+    }
+
+    pub async fn execute_subworkflow(
+        &self,
+        parent_ctx: &WorkflowRunContext,
+        child_workflow_id: uuid::Uuid,
+        input: Vec<INodeExecutionData>,
+    ) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
+        let Some(executor) = self.subworkflow_executor.as_ref() else {
+            return Err(BarqError::NodeOperationError {
+                node_name: "executeWorkflow".to_string(),
+                message:
+                    "Subworkflow executor is not configured in runtime; cannot execute child workflow."
+                        .to_string(),
+            });
+        };
+
+        let parent = crate::subworkflow::SubWorkflowParentContext {
+            run_id: parent_ctx.run_id,
+            execution_id: parent_ctx.execution_id,
+            parent_execution_id: parent_ctx.parent_execution_id,
+            manual: parent_ctx.manual,
+        };
+
+        match executor
+            .execute_subworkflow(parent, child_workflow_id, input)
+            .await
+        {
+            Ok(result) => Ok(result.outputs),
+            Err(err @ BarqError::SubworkflowError { .. }) => Err(err),
+            Err(other) => Err(BarqError::SubworkflowError {
+                child_execution_id: "unknown".to_string(),
+                message: other.to_string(),
+            }),
+        }
     }
 
     /// Convert core schema WorkflowDef to flow crate WorkflowDef.
@@ -845,6 +962,7 @@ mod tests {
             static_data: None,
             manual: true,
             execution_id: None,
+            parent_execution_id: None,
             cancellation_token: None,
         };
 
@@ -874,6 +992,7 @@ mod tests {
             static_data: None,
             manual: true,
             execution_id: None,
+            parent_execution_id: None,
             cancellation_token: None,
         };
 
@@ -899,6 +1018,7 @@ mod tests {
             static_data: None,
             manual: false,
             execution_id: None,
+            parent_execution_id: None,
             cancellation_token: None,
         };
 
@@ -920,6 +1040,7 @@ mod tests {
             static_data: None,
             manual: true,
             execution_id: Some(uuid::Uuid::new_v4()),
+            parent_execution_id: None,
             cancellation_token: Some(token),
         };
 

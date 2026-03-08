@@ -230,6 +230,7 @@ impl ActiveWorkflowManager {
                         static_data: None,
                         manual: false,
                         execution_id: None,
+                        parent_execution_id: None,
                         cancellation_token: None,
                     };
 
