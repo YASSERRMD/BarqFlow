@@ -393,13 +393,15 @@ async function ensureRequiredCredentialsPresent(
   }
 }
 
-function applyExecutionResult(result: any) {
+function applyExecutionResult(result: any, targetNodeId?: string) {
   nodes.value.forEach((n) => {
     const nodeName = n.data.label
     const nodeResult = result?.data?.[nodeName]
     if (nodeResult) {
       n.data.status = nodeResult.success ? 'success' : 'error'
-    } else {
+    } else if (!targetNodeId) {
+      n.data.status = result?.status === 'success' ? 'success' : 'error'
+    } else if (String(n.id) === targetNodeId) {
       n.data.status = result?.status === 'success' ? 'success' : 'error'
     }
   })
@@ -487,13 +489,19 @@ async function handleSave() {
   return saved
 }
 
-async function runWorkflow(workflowId: string) {
+async function runWorkflow(
+  workflowId: string,
+  payload: Record<string, any> = {},
+  targetNodeId?: string,
+) {
   nodes.value.forEach((n) => {
-    n.data.status = 'running'
+    if (!targetNodeId || String(n.id) === targetNodeId) {
+      n.data.status = 'running'
+    }
   })
 
-  const result = await workflowStore.executeWorkflow(workflowId)
-  applyExecutionResult(result)
+  const result = await workflowStore.executeWorkflow(workflowId, payload)
+  applyExecutionResult(result, targetNodeId)
   return result
 }
 
@@ -623,7 +631,11 @@ async function handleTestNode(node: any) {
   }
 
   try {
-    const result = await runWorkflow(workflowId)
+    const result = await runWorkflow(
+      workflowId,
+      { manual: true, stopAtNodeId: String(node.id) },
+      String(node.id),
+    )
     const nodeResult = result?.data?.[node.data.label]
 
     if (nodeResult?.success) {

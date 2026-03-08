@@ -231,6 +231,7 @@ impl SubWorkflowExecutor for RepositorySubWorkflowExecutor {
             execution_id: child_execution_entity.as_ref().map(|entity| entity.id),
             parent_execution_id: parent.execution_id.or(parent.parent_execution_id),
             cancellation_token: None,
+            stop_after_node_id: None,
         };
 
         let run_result = child_runner.run_workflow(child_context).await;
@@ -410,6 +411,7 @@ mod tests {
                 execution_id: None,
                 parent_execution_id: None,
                 cancellation_token: None,
+                stop_after_node_id: None,
             })
             .await
             .unwrap();
@@ -466,6 +468,7 @@ mod tests {
                 execution_id: None,
                 parent_execution_id: None,
                 cancellation_token: None,
+                stop_after_node_id: None,
             })
             .await
             .unwrap_err();
