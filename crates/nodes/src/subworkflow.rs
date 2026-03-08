@@ -36,14 +36,8 @@ impl INodeType for ExecuteWorkflowNode {
         // We fetch the current input data that triggered this node, assuming index 0.
         // IExecuteFunctions needs to be able to fetch "all items from input index 0" or we can just 
         // rely on the Runner loop data injection for ExecuteSubWorkflow.
-        let items = context.get_input_data(0);
-        let mut extracted_items = Vec::new();
-
-        for item in items.map_or(vec![], |v| v.to_vec()) {
-            extracted_items.push(item);
-        }
-
-        let input_data = serde_json::to_value(&extracted_items).unwrap_or(serde_json::Value::Null);
+        let items = context.get_input_data(0).await.unwrap_or_default();
+        let input_data = serde_json::to_value(&items).unwrap_or(serde_json::Value::Null);
 
         // Throw specialized error to trap execution and force runner to process sub workflow
         Err(BarqError::ExecuteSubWorkflow {

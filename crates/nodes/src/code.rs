@@ -45,18 +45,18 @@ impl INodeType for CodeNode {
         let code_val = context.get_node_parameter("code", None).await?;
         let code = code_val.as_str().unwrap_or("return items;").to_string();
 
+        // We receive the previous items
+        let previous_items = match context.get_input_data(0).await {
+            Ok(data) => data,
+            Err(_) => vec![],
+        };
+
         // Ensure Rhai execution is isolated (no OS access, etc.)
         // By default, `Engine::new()` avoids exposing OS boundaries unless manually registered
         let mut engine = Engine::new();
 
         // Limit maximum operations to prevent infinite loops
         engine.set_max_operations(100_000);
-
-        // We receive the previous items
-        let previous_items = match context.get_input_data(0) {
-            Ok(data) => data.clone(),
-            Err(_) => vec![],
-        };
 
         // Convert the input list to Rhai format
         let mut items_array = rhai::Array::new();
@@ -195,11 +195,11 @@ mod tests {
             Ok(std::collections::HashMap::new())
         }
 
-        fn get_input_data(
+        async fn get_input_data(
             &self,
             _input_index: usize,
-        ) -> Result<&Vec<INodeExecutionData>, BarqError> {
-            Ok(&self.inputs)
+        ) -> Result<Vec<INodeExecutionData>, BarqError> {
+            Ok(self.inputs.clone())
         }
         fn log(&self, _message: &str) {}
     }
