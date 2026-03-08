@@ -6,6 +6,10 @@ use barqflow_exec::runner::{ExecutionConfig, WorkflowRunContext, WorkflowRunner}
 use std::collections::HashMap;
 use tokio_cron_scheduler::Job;
 
+fn is_webhook_node_type(node_type: &str) -> bool {
+    matches!(node_type, "webhook" | "barqflow-nodes.webhook")
+}
+
 pub async fn run_boot_sequence(
     state: &AppState,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -37,7 +41,7 @@ pub async fn run_boot_sequence(
         };
 
         for node in &nodes {
-            if node.r#type == "webhook" {
+            if is_webhook_node_type(&node.r#type) {
                 // Extract path parameter, fallback to node ID if not present
                 let path = node.parameters.0.get("path")
                     .and_then(|p| p.as_str())
@@ -110,4 +114,17 @@ pub async fn run_boot_sequence(
 
     info!("Boot sequence completed successfully.");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_webhook_node_type;
+
+    #[test]
+    fn test_webhook_type_detection_accepts_canonical_and_legacy() {
+        assert!(is_webhook_node_type("barqflow-nodes.webhook"));
+        assert!(is_webhook_node_type("webhook"));
+        assert!(!is_webhook_node_type("barqflow-nodes.cronTrigger"));
+        assert!(!is_webhook_node_type("barqflow-nodes.manualTrigger"));
+    }
 }
