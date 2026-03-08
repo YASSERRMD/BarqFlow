@@ -2,6 +2,8 @@ use regex::Regex;
 use rhai::{Dynamic, Engine, Scope, AST};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use md5::{Digest as Md5Digest, Md5};
+use sha2::Sha256;
 
 #[derive(Debug, Clone)]
 pub struct ExpressionContext {
@@ -44,19 +46,15 @@ impl ExpressionEngine {
         });
 
         self.engine.register_fn("hash_md5", |s: &str| {
-            use std::collections::hash_map::DefaultHasher;
-            use std::hash::{Hash, Hasher};
-            let mut hasher = DefaultHasher::new();
-            s.hash(&mut hasher);
-            format!("{:x}", hasher.finish())
+            let mut hasher = Md5::new();
+            hasher.update(s.as_bytes());
+            hex::encode(hasher.finalize())
         });
 
         self.engine.register_fn("hash_sha256", |s: &str| {
-            use std::collections::hash_map::DefaultHasher;
-            use std::hash::{Hash, Hasher};
-            let mut hasher = DefaultHasher::new();
-            s.hash(&mut hasher);
-            format!("{:x}", hasher.finish())
+            let mut hasher = Sha256::new();
+            hasher.update(s.as_bytes());
+            hex::encode(hasher.finalize())
         });
 
         self.engine
@@ -427,6 +425,51 @@ mod tests {
             .into_string()
             .unwrap()
             .contains("hello%20world"));
+    }
+
+    #[test]
+    fn test_hash_md5_uses_real_md5_digest() {
+        let engine = ExpressionEngine::new().with_custom_functions();
+
+        let result = engine
+            .eval_with_context(
+                "hash_md5(\"hello\")",
+                &ExpressionContext {
+                    json_data: serde_json::json!({}),
+                    binary_keys: vec![],
+                    parameters: HashMap::new(),
+                    workflow_cache: HashMap::new(),
+                },
+            )
+            .unwrap()
+            .into_string()
+            .unwrap();
+
+        assert_eq!(result, "5d41402abc4b2a76b9719d911017c592");
+    }
+
+    #[test]
+    fn test_hash_sha256_uses_real_sha256_digest() {
+        let engine = ExpressionEngine::new().with_custom_functions();
+
+        let result = engine
+            .eval_with_context(
+                "hash_sha256(\"hello\")",
+                &ExpressionContext {
+                    json_data: serde_json::json!({}),
+                    binary_keys: vec![],
+                    parameters: HashMap::new(),
+                    workflow_cache: HashMap::new(),
+                },
+            )
+            .unwrap()
+            .into_string()
+            .unwrap();
+
+        assert_eq!(
+            result,
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        );
     }
 
     #[test]
