@@ -448,4 +448,153 @@ mod tests {
         assert!(a_children.contains(&b_idx));
         assert!(a_children.contains(&c_idx));
     }
+
+    #[test]
+    fn test_topological_sort_linear_dependencies() {
+        let connections = HashMap::from([
+            (
+                "A".to_string(),
+                INodeConnections(HashMap::from([(
+                    NodeConnectionType::Main,
+                    vec![vec![IConnection {
+                        node: "B".to_string(),
+                        r#type: NodeConnectionType::Main,
+                        index: 0,
+                    }]],
+                )])),
+            ),
+            (
+                "B".to_string(),
+                INodeConnections(HashMap::from([(
+                    NodeConnectionType::Main,
+                    vec![vec![IConnection {
+                        node: "C".to_string(),
+                        r#type: NodeConnectionType::Main,
+                        index: 0,
+                    }]],
+                )])),
+            ),
+        ]);
+
+        let workflow = WorkflowDef {
+            id: "test-linear-order".to_string(),
+            name: "Linear Order".to_string(),
+            nodes: vec![
+                create_test_node("A", "A", "manualTrigger"),
+                create_test_node("B", "B", "set"),
+                create_test_node("C", "C", "set"),
+            ],
+            connections,
+            settings: None,
+            static_data: None,
+            pin_data: None,
+            version_id: None,
+        };
+
+        let parsed = WorkflowToGraphParser::parse(&workflow).unwrap();
+        let sorted = GraphTraversal::topological_sort(&parsed.graph).unwrap();
+
+        let pos_a = sorted
+            .iter()
+            .position(|&idx| idx == *parsed.node_indices.get(&NodeId::new("A")).unwrap())
+            .unwrap();
+        let pos_b = sorted
+            .iter()
+            .position(|&idx| idx == *parsed.node_indices.get(&NodeId::new("B")).unwrap())
+            .unwrap();
+        let pos_c = sorted
+            .iter()
+            .position(|&idx| idx == *parsed.node_indices.get(&NodeId::new("C")).unwrap())
+            .unwrap();
+
+        assert!(pos_a < pos_b);
+        assert!(pos_b < pos_c);
+    }
+
+    #[test]
+    fn test_topological_sort_branch_merge_dependencies() {
+        let connections = HashMap::from([
+            (
+                "A".to_string(),
+                INodeConnections(HashMap::from([(
+                    NodeConnectionType::Main,
+                    vec![vec![
+                        IConnection {
+                            node: "B".to_string(),
+                            r#type: NodeConnectionType::Main,
+                            index: 0,
+                        },
+                        IConnection {
+                            node: "C".to_string(),
+                            r#type: NodeConnectionType::Main,
+                            index: 0,
+                        },
+                    ]],
+                )])),
+            ),
+            (
+                "B".to_string(),
+                INodeConnections(HashMap::from([(
+                    NodeConnectionType::Main,
+                    vec![vec![IConnection {
+                        node: "D".to_string(),
+                        r#type: NodeConnectionType::Main,
+                        index: 0,
+                    }]],
+                )])),
+            ),
+            (
+                "C".to_string(),
+                INodeConnections(HashMap::from([(
+                    NodeConnectionType::Main,
+                    vec![vec![IConnection {
+                        node: "D".to_string(),
+                        r#type: NodeConnectionType::Main,
+                        index: 0,
+                    }]],
+                )])),
+            ),
+        ]);
+
+        let workflow = WorkflowDef {
+            id: "test-branch-merge-order".to_string(),
+            name: "Branch Merge Order".to_string(),
+            nodes: vec![
+                create_test_node("A", "A", "manualTrigger"),
+                create_test_node("B", "B", "set"),
+                create_test_node("C", "C", "set"),
+                create_test_node("D", "D", "set"),
+            ],
+            connections,
+            settings: None,
+            static_data: None,
+            pin_data: None,
+            version_id: None,
+        };
+
+        let parsed = WorkflowToGraphParser::parse(&workflow).unwrap();
+        let sorted = GraphTraversal::topological_sort(&parsed.graph).unwrap();
+
+        let pos_a = sorted
+            .iter()
+            .position(|&idx| idx == *parsed.node_indices.get(&NodeId::new("A")).unwrap())
+            .unwrap();
+        let pos_b = sorted
+            .iter()
+            .position(|&idx| idx == *parsed.node_indices.get(&NodeId::new("B")).unwrap())
+            .unwrap();
+        let pos_c = sorted
+            .iter()
+            .position(|&idx| idx == *parsed.node_indices.get(&NodeId::new("C")).unwrap())
+            .unwrap();
+        let pos_d = sorted
+            .iter()
+            .position(|&idx| idx == *parsed.node_indices.get(&NodeId::new("D")).unwrap())
+            .unwrap();
+
+        assert!(pos_a < pos_b);
+        assert!(pos_a < pos_c);
+        assert!(pos_b < pos_d);
+        assert!(pos_c < pos_d);
+    }
 }
