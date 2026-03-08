@@ -1193,6 +1193,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_run_workflow_stop_at_unknown_node_returns_error() {
+        let registry = create_mock_registry();
+        let runner = WorkflowRunner::new(registry, ExecutionConfig::default());
+        let workflow = create_test_workflow();
+
+        let context = WorkflowRunContext {
+            run_id: RunId::new(),
+            workflow,
+            static_data: None,
+            manual: true,
+            execution_id: None,
+            parent_execution_id: None,
+            cancellation_token: None,
+            stop_after_node_id: Some("missing-node".to_string()),
+        };
+
+        let err = runner.run_workflow(context).await.unwrap_err();
+        match err {
+            BarqError::WorkflowConfigurationError { message } => {
+                assert!(message.contains("not found"));
+            }
+            other => panic!("expected WorkflowConfigurationError, got {}", other),
+        }
+    }
+
+    #[tokio::test]
     async fn test_run_with_continue_on_fail() {
         let registry = create_mock_registry();
         let config = ExecutionConfig {
