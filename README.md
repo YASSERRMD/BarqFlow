@@ -1,128 +1,142 @@
 <div align="center">
   <img src="web/public/logo.png" alt="BarqFlow Logo" width="120" height="120" />
   <h1>BarqFlow</h1>
-  <p><strong>A Hyper-Scalable, Production-Ready Agentic Workflow Automation Engine Written in Rust 🦀 & Vue 3 ⚡️</strong></p>
-
-  <p>
-    <a href="https://rustup.rs/"><img src="https://img.shields.io/badge/rust-1.80%2B-orange.svg" alt="Rust Version" /></a>
-    <a href="https://vuejs.org/"><img src="https://img.shields.io/badge/vue-3.5%2B-brightgreen.svg" alt="Vue Version" /></a>
-    <a href="https://github.com/YASSERRMD/BarqFlow/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License" /></a>
-  </p>
+  <p><strong>Rust-based workflow automation platform with a Vue 3 visual editor</strong></p>
 </div>
 
----
+## Overview
+BarqFlow is a workflow automation engine built with Rust (Axum/Tokio) and Vue 3.
 
-## ⚡️ What is BarqFlow?
+It is inspired by node-based automation products, including n8n, at the product and UX level (visual canvas, trigger/action model, workflow graph execution). It is an independent implementation in this repository and is not a copy/paste of n8n source code.
 
-BarqFlow is an ultra-fast, n8n-inspired workflow automation engine built entirely from scratch in **Rust**. It provides a pure stateless graph-execution pipeline utilizing a sophisticated **Rhai** scripting engine for arbitrary payload resolution.
+## What BarqFlow Includes
+- Workflow execution engine with graph traversal, branching, and scoped node test execution
+- REST API under `/rest` for users, workflows, executions, credentials, settings, and health
+- Webhook runtime under `/webhook/{path}`
+- Wait/resume execution flow with resume tokens
+- Runtime execution stop/cancellation support
+- Node registry + schema-driven node forms in the editor
+- Credential storage with encrypted payloads (`BARQFLOW_ENCRYPTION_KEY`)
+- JWT-based auth with hardened production secret handling
+- Dockerized deployment path
 
-With BarqFlow, you can construct massive multi-branch workflows with drag-and-drop web interfaces and execute them securely with zero-overhead async parallelization via **Tokio**.
+## Runtime Endpoints
+- API base: `/rest`
+- Webhook base: `/webhook`
+- Static UI assets are served from `web/dist` by the backend in production mode
 
-### 🚀 Key Features
-
-* **High-Performance Rust Core:** Powered by the Axum framework and Tokio async runtime, handling tens of thousands of simultaneous webhooks gracefully.
-* **Advanced Graph Execution Engine:** Cycle-detection, topological sorting, state checkpointing, and branch merging mechanisms built directly into `petgraph`.
-* **Dynamic Node Registry:** Safe schema parsing for dynamically generated components (HTTP Requests, Conditionals, Merges, Webhooks, Scripts).
-* **Rhai Expression System:** Built-in powerful scripting expressions (`=$json.body.user.name`) seamlessly embedded directly into your execution components.
-* **Secure Credential Injection:** Symmetric AES-256 encryption via `argon2` ensures total confidentiality for your OAuth tokens and DB credentials.
-* **Vue 3 Beautiful Glassmorphism UI:** Complete frontend canvas leveraging rich SVGs, animations, and Pinia stores.
-* **Ready for Production:** Included PostgreSQL schema, migrations, Axum static-file servicing, JWT Authentication, and native Docker configurations.
-
----
-
-## 🛠 Architecture Overview
-
-The codebase is organized as a unified Cargo Workspace spanning critical execution boundaries:
-
+## Architecture
 ```text
-packages/
- ├── crates/core      # Foundational Data Primitives, Graph Models & Errors
- ├── crates/db        # SQLite/PostgreSQL Repositories via SQLx + Migrations & Crypto
- ├── crates/flow      # Topo Execution Walkers, Graph Resolution & Rhai Expression Engine
- ├── crates/exec      # Tokio Runner, State Checkpointing & Telemetry State
- ├── crates/nodes     # Concrete implementations (Webhook, HTTP Request, Filter, If)
- ├── crates/api       # REST Router, Axum Controllers, & JWT Stateless Auth
- ├── crates/registry  # In-memory maps parsing Node Form UI Contracts
- └── crates/server    # Global Boot Sequence mapping API and Graph boundaries & Static File Serving
- 
-web/                  # The UI Frontend Canvas (Vue 3 / Vite)
+crates/
+  core/        Shared types, traits, schema contracts
+  flow/        Expression engine and flow helpers
+  exec/        Workflow runner, context, checkpointing
+  registry/    Node/Credential registries
+  nodes/       Node implementations and node schema registration
+  db/          Database models and access layer
+  api/         Axum controllers, routes, repositories
+  server/      Boot sequence and app state wiring
+bin/
+  barqflow/    CLI entry wrapper
+web/
+  src/         Vue 3 + Pinia + Vue Router UI
+  public/      Static assets
+docker/
+  Dockerfile
+  docker-compose.yml
 ```
 
----
-
-## 🐳 Quick Start (Docker Compose)
-
-The fastest and most reliable way to experience BarqFlow is via the provided `docker-compose.yml`.
-
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/YASSERRMD/BarqFlow.git
-   cd BarqFlow
-   ```
-
-2. **Spin up the stack (Postgres + Engine + UI):**
-   *(Note: The `docker-compose.yml` and `Dockerfile` are neatly organized under the `docker/` folder rather than cluttering the root directory!)*
-   We've included a robust `deploy.sh` script to ensure you always build fresh images and wipe old cache variables:
-   ```bash
-   ./deploy.sh
-   ```
-   
-   *(Alternatively, you can manually run `docker-compose -f docker/docker-compose.yml up --build -d`)*
-
-3. **Access the application:**
-   Navigate your browser to `http://localhost:3000`. You will see the login screen and can begin dragging nodes onto the canvas!
-
----
-
-## 💻 Manual Developer Setup 
-
-### Prerequisites
-
-* Rust 1.80+ (via rustup)
-* Node.js 20+ & `pnpm`
-* PostgreSQL 15+
-
-### 1. Database Configuration
-
-Ensure PostgreSQL is running locally.
-
+## Quick Start (Docker)
 ```bash
-# Create a valid .env file in the repository root
-echo 'DATABASE_URL=postgres://postgres:postgres@localhost:5432/barqflow' > .env
-echo 'JWT_SECRET=super_secret_temporary_key_for_dev_only' >> .env
-echo 'BARQFLOW_ENCRYPTION_KEY=this_is_a_32_byte_dev_secret_key' >> .env
-
-# Install sqlx-cli to handle migrations
-cargo install sqlx-cli --no-default-features --features rustls,postgres
-sqlx database create
-sqlx migrate run --source crates/db/migrations
+git clone https://github.com/YASSERRMD/BarqFlow.git
+cd BarqFlow
+./deploy.sh
 ```
 
-### 2. Build the Frontend Canvas
+Then open:
+- `http://localhost:3000`
 
-The UI must be built before the Axum server spins up, as Axum serves the compiled artifacts on `0.0.0.0:3000`.
+## Local Development
+### Prerequisites
+- Rust `1.88+`
+- Node.js `20+`
+- `pnpm`
+- PostgreSQL `15+`
 
+### Environment Variables
+Set these in `.env` (root):
+
+| Variable | Required | Notes |
+|---|---|---|
+| `DATABASE_URL` | Yes | PostgreSQL connection string |
+| `BARQFLOW_ENCRYPTION_KEY` | Yes | Must be exactly 32 characters |
+| `PORT` | No | Default `3000` |
+| `RUST_LOG` | No | Example: `info,barqflow=debug` |
+| `JWT_SECRET` | Required in production | In development, an ephemeral secret is generated if missing |
+| `BARQFLOW_ENV` | No | Use `production` to enforce strict JWT secret requirement |
+
+### Database Migrations
+```bash
+cargo install sqlx-cli --no-default-features --features rustls,postgres
+sqlx migrate run --source crates/api/migrations
+```
+
+### Run Backend
+```bash
+cargo run -p barqflow-server
+```
+
+### Run Frontend (dev server)
 ```bash
 cd web
 pnpm install
-pnpm run build
-cd ..
+pnpm dev
 ```
 
-### 3. Spin up the Core Engine
-
+### Build Frontend for Backend Static Serving
 ```bash
-cargo run --bin barqflow-server
+cd web
+pnpm build
 ```
 
-*(You can now access `http://localhost:3000` via your browser).*
+## API Surface (Current)
+- Auth/User
+  - `POST /rest/users`
+  - `POST /rest/login`
+  - `GET /rest/users/me`
+- Workflows
+  - `GET/POST /rest/workflows`
+  - `GET/PUT/DELETE /rest/workflows/{id}`
+  - `PUT /rest/workflows/{id}/activate`
+  - `POST /rest/workflows/{id}/duplicate`
+- Executions
+  - `GET /rest/executions`
+  - `POST /rest/executions/workflow/{workflow_id}`
+  - `POST /rest/executions/workflow/{workflow_id}/test-node/{node_id}`
+  - `POST /rest/executions/{id}/stop`
+  - `POST /rest/executions/{id}/retry`
+  - `POST /rest/executions/{id}/resume/{resume_token}`
+- Credentials
+  - `GET/POST /rest/credentials`
+  - `DELETE /rest/credentials/{id}`
+  - `GET /rest/credentials/types`
+  - `POST /rest/credentials/test`
+- Nodes
+  - `GET /rest/nodes`
+- Health
+  - `GET /rest/health/triggers`
+- Webhook
+  - `ANY /webhook/{path}`
 
----
+## Production Notes
+- Keep `JWT_SECRET` and `BARQFLOW_ENCRYPTION_KEY` managed in a secrets manager.
+- Do not commit `.env` files with real secrets.
+- Frontend build artifacts (`web/dist`) are generated during deployment/build.
 
-## 🤝 Contribution
+## Contributing
+- Follow the repository git workflow conventions in `git_workflow.md`.
+- Keep changes atomic and tested.
+- Prefer adding or updating tests with behavior changes.
 
-BarqFlow is open-source and welcomes pull requests! Specifically, we are always looking to expand our **Nodes Ecosystem**. Check out `crates/nodes/src` to see how you can develop a new `INodeType` integration with just a few lines of Rust!
-
-## 📜 License
-
-This project is licensed under the [MIT License](LICENSE).
+## License
+See [LICENSE](LICENSE). If you are packaging or redistributing, validate license metadata across repository files and Cargo package metadata.
