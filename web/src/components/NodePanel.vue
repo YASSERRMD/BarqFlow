@@ -331,6 +331,13 @@ const missingRequiredCredentials = computed(() => {
     .map((ref: any) => String(ref.displayName || ref.credentialType || 'credential'))
 })
 
+const credentialTypesWithoutSavedOptions = computed(() => {
+  return nodeCredentialRefs.value
+    .filter((ref: any) => ref?.required)
+    .filter((ref: any) => (credentialOptions.value[ref.credentialType] || []).length === 0)
+    .map((ref: any) => String(ref.displayName || ref.credentialType || 'credential'))
+})
+
 const canTestNode = computed(
   () =>
     missingRequiredParameters.value.length === 0 &&
@@ -395,6 +402,10 @@ function applyMockData() {
 function onDeleteNode() {
   if (!props.node?.id) return
   emit('delete-node', String(props.node.id))
+}
+
+function openCredentialsPage() {
+  window.location.assign('/credentials')
 }
 </script>
 
@@ -542,6 +553,13 @@ function onDeleteNode() {
               >
                 This credential is required.
               </p>
+              <p
+                v-if="!credentialsLoading && (credentialOptions[ref.credentialType] || []).length === 0"
+                class="mt-1 text-xs text-red-600"
+              >
+                No saved {{ ref.displayName }} credential found.
+                <a href="/credentials" class="underline font-semibold">Add one in Credentials</a>.
+              </p>
             </div>
           </div>
         </div>
@@ -561,6 +579,13 @@ function onDeleteNode() {
           </p>
           <p v-if="missingRequiredCredentials.length > 0">
             Missing required credentials: {{ missingRequiredCredentials.join(', ') }}
+          </p>
+          <p v-if="credentialTypesWithoutSavedOptions.length > 0">
+            No saved credentials available for:
+            {{ credentialTypesWithoutSavedOptions.join(', ') }}.
+            <button type="button" class="underline font-semibold" @click="openCredentialsPage">
+              Open Credentials
+            </button>
           </p>
         </div>
       </div>
