@@ -32,7 +32,7 @@ const primaryLabel = computed(() => {
   >
     <!-- Handle (Input) -->
     <Handle 
-      v-if="data.schema?.type !== 'trigger'"
+      v-if="!data.isTrigger"
       id="a" 
       type="target" 
       :position="Position.Left" 
@@ -50,7 +50,7 @@ const primaryLabel = computed(() => {
         </div>
         <div class="min-w-0">
           <div class="text-[13px] font-bold text-slate-800 truncate">{{ primaryLabel }}</div>
-          <div class="text-[10px] text-slate-500 uppercase tracking-wide truncate">{{ data.schema?.type || data.type }}</div>
+          <div class="text-[10px] text-slate-500 uppercase tracking-wide truncate">{{ data.kind || data.type }}</div>
         </div>
       </div>
 

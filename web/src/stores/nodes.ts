@@ -18,7 +18,7 @@ export const useNodeStore = defineStore('nodes', {
                 this.nodeTypes = response.data.map((node: any) => {
                     let category = 'Core';
                     const name = node.name || '';
-                    if (name.toLowerCase().includes('trigger') || name.includes('webhook') || name.includes('manual')) {
+                    if (node.is_trigger || name.toLowerCase().includes('trigger') || name.includes('webhook') || name.includes('manual')) {
                         category = 'Triggers';
                     } else if (name.startsWith('barqflow-nodes') && !name.includes('trigger') && !name.includes('webhook') && !name.includes('wait') && !name.includes('executeWorkflow')) {
                         category = 'Integrations';
@@ -28,8 +28,10 @@ export const useNodeStore = defineStore('nodes', {
 
                     return {
                         name: node.display_name || node.name,
-                        type: name.includes('Trigger') ? 'trigger' : (name.includes('Set') ? 'manipulation' : 'action'),
+                        type: node.name,
+                        kind: node.is_trigger ? 'trigger' : (category === 'Data & Logic' ? 'manipulation' : 'action'),
                         description: node.description,
+                        isTrigger: !!node.is_trigger,
                         schema: node,
                         category
                     };

@@ -1,7 +1,18 @@
 /// <reference types="../../node_modules/.vue-global-types/vue_3.5_0_0_0.d.ts" />
+import { computed } from 'vue';
 import { Handle, Position } from '@vue-flow/core';
-import { Settings2, Play } from 'lucide-vue-next';
+import { Play } from 'lucide-vue-next';
+import { getNodeVisuals } from '../utils/nodeVisuals';
 const props = defineProps();
+// data.schema.name is the backend name, e.g. "barqflow-nodes.postgres"
+const visuals = computed(() => {
+    const backendName = props.data.schema?.name || '';
+    return getNodeVisuals(backendName);
+});
+// Correct text presentation: Top line should be the Node Description/Display Name, bottom line is generic execution or subtitle
+const primaryLabel = computed(() => {
+    return props.data.schema?.display_name || props.data.label || 'Unknown Node';
+});
 debugger; /* PartiallyEnd: #3632/scriptSetup.vue */
 const __VLS_ctx = {};
 let __VLS_components;
@@ -9,12 +20,17 @@ let __VLS_directives;
 // CSS variable injection 
 // CSS variable injection end 
 __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+    ...{ class: "min-w-[220px] bg-white rounded-md border shadow-sm transition-all duration-200 group relative" },
     ...{ class: ([
-            'min-w-[240px] glass-card rounded-[1.5rem] transition-all duration-300 group hover:shadow-node-hover hover:-translate-y-1',
-            __VLS_ctx.selected ? 'border-brand-500 ring-4 ring-brand-500/20 shadow-[0_8px_30px_rgb(14,165,233,0.3)] scale-[1.02]' : 'border-white/60'
+            __VLS_ctx.selected ? 'ring-1 shadow-md' : 'hover:border-slate-400',
         ]) },
+    ...{ style: ({
+            borderLeftWidth: '4px',
+            borderLeftColor: __VLS_ctx.visuals.color,
+            borderColor: __VLS_ctx.selected ? __VLS_ctx.visuals.color : '#cbd5e1'
+        }) },
 });
-if (__VLS_ctx.data.schema.type !== 'trigger') {
+if (!__VLS_ctx.data.isTrigger) {
     const __VLS_0 = {}.Handle;
     /** @type {[typeof __VLS_components.Handle, ]} */ ;
     // @ts-ignore
@@ -38,11 +54,10 @@ __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.d
     ...{ class: "flex items-center gap-2 overflow-hidden" },
 });
 __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-    ...{ class: "w-6 h-6 rounded flex items-center justify-center shrink-0" },
-    ...{ class: (__VLS_ctx.data.schema.type === 'trigger' ? 'text-purple-600 bg-purple-50' : 'text-brand-600 bg-brand-50') },
+    ...{ class: "w-7 h-7 rounded flex items-center justify-center shrink-0 shadow-sm" },
+    ...{ style: ({ backgroundColor: __VLS_ctx.visuals.iconBgColor, color: __VLS_ctx.visuals.iconColor }) },
 });
-const __VLS_4 = {}.Settings2;
-/** @type {[typeof __VLS_components.Settings2, ]} */ ;
+const __VLS_4 = ((__VLS_ctx.visuals.icon));
 // @ts-ignore
 const __VLS_5 = __VLS_asFunctionalComponent(__VLS_4, new __VLS_4({
     ...{ class: "w-4 h-4" },
@@ -54,13 +69,13 @@ __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.d
     ...{ class: "min-w-0" },
 });
 __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-    ...{ class: "text-sm font-semibold text-slate-800 truncate" },
+    ...{ class: "text-[13px] font-bold text-slate-800 truncate" },
 });
-(__VLS_ctx.data.label);
+(__VLS_ctx.primaryLabel);
 __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
     ...{ class: "text-[10px] text-slate-500 uppercase tracking-wide truncate" },
 });
-(__VLS_ctx.data.schema.type);
+(__VLS_ctx.data.kind || __VLS_ctx.data.type);
 __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
     ...{ class: "opacity-0 group-hover:opacity-100 p-1.5 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded transition-all shrink-0" },
     title: "Execute Node",
@@ -76,7 +91,7 @@ const __VLS_10 = __VLS_9({
 }, ...__VLS_functionalComponentArgsRest(__VLS_9));
 if (__VLS_ctx.data.status) {
     __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-        ...{ class: "px-3 py-1.5 border-t border-slate-100 bg-slate-50 rounded-b-lg flex items-center gap-2" },
+        ...{ class: "px-3 py-1.5 border-t border-slate-100 bg-slate-50 rounded-b-md flex items-center gap-2" },
     });
     __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
         ...{ class: "w-2 h-2 rounded-full" },
@@ -106,6 +121,15 @@ const __VLS_14 = __VLS_13({
     position: (__VLS_ctx.Position.Right),
     ...{ class: "!w-4 !h-6 !bg-slate-300 !border-2 !border-white !rounded-sm hover:!bg-brand-500 !-mr-2 !transition-colors !z-10" },
 }, ...__VLS_functionalComponentArgsRest(__VLS_13));
+/** @type {__VLS_StyleScopedClasses['min-w-[220px]']} */ ;
+/** @type {__VLS_StyleScopedClasses['bg-white']} */ ;
+/** @type {__VLS_StyleScopedClasses['rounded-md']} */ ;
+/** @type {__VLS_StyleScopedClasses['border']} */ ;
+/** @type {__VLS_StyleScopedClasses['shadow-sm']} */ ;
+/** @type {__VLS_StyleScopedClasses['transition-all']} */ ;
+/** @type {__VLS_StyleScopedClasses['duration-200']} */ ;
+/** @type {__VLS_StyleScopedClasses['group']} */ ;
+/** @type {__VLS_StyleScopedClasses['relative']} */ ;
 /** @type {__VLS_StyleScopedClasses['!w-4']} */ ;
 /** @type {__VLS_StyleScopedClasses['!h-6']} */ ;
 /** @type {__VLS_StyleScopedClasses['!bg-slate-300']} */ ;
@@ -126,18 +150,19 @@ const __VLS_14 = __VLS_13({
 /** @type {__VLS_StyleScopedClasses['items-center']} */ ;
 /** @type {__VLS_StyleScopedClasses['gap-2']} */ ;
 /** @type {__VLS_StyleScopedClasses['overflow-hidden']} */ ;
-/** @type {__VLS_StyleScopedClasses['w-6']} */ ;
-/** @type {__VLS_StyleScopedClasses['h-6']} */ ;
+/** @type {__VLS_StyleScopedClasses['w-7']} */ ;
+/** @type {__VLS_StyleScopedClasses['h-7']} */ ;
 /** @type {__VLS_StyleScopedClasses['rounded']} */ ;
 /** @type {__VLS_StyleScopedClasses['flex']} */ ;
 /** @type {__VLS_StyleScopedClasses['items-center']} */ ;
 /** @type {__VLS_StyleScopedClasses['justify-center']} */ ;
 /** @type {__VLS_StyleScopedClasses['shrink-0']} */ ;
+/** @type {__VLS_StyleScopedClasses['shadow-sm']} */ ;
 /** @type {__VLS_StyleScopedClasses['w-4']} */ ;
 /** @type {__VLS_StyleScopedClasses['h-4']} */ ;
 /** @type {__VLS_StyleScopedClasses['min-w-0']} */ ;
-/** @type {__VLS_StyleScopedClasses['text-sm']} */ ;
-/** @type {__VLS_StyleScopedClasses['font-semibold']} */ ;
+/** @type {__VLS_StyleScopedClasses['text-[13px]']} */ ;
+/** @type {__VLS_StyleScopedClasses['font-bold']} */ ;
 /** @type {__VLS_StyleScopedClasses['text-slate-800']} */ ;
 /** @type {__VLS_StyleScopedClasses['truncate']} */ ;
 /** @type {__VLS_StyleScopedClasses['text-[10px]']} */ ;
@@ -161,7 +186,7 @@ const __VLS_14 = __VLS_13({
 /** @type {__VLS_StyleScopedClasses['border-t']} */ ;
 /** @type {__VLS_StyleScopedClasses['border-slate-100']} */ ;
 /** @type {__VLS_StyleScopedClasses['bg-slate-50']} */ ;
-/** @type {__VLS_StyleScopedClasses['rounded-b-lg']} */ ;
+/** @type {__VLS_StyleScopedClasses['rounded-b-md']} */ ;
 /** @type {__VLS_StyleScopedClasses['flex']} */ ;
 /** @type {__VLS_StyleScopedClasses['items-center']} */ ;
 /** @type {__VLS_StyleScopedClasses['gap-2']} */ ;
@@ -188,8 +213,9 @@ const __VLS_self = (await import('vue')).defineComponent({
         return {
             Handle: Handle,
             Position: Position,
-            Settings2: Settings2,
             Play: Play,
+            visuals: visuals,
+            primaryLabel: primaryLabel,
         };
     },
     __typeProps: {},

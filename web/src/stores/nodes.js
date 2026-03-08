@@ -14,13 +14,28 @@ export const useNodeStore = defineStore('nodes', {
             this.error = null;
             try {
                 const response = await api.get('/nodes');
-                this.nodeTypes = response.data.map((node) => ({
-                    name: node.displayName,
-                    type: node.name.includes('Trigger') ? 'trigger' : (node.name.includes('Set') ? 'manipulation' : 'action'),
-                    description: node.description,
-                    icon: node.name.includes('HTTP') ? 'Globe' : 'Settings2',
-                    schema: node
-                }));
+                this.nodeTypes = response.data.map((node) => {
+                    let category = 'Core';
+                    const name = node.name || '';
+                    if (node.is_trigger || name.toLowerCase().includes('trigger') || name.includes('webhook') || name.includes('manual')) {
+                        category = 'Triggers';
+                    }
+                    else if (name.startsWith('barqflow-nodes') && !name.includes('trigger') && !name.includes('webhook') && !name.includes('wait') && !name.includes('executeWorkflow')) {
+                        category = 'Integrations';
+                    }
+                    else if (name.includes('set') || name.includes('filter') || name.includes('itemLists') || name.includes('code') || name.includes('merge') || name.includes('switch') || name.includes('if')) {
+                        category = 'Data & Logic';
+                    }
+                    return {
+                        name: node.display_name || node.name,
+                        type: node.name,
+                        kind: node.is_trigger ? 'trigger' : (category === 'Data & Logic' ? 'manipulation' : 'action'),
+                        description: node.description,
+                        isTrigger: !!node.is_trigger,
+                        schema: node,
+                        category
+                    };
+                });
             }
             catch (err) {
                 this.error = err.response?.data?.message || 'Failed to load nodes';
