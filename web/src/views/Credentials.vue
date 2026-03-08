@@ -36,6 +36,47 @@ const filteredCredentials = computed(() => {
   })
 })
 
+function formatRelativeTime(iso?: string | null): string {
+  if (!iso) return 'Never used'
+
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return 'Never used'
+
+  const diffSeconds = Math.floor((date.getTime() - Date.now()) / 1000)
+  const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' })
+  const absSeconds = Math.abs(diffSeconds)
+
+  if (absSeconds < 60) return rtf.format(diffSeconds, 'second')
+
+  const diffMinutes = Math.floor(diffSeconds / 60)
+  if (Math.abs(diffMinutes) < 60) return rtf.format(diffMinutes, 'minute')
+
+  const diffHours = Math.floor(diffMinutes / 60)
+  if (Math.abs(diffHours) < 24) return rtf.format(diffHours, 'hour')
+
+  const diffDays = Math.floor(diffHours / 24)
+  if (Math.abs(diffDays) < 30) return rtf.format(diffDays, 'day')
+
+  return date.toLocaleDateString()
+}
+
+function credentialLastUsedIso(cred: any): string | null {
+  return cred?.last_used_at || cred?.lastUsedAt || cred?.updated_at || cred?.created_at || null
+}
+
+function credentialLastUsedLabel(cred: any): string {
+  return formatRelativeTime(credentialLastUsedIso(cred))
+}
+
+function credentialLastUsedTitle(cred: any): string {
+  const iso = credentialLastUsedIso(cred)
+  if (!iso) return 'Never used'
+
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return 'Never used'
+  return date.toLocaleString()
+}
+
 watch(
   () => JSON.stringify(newCredentialData.value),
   () => {
@@ -243,7 +284,9 @@ async function deleteCredential(id: string) {
                 </div>
               </td>
               <td class="px-8 py-6">
-                <span class="text-sm font-medium text-slate-400">Unknown</span>
+                <span class="text-sm font-medium text-slate-400" :title="credentialLastUsedTitle(cred)">
+                  {{ credentialLastUsedLabel(cred) }}
+                </span>
               </td>
               <td class="px-8 py-6 text-right">
                 <div class="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
