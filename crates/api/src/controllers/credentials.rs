@@ -1,7 +1,7 @@
 use crate::auth::Claims;
 use axum::http::StatusCode;
 use axum::{
-    extract::{Json, State},
+    extract::{Json, Path, State},
     routing::{get, post},
     Router,
 };
@@ -56,6 +56,7 @@ fn mask_credential_data(data: &serde_json::Value) -> serde_json::Value {
 pub fn credential_routes(state: AppState) -> Router {
     Router::new()
         .route("/credentials", get(get_credentials).post(create_credential))
+        .route("/credentials/{id}", axum::routing::delete(delete_credential))
         .route("/credentials/types", get(get_credential_types))
         .route("/credentials/test", post(test_credential))
         .with_state(state)
@@ -171,6 +172,24 @@ async fn test_credential(
     Ok(Json(serde_json::json!({
         "valid": is_valid
     })))
+}
+
+async fn delete_credential(
+    _claims: Claims,
+    State(state): State<AppState>,
+    Path(id): Path<uuid::Uuid>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let deleted = state
+        .credential_repo
+        .delete(id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    if deleted {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err((StatusCode::NOT_FOUND, "Credential not found".into()))
+    }
 }
 
 #[cfg(test)]
