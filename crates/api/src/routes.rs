@@ -13,9 +13,10 @@ use tower_http::services::{ServeDir, ServeFile};
 use crate::controllers::{
     credentials::{credential_routes, AppState as CredState},
     executions::{execution_routes, AppState as ExecState},
+    settings::{settings_routes, AppState as SettingsState},
     oauth2::{oauth2_routes, OAuth2State},
     users::{user_routes, AppState as UserState},
-    webhooks::{new_webhook_registry, webhook_routes, WebhookRegistry, WebhookState},
+    webhooks::{webhook_routes, WebhookRegistry, WebhookState},
     workflows::{workflow_routes, AppState as WfState},
     nodes::{node_routes, AppState as NodeState},
 };
@@ -53,6 +54,10 @@ pub fn create_router(state: AppState) -> Router {
         }))
         .merge(oauth2_routes(OAuth2State {
             credential_repo: Arc::clone(&state.credential_repo),
+        }))
+        .merge(settings_routes(SettingsState {
+            node_registry: Arc::clone(&state.node_registry),
+            credential_registry: Arc::clone(&state.credential_registry),
         }))
         .nest("/nodes", node_routes(NodeState {
             node_registry: Arc::clone(&state.node_registry),
