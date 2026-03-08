@@ -80,6 +80,16 @@ export const useWorkflowStore = defineStore('workflows', {
                 throw err;
             }
         },
+        async duplicateWorkflow(id: string) {
+            try {
+                const response = await api.post(`/workflows/${id}/duplicate`);
+                this.workflows.unshift(response.data);
+                return response.data;
+            } catch (err: any) {
+                this.error = err.message;
+                throw err;
+            }
+        },
         async executeWorkflow(workflowId: string, payload: any = {}) {
             this.loading = true;
             try {
