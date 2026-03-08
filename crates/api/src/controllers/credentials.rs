@@ -6,9 +6,11 @@ use axum::{
     routing::{get, post, put},
     Router,
 };
+use barqflow_core::types::GenericValue;
 use barqflow_db::models::CredentialEntity;
 use barqflow_registry::registry::CredentialRegistry;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -60,6 +62,7 @@ pub fn credential_routes(state: AppState) -> Router {
             "/credentials/{id}",
             put(update_credential).delete(delete_credential),
         )
+        .route("/credentials/{id}/test", post(test_saved_credential))
         .route("/credentials/types", get(get_credential_types))
         .route("/credentials/test", post(test_credential))
         .with_state(state)
@@ -202,29 +205,39 @@ async fn update_credential(
     Ok(Json(CredentialResponse::from(updated)))
 }
 
-async fn test_credential(
-    _claims: Claims,
-    State(state): State<AppState>,
-    Json(payload): Json<TestCredentialRequest>,
-) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+fn credential_data_to_map(
+    data: &serde_json::Value,
+) -> Result<HashMap<String, GenericValue>, (StatusCode, String)> {
+    let object = data.as_object().ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            "Credential payload must be a JSON object".to_string(),
+        )
+    })?;
+
+    Ok(object
+        .iter()
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect())
+}
+
+async fn validate_credential_data(
+    state: &AppState,
+    cred_type: &str,
+    data: &HashMap<String, GenericValue>,
+) -> Result<bool, (StatusCode, String)> {
     let cred_info = state
         .credential_registry
-        .get_credential(&payload.cred_type)
+        .get_credential(cred_type)
         .ok_or_else(|| {
             (
                 StatusCode::NOT_FOUND,
-                format!(
-                    "Credential type '{}' not found in registry",
-                    payload.cred_type
-                ),
+                format!("Credential type '{}' not found in registry", cred_type),
             )
         })?;
 
-    // Check if the credential type provides standard API ping rules
     if let Some(rules) = cred_info.cred_impl.test_request() {
         let client = reqwest::Client::new();
-
-        // Parse HTTP Method
         let method = match rules.method.to_uppercase().as_str() {
             "GET" => reqwest::Method::GET,
             "POST" => reqwest::Method::POST,
@@ -234,10 +247,6 @@ async fn test_credential(
             _ => reqwest::Method::GET,
         };
 
-        // Execute Ping (Authentication injection can be done inside test_credential override)
-        // For generic ping tests, if the API requires the username/password in the URL or Body,
-        // it must be handled by the specialized `test_credential` method on the trait implementation.
-        // This is a basic generic ping.
         let response = client
             .request(method, &rules.url)
             .send()
@@ -258,15 +267,44 @@ async fn test_credential(
         }
     }
 
-    // Call the specific implementation's test_credential method for deep validation
-    let is_valid = cred_info
+    cred_info
         .cred_impl
-        .test_credential(&payload.data)
+        .test_credential(data)
         .await
-        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))
+}
+
+async fn test_credential(
+    _claims: Claims,
+    State(state): State<AppState>,
+    Json(payload): Json<TestCredentialRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let is_valid = validate_credential_data(&state, &payload.cred_type, &payload.data).await?;
 
     Ok(Json(serde_json::json!({
         "valid": is_valid
+    })))
+}
+
+async fn test_saved_credential(
+    _claims: Claims,
+    State(state): State<AppState>,
+    Path(id): Path<uuid::Uuid>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let credential = state
+        .credential_repo
+        .find_by_id(id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Credential not found".to_string()))?;
+
+    let data_map = credential_data_to_map(&credential.data)?;
+    let is_valid = validate_credential_data(&state, &credential.cred_type, &data_map).await?;
+
+    Ok(Json(serde_json::json!({
+        "valid": is_valid,
+        "credentialId": credential.id,
+        "credentialType": credential.cred_type,
     })))
 }
 
@@ -442,5 +480,55 @@ mod tests {
         assert_eq!(reloaded.name, "OpenAI Prod Renamed");
         assert_eq!(reloaded.data["apiKey"], "sk-new");
         assert_eq!(reloaded.data["baseUrl"], "https://api.openai.com/v1");
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn test_saved_credential_test_endpoint_uses_stored_data(pool: PgPool) {
+        std::env::set_var(
+            "BARQFLOW_ENCRYPTION_KEY",
+            "12345678901234567890123456789012",
+        );
+
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/ping"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&mock_server)
+            .await;
+
+        let registry = CredentialRegistry::new();
+        registry
+            .register_credential(CredentialInfo {
+                name: "testAuth".to_string(),
+                cred_impl: Arc::new(TestCredential {
+                    test_url: format!("{}/ping", mock_server.uri()),
+                }),
+            })
+            .unwrap();
+
+        let repo = Arc::new(CredentialRepository::new(pool.clone()));
+        let state = AppState {
+            credential_repo: Arc::clone(&repo),
+            credential_registry: Arc::new(registry),
+        };
+        let app = credential_routes(state);
+
+        let created = repo
+            .create("Saved Credential", "testAuth", json!({"token":"abc"}))
+            .await
+            .unwrap();
+
+        let token =
+            crate::auth::generate_jwt("00000000-0000-0000-0000-000000000000", "admin").unwrap();
+
+        let request = Request::builder()
+            .uri(format!("/credentials/{}/test", created.id))
+            .method("POST")
+            .header("Authorization", format!("Bearer {}", token))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
     }
 }
