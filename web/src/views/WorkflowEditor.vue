@@ -278,6 +278,13 @@ function isMissingRequiredValue(prop: any, value: any): boolean {
   if ((type === 'collection' || type === 'fixedCollection') && Array.isArray(value)) {
     return value.length === 0
   }
+  if (
+    (type === 'collection' || type === 'fixedCollection') &&
+    typeof value === 'object' &&
+    !Array.isArray(value)
+  ) {
+    return Object.keys(value).length === 0
+  }
 
   return false
 }
