@@ -2,7 +2,6 @@ use crate::auth::Claims;
 use axum::http::StatusCode;
 use axum::{
     extract::{Path, Query, State},
-    response::IntoResponse,
     routing::{get, post},
     Json,
     Router,
@@ -25,7 +24,7 @@ pub struct AppState {
 pub fn execution_routes(state: AppState) -> Router {
     Router::new()
         .route("/executions", get(list_executions))
-        .route("/executions/{id}", get(get_execution))
+        .route("/executions/{id}", get(get_execution).delete(delete_execution))
         .route("/executions/workflow/{workflow_id}", post(execute_workflow))
         .with_state(state)
 }
@@ -85,6 +84,24 @@ async fn get_execution(
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Execution not found".into()))?;
 
     Ok(Json(exec))
+}
+
+async fn delete_execution(
+    _claims: Claims,
+    State(state): State<AppState>,
+    Path(id): Path<uuid::Uuid>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let deleted = state
+        .execution_repo
+        .delete(id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    if deleted {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err((StatusCode::NOT_FOUND, "Execution not found".into()))
+    }
 }
 
 async fn execute_workflow(
