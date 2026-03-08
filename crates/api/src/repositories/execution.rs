@@ -122,6 +122,20 @@ impl ExecutionRepository {
 
         Ok(result.rows_affected())
     }
+
+    pub async fn delete(&self, id: Uuid) -> Result<bool> {
+        let result = sqlx::query(
+            r#"
+            DELETE FROM executions
+            WHERE id = $1
+            "#,
+        )
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
 }
 
 #[cfg(test)]
