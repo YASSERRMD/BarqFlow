@@ -7,6 +7,7 @@ use axum::{
 use crate::repositories::credential::CredentialRepository;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use uuid::Uuid;
 
 /// State for OAuth2 controller
 #[derive(Clone)]
@@ -55,6 +56,62 @@ pub fn oauth2_routes(state: OAuth2State) -> Router {
         .with_state(state)
 }
 
+fn parse_callback_state(state: &str) -> Result<(Uuid, Option<String>), (StatusCode, String)> {
+    let mut parts = state.splitn(2, ':');
+    let credential_part = parts.next().unwrap_or_default();
+    let csrf_part = parts
+        .next()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToOwned::to_owned);
+
+    let credential_id = Uuid::parse_str(credential_part)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid credential ID in state".into()))?;
+    Ok((credential_id, csrf_part))
+}
+
+fn validate_state_nonce(
+    credential_data: &serde_json::Value,
+    provided_nonce: Option<&str>,
+) -> Result<(), (StatusCode, String)> {
+    let expected_nonce = credential_data
+        .get("oauthState")
+        .and_then(|v| v.as_str())
+        .filter(|v| !v.trim().is_empty())
+        .or_else(|| {
+            credential_data
+                .get("oauthCsrfState")
+                .and_then(|v| v.as_str())
+                .filter(|v| !v.trim().is_empty())
+        });
+
+    let Some(expected) = expected_nonce else {
+        return Ok(()); // Backward compatibility for legacy credentials.
+    };
+
+    let Some(provided) = provided_nonce else {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Missing OAuth2 state token".to_string(),
+        ));
+    };
+
+    if provided != expected {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Invalid OAuth2 state token".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
+fn read_credential_string(data: &serde_json::Value, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .find_map(|k| data.get(*k).and_then(|v| v.as_str()))
+        .map(|v| v.to_string())
+}
+
 /// Handles the OAuth2 redirect callback from an external provider.
 ///
 /// Flow:
@@ -65,9 +122,8 @@ async fn oauth2_callback(
     Query(params): Query<OAuth2CallbackQuery>,
     State(state): State<OAuth2State>,
 ) -> Result<Json<OAuth2CallbackResponse>, (StatusCode, String)> {
-    // Parse the credential ID from the OAuth2 `state` parameter
-    let credential_id = uuid::Uuid::parse_str(&params.state)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid credential ID in state".into()))?;
+    // Parse the credential ID and optional CSRF token from OAuth2 `state`.
+    let (credential_id, csrf_token) = parse_callback_state(&params.state)?;
 
     // Retrieve the existing credential (needed for current data e.g. client_id/secret if not in query)
     let existing = state
@@ -76,28 +132,27 @@ async fn oauth2_callback(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Credential not found".into()))?;
+    validate_state_nonce(&existing.data, csrf_token.as_deref())?;
 
     // Build the token exchange request body
     let token_url = params
         .token_url
         .clone()
+        .or_else(|| read_credential_string(&existing.data, &["accessTokenUrl", "tokenUrl"]))
         .ok_or_else(|| (StatusCode::BAD_REQUEST, "token_url is required".into()))?;
 
     let redirect_uri = params
         .redirect_uri
         .clone()
-        .unwrap_or_else(|| "".to_string());
-
-    let client_id = params
-        .client_id
-        .clone()
-        .or_else(|| existing.data.get("clientId").and_then(|v| v.as_str()).map(String::from))
+        .or_else(|| read_credential_string(&existing.data, &["redirectUri"]))
         .unwrap_or_default();
 
-    let client_secret = params
-        .client_secret
-        .clone()
-        .or_else(|| existing.data.get("clientSecret").and_then(|v| v.as_str()).map(String::from))
+    let client_id = read_credential_string(&existing.data, &["clientId"])
+        .or_else(|| params.client_id.clone())
+        .unwrap_or_default();
+
+    let client_secret = read_credential_string(&existing.data, &["clientSecret"])
+        .or_else(|| params.client_secret.clone())
         .unwrap_or_default();
 
     // Exchange code for tokens via POST to the provider token endpoint
@@ -139,6 +194,9 @@ async fn oauth2_callback(
             "expiresIn": token_body.expires_in,
             "scope": token_body.scope,
         }));
+        // One-time nonce should not persist after successful callback.
+        obj.remove("oauthState");
+        obj.remove("oauthCsrfState");
     }
 
     // Persist the updated credential (CredentialRepository will automatically re-encrypt)
@@ -165,6 +223,28 @@ mod tests {
     use wiremock::matchers::{body_string_contains, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    #[test]
+    fn parse_callback_state_supports_uuid_and_nonce() {
+        let id = Uuid::new_v4();
+        let state = format!("{}:csrf-token-123", id);
+        let (parsed_id, nonce) = parse_callback_state(&state).unwrap();
+        assert_eq!(parsed_id, id);
+        assert_eq!(nonce.as_deref(), Some("csrf-token-123"));
+    }
+
+    #[test]
+    fn validate_state_nonce_accepts_matching_nonce() {
+        let data = json!({ "oauthState": "csrf-abc" });
+        assert!(validate_state_nonce(&data, Some("csrf-abc")).is_ok());
+    }
+
+    #[test]
+    fn validate_state_nonce_rejects_missing_or_mismatched_nonce() {
+        let data = json!({ "oauthState": "csrf-abc" });
+        assert!(validate_state_nonce(&data, None).is_err());
+        assert!(validate_state_nonce(&data, Some("wrong")).is_err());
+    }
+
     #[sqlx::test(migrations = "./migrations")]
     async fn test_oauth2_token_exchange(pool: PgPool) {
         std::env::set_var("BARQFLOW_ENCRYPTION_KEY", "12345678901234567890123456789012");
@@ -189,7 +269,11 @@ mod tests {
             .create(
                 "Test OAuth2 Credential",
                 "myOAuth2Api",
-                json!({ "clientId": "test-client-id", "clientSecret": "test-client-secret" }),
+                json!({
+                    "clientId": "test-client-id",
+                    "clientSecret": "test-client-secret",
+                    "oauthState": "csrf-123"
+                }),
             )
             .await
             .unwrap();
@@ -201,8 +285,9 @@ mod tests {
 
         let token_url = format!("{}/oauth/token", mock_server.uri());
         let uri = format!(
-            "/oauth2-credential/callback?code=auth_code_123&state={}&token_url={}&client_id=test-client-id&client_secret=test-client-secret",
-            cred.id, urlencoding::encode(&token_url)
+            "/oauth2-credential/callback?code=auth_code_123&state={}%3Acsrf-123&token_url={}&client_id=test-client-id&client_secret=test-client-secret",
+            cred.id,
+            urlencoding::encode(&token_url)
         );
 
         let request = Request::builder()
