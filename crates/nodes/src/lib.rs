@@ -205,12 +205,63 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
         node_impl: Arc::new(trigger::CronTriggerNode::new("0 * * * *")),
     });
 
+    let mut execute_workflow_props = empty_props.clone();
+    execute_workflow_props.properties = vec![
+        barqflow_core::properties::INodeProperty {
+            name: "workflowId".into(),
+            display_name: "Workflow ID".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("UUID of the child workflow to execute.".into()),
+            hint: Some("Use a workflow UUID from the workflows list.".into()),
+            required: true,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "mode".into(),
+            display_name: "Mode".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("wait")),
+            description: Some("Execution mode for sub-workflow invocation.".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Wait for Completion".into(),
+                    value: serde_json::json!("wait"),
+                    description: Some("Run child workflow and return its outputs.".into()),
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Run".into(),
+                    value: serde_json::json!("run"),
+                    description: Some("Trigger child execution inline.".into()),
+                },
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "inputData".into(),
+            display_name: "Input Data".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Text,
+            default: None,
+            description: Some(
+                "Optional JSON payload for the child workflow. If empty, incoming items are forwarded."
+                    .into(),
+            ),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+    ];
+
     let _ = registry.register_node(NodeInfo {
         name: "barqflow-nodes.executeWorkflow".into(),
         display_name: "Execute Workflow".into(),
         version: 1.0,
         description: "Execute another workflow".into(),
-        properties: empty_props.clone(),
+        properties: execute_workflow_props,
         is_trigger: false,
         max_inputs: 1,
         node_impl: Arc::new(subworkflow::ExecuteWorkflowNode),

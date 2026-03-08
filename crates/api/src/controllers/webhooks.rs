@@ -14,6 +14,7 @@ use barqflow_exec::runner::{ExecutionConfig, WorkflowRunContext, WorkflowRunner}
 use barqflow_registry::registry::NodeRegistry;
 use crate::repositories::credential::CredentialRepository;
 use crate::repositories::workflow::WorkflowRepository;
+use crate::subworkflow_executor::RepositorySubWorkflowExecutor;
 use serde_json::json;
 use std::{
     collections::HashMap,
@@ -131,6 +132,11 @@ async fn handle_webhook(
         Arc::clone(&state.credential_repo),
         &nodes,
     ));
+    let subworkflow_executor = Arc::new(RepositorySubWorkflowExecutor::new(
+        Arc::clone(&state.workflow_repo),
+        Arc::clone(&state.credential_repo),
+        Arc::clone(&state.node_registry),
+    ));
 
     let workflow_def = WorkflowDef {
         id: WorkflowId(wf_entity.id),
@@ -141,7 +147,8 @@ async fn handle_webhook(
         settings,
     };
     let runner = WorkflowRunner::new(state.node_registry.clone(), ExecutionConfig::default())
-        .with_credential_provider(credential_provider);
+        .with_credential_provider(credential_provider)
+        .with_subworkflow_executor(subworkflow_executor);
     let run_id = RunId::new();
 
     // Inject the trigger output as static data for the webhook node
@@ -151,6 +158,7 @@ async fn handle_webhook(
         static_data: Some(trigger_output),
         manual: false,
         execution_id: None,
+        parent_execution_id: None,
         cancellation_token: None,
     };
 

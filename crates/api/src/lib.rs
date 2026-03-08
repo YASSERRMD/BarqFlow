@@ -6,5 +6,6 @@ pub mod crypto;
 pub mod repositories;
 pub mod credentials_provider;
 pub mod active_workflows;
+pub mod subworkflow_executor;
 
 pub use routes::{create_router, AppState};
