@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { X, Play, Trash2, Info, ExternalLink, Settings2 } from 'lucide-vue-next'
 import { useNodeStore } from '../stores/nodes'
 
@@ -19,7 +19,10 @@ const props = defineProps<{
 const emit = defineEmits<{
   (event: 'close'): void
   (event: 'test-node', node: any): void
+  (event: 'delete-node', nodeId: string): void
 }>()
+
+const localNotice = ref<string | null>(null)
 
 const nodeSchema = computed(() => {
   if (!props.node) return null
@@ -30,6 +33,11 @@ const nodeSchema = computed(() => {
   if (matchedType) return matchedType.schema
 
   return props.node.data.schema || null
+})
+
+const documentationUrl = computed(() => {
+  const schema = nodeSchema.value as any
+  return schema?.documentation_url || schema?.documentationUrl || null
 })
 
 function getCategoryColor(type: string) {
@@ -52,6 +60,60 @@ const panelTestState = computed(() => {
 })
 
 const isTesting = computed(() => panelTestState.value?.status === 'running')
+
+function mockValueForProperty(prop: any) {
+  const name = String(prop?.name || '').toLowerCase()
+
+  if (prop?.type === 'options') {
+    return prop?.options?.[0]?.value ?? null
+  }
+
+  if (prop?.type === 'boolean') {
+    return true
+  }
+
+  if (prop?.type === 'string' || prop?.type === 'text') {
+    if (name.includes('url')) return 'http://localhost:11434'
+    if (name.includes('model')) return 'llama3.2'
+    if (name.includes('prompt')) return 'Write one sentence about workflow automation.'
+    if (name.includes('api') && name.includes('key')) return 'test-key'
+    return 'sample-value'
+  }
+
+  return null
+}
+
+function applyMockData() {
+  if (!props.node || !nodeSchema.value) return
+
+  const schema: any = nodeSchema.value
+  const target = props.node.data.properties || {}
+  let updated = 0
+
+  for (const prop of schema.properties || []) {
+    const current = target[prop.name]
+    if (current !== undefined && current !== null && String(current).length > 0) {
+      continue
+    }
+
+    const next = mockValueForProperty(prop)
+    if (next !== null) {
+      target[prop.name] = next
+      updated += 1
+    }
+  }
+
+  props.node.data.properties = { ...target }
+  localNotice.value =
+    updated > 0
+      ? `Injected mock values for ${updated} parameter(s).`
+      : 'No empty parameters found for mock injection.'
+}
+
+function onDeleteNode() {
+  if (!props.node?.id) return
+  emit('delete-node', String(props.node.id))
+}
 </script>
 
 <template>
@@ -100,9 +162,6 @@ const isTesting = computed(() => panelTestState.value?.status === 'running')
                     :placeholder="prop.placeholder || ''"
                     class="w-full px-3 py-2 bg-white border border-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500 rounded-md text-sm text-slate-900 shadow-sm"
                   />
-                  <button v-if="prop.type === 'string'" class="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-medium text-brand-600 bg-brand-50 px-1.5 rounded hover:bg-brand-100">
-                    Expression
-                  </button>
                 </div>
 
                 <div v-else-if="prop.type === 'options'">
@@ -138,18 +197,11 @@ const isTesting = computed(() => panelTestState.value?.status === 'running')
 
           <div v-else-if="(node.data.kind || node.data.type) === 'action'" class="space-y-4">
             <p class="text-xs text-amber-600 bg-amber-50 p-2 rounded border border-amber-200">No dynamic schema available from backend. Using fallback rendering.</p>
-            <div>
-              <label class="block text-sm font-medium text-slate-700 mb-1.5">Request Method</label>
-              <select class="w-full px-3 py-2 bg-white border border-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500 rounded-md text-sm text-slate-900 shadow-sm">
-                <option>GET</option>
-                <option>POST</option>
-              </select>
-            </div>
           </div>
         </div>
 
-        <div>
-          <a href="#" class="inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 hover:text-brand-700">
+        <div v-if="documentationUrl">
+          <a :href="documentationUrl" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 hover:text-brand-700">
             <ExternalLink class="w-4 h-4" /> View Documentation
           </a>
         </div>
@@ -167,12 +219,23 @@ const isTesting = computed(() => panelTestState.value?.status === 'running')
         {{ panelTestState.message }}
       </div>
 
+      <div v-if="localNotice" class="mx-6 mb-3 px-3 py-2 rounded-lg text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200">
+        {{ localNotice }}
+      </div>
+
       <div class="px-6 py-4 border-t border-slate-200 bg-white flex items-center justify-between gap-3">
-        <button class="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors border border-transparent hover:border-red-100" title="Delete Node">
+        <button
+          @click="onDeleteNode"
+          class="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors border border-transparent hover:border-red-100"
+          title="Delete Node"
+        >
           <Trash2 class="w-5 h-5" />
         </button>
         <div class="flex gap-2">
-          <button class="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 shadow-sm">
+          <button
+            @click="applyMockData"
+            class="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 shadow-sm"
+          >
             Mock Data
           </button>
           <button
