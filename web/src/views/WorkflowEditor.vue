@@ -4,17 +4,17 @@ import { VueFlow, useVueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
-import { Plus, Play, Save, Settings2, Loader2 } from 'lucide-vue-next'
+import { Plus, Play, Save, Loader2 } from 'lucide-vue-next'
 
 import CustomNode from '../components/CustomNode.vue'
 import NodeCreator from '../components/NodeCreator.vue'
 import NodePanel from '../components/NodePanel.vue'
 import { useWorkflowStore } from '../stores/workflows'
 import { useNodeStore } from '../stores/nodes'
-import { useRoute } from 'vue-router'
-import { v4 as uuidv4 } from 'uuid'
+import { useRoute, useRouter } from 'vue-router'
 
 const route = useRoute()
+const router = useRouter()
 const workflowStore = useWorkflowStore()
 const nodeStore = useNodeStore()
 const { onConnect, addEdges, toObject, setNodes, setEdges, screenToFlowCoordinate } = useVueFlow()
@@ -23,6 +23,8 @@ const nodes = ref<any[]>([])
 const edges = ref<any[]>([])
 const selectedNode = ref<any>(null)
 const showNodeCreator = ref(false)
+const executionNotice = ref<{ type: 'success' | 'error'; message: string } | null>(null)
+const nodeTestState = ref<{ nodeId: string; status: 'running' | 'success' | 'error'; message: string } | null>(null)
 
 function buildDefaultProperties(schema: any): Record<string, any> {
   const defaults: Record<string, any> = {}
@@ -45,6 +47,10 @@ function makeUniqueNodeLabel(baseName: string): string {
   let i = 2
   while (existing.has(`${baseName} ${i}`)) i += 1
   return `${baseName} ${i}`
+}
+
+function createNodeId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `node-${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
 function toCanvasNode(inode: any): any {
@@ -118,9 +124,7 @@ function buildWorkflowConnections(flowNodes: any[], flowEdges: any[]) {
 }
 
 function buildCanvasEdges(loadedNodes: any[], rawConnections: any): any[] {
-  const byName = new Map(
-    loadedNodes.map((n: any) => [n?.data?.label, n]),
-  )
+  const byName = new Map(loadedNodes.map((n: any) => [n?.data?.label, n]))
 
   const loadedEdges: any[] = []
   Object.keys(rawConnections || {}).forEach((sourceName) => {
@@ -147,7 +151,184 @@ function buildCanvasEdges(loadedNodes: any[], rawConnections: any): any[] {
   return loadedEdges
 }
 
-// Load Nodes and Workflow on Mount
+function onNodeClick({ node }: any) {
+  selectedNode.value = node
+}
+
+function getCurrentWorkflowName() {
+  return workflowStore.activeWorkflow?.name || 'My New Workflow'
+}
+
+function getCurrentWorkflowId(): string | null {
+  if (route.params.id && route.params.id !== 'new') {
+    return route.params.id as string
+  }
+  return workflowStore.activeWorkflow?.id || null
+}
+
+function applyExecutionResult(result: any) {
+  nodes.value.forEach((n) => {
+    const nodeName = n.data.label
+    const nodeResult = result?.data?.[nodeName]
+    if (nodeResult) {
+      n.data.status = nodeResult.success ? 'success' : 'error'
+    } else {
+      n.data.status = result?.status === 'success' ? 'success' : 'error'
+    }
+  })
+}
+
+function extractNodeError(result: any, nodeLabel?: string): string {
+  if (nodeLabel && result?.data?.[nodeLabel]?.error) {
+    return String(result.data[nodeLabel].error)
+  }
+
+  if (result?.data?.error) {
+    return String(result.data.error)
+  }
+
+  const firstFailure = Object.values(result?.data || {}).find(
+    (entry: any) => entry && entry.success === false,
+  ) as any
+
+  if (firstFailure?.error) {
+    return String(firstFailure.error)
+  }
+
+  return 'Execution failed'
+}
+
+async function handleSave() {
+  const flow = toObject()
+  const payloadNodes = flow.nodes.map((n: any) => toWorkflowNode(n))
+  const payloadConnections = buildWorkflowConnections(flow.nodes, flow.edges)
+
+  const payload = {
+    id: route.params.id !== 'new' ? route.params.id : undefined,
+    name: getCurrentWorkflowName(),
+    nodes: payloadNodes,
+    connections: payloadConnections,
+    settings: workflowStore.activeWorkflow?.settings || {},
+  }
+
+  const saved = await workflowStore.saveWorkflow(payload)
+
+  if (route.params.id === 'new' && saved?.id) {
+    await router.replace(`/workflow/${saved.id}`)
+  }
+
+  return saved
+}
+
+async function runWorkflow(workflowId: string) {
+  nodes.value.forEach((n) => {
+    n.data.status = 'running'
+  })
+
+  const result = await workflowStore.executeWorkflow(workflowId)
+  applyExecutionResult(result)
+  return result
+}
+
+async function handleExecute() {
+  if (workflowStore.loading) return
+
+  executionNotice.value = null
+  nodeTestState.value = null
+
+  let workflowId = getCurrentWorkflowId()
+  if (!workflowId) {
+    const saved = await handleSave()
+    workflowId = saved?.id || getCurrentWorkflowId()
+  }
+
+  if (!workflowId) {
+    executionNotice.value = {
+      type: 'error',
+      message: 'Save workflow first before execution.',
+    }
+    return
+  }
+
+  try {
+    const result = await runWorkflow(workflowId)
+    if (result?.status === 'success') {
+      executionNotice.value = {
+        type: 'success',
+        message: 'Workflow executed successfully.',
+      }
+    } else {
+      executionNotice.value = {
+        type: 'error',
+        message: extractNodeError(result),
+      }
+    }
+  } catch (err: any) {
+    nodes.value.forEach((n) => {
+      n.data.status = 'error'
+    })
+
+    executionNotice.value = {
+      type: 'error',
+      message: err?.response?.data || err?.message || 'Execution failed.',
+    }
+  }
+}
+
+async function handleTestNode(node: any) {
+  if (!node) return
+
+  executionNotice.value = null
+  nodeTestState.value = {
+    nodeId: node.id,
+    status: 'running',
+    message: `Testing '${node.data.label}'...`,
+  }
+
+  let workflowId = getCurrentWorkflowId()
+  if (!workflowId) {
+    const saved = await handleSave()
+    workflowId = saved?.id || getCurrentWorkflowId()
+  }
+
+  if (!workflowId) {
+    nodeTestState.value = {
+      nodeId: node.id,
+      status: 'error',
+      message: 'Save workflow first before testing this step.',
+    }
+    return
+  }
+
+  try {
+    const result = await runWorkflow(workflowId)
+    const nodeResult = result?.data?.[node.data.label]
+
+    if (nodeResult?.success) {
+      const outputsCount = Array.isArray(nodeResult.outputs)
+        ? nodeResult.outputs.length
+        : 0
+      nodeTestState.value = {
+        nodeId: node.id,
+        status: 'success',
+        message: `Test passed. Outputs: ${outputsCount}`,
+      }
+    } else {
+      nodeTestState.value = {
+        nodeId: node.id,
+        status: 'error',
+        message: extractNodeError(result, node.data.label),
+      }
+    }
+  } catch (err: any) {
+    nodeTestState.value = {
+      nodeId: node.id,
+      status: 'error',
+      message: err?.response?.data || err?.message || 'Node test failed.',
+    }
+  }
+}
+
 onMounted(async () => {
   await nodeStore.fetchNodeTypes()
   if (!(route.params.id && route.params.id !== 'new')) return
@@ -166,55 +347,14 @@ onMounted(async () => {
 })
 
 onConnect((params) => {
-  addEdges([{
-    ...params,
-    animated: true,
-    style: { stroke: '#0ea5e9', strokeWidth: 2 }
-  }])
+  addEdges([
+    {
+      ...params,
+      animated: true,
+      style: { stroke: '#0ea5e9', strokeWidth: 2 },
+    },
+  ])
 })
-
-function onNodeClick({ node }: any) {
-  selectedNode.value = node
-}
-
-async function handleExecute() {
-  if (workflowStore.loading) return
-  if (route.params.id === 'new') return
-  
-  nodes.value.forEach(n => n.data.status = 'running')
-  
-  try {
-    const wfId = route.params.id !== 'new' ? route.params.id as string : '00000000-0000-0000-0000-000000000000' 
-    const result = await workflowStore.executeWorkflow(wfId)
-    
-    nodes.value.forEach(n => {
-      const nodeName = n.data.label;
-      if (result.data && result.data[nodeName]) {
-         n.data.status = result.data[nodeName].success ? 'success' : 'error'
-      } else {
-         n.data.status = 'success'
-      }
-    })
-  } catch (err) {
-    nodes.value.forEach(n => n.data.status = 'error')
-  }
-}
-
-async function handleSave() {
-  const flow = toObject()
-  const payloadNodes = flow.nodes.map((n: any) => toWorkflowNode(n))
-  const payloadConnections = buildWorkflowConnections(flow.nodes, flow.edges)
-
-  const payloadStr = {
-      id: route.params.id !== 'new' ? route.params.id : undefined,
-      name: workflowStore.activeWorkflow?.name || 'My New Workflow',
-      nodes: payloadNodes,
-      connections: payloadConnections,
-      settings: workflowStore.activeWorkflow?.settings || {}
-  }
-  
-  await workflowStore.saveWorkflow(payloadStr)
-}
 
 function onDragStart(event: DragEvent, nodeTypeObj: any) {
   if (event.dataTransfer) {
@@ -228,19 +368,17 @@ function onDrop(event: DragEvent) {
   if (!nodeDataStr) return
 
   const nodeSchema = JSON.parse(nodeDataStr)
-  // Calculate drag position taking into account the canvas bounding box and scale
-  const position = screenToFlowCoordinate({ x: event.clientX, y: event.clientY }) 
-  
+  const position = screenToFlowCoordinate({ x: event.clientX, y: event.clientY })
+
   const typeName = nodeSchema.schema?.name || nodeSchema.type || ''
   const typeEntry = findTypeEntry(typeName)
   const schema = nodeSchema.schema || typeEntry?.schema || null
 
-  // Set default properties based on schema if not exist
   const propertiesObj = buildDefaultProperties(schema)
   const label = makeUniqueNodeLabel(nodeSchema.name || schema?.display_name || typeName)
 
   const newNode = {
-    id: uuidv4(),
+    id: createNodeId(),
     type: 'custom',
     position,
     data: {
@@ -251,8 +389,8 @@ function onDrop(event: DragEvent) {
       description: nodeSchema.description || schema?.description || '',
       status: null,
       schema,
-      properties: propertiesObj
-    }
+      properties: propertiesObj,
+    },
   }
 
   nodes.value.push(newNode)
@@ -261,41 +399,48 @@ function onDrop(event: DragEvent) {
 
 <template>
   <div class="h-full w-full flex overflow-hidden bg-transparent">
-    <!-- Main Canvas Area -->
     <div class="flex-1 relative overflow-hidden">
-      <!-- Toolbar -->
       <div class="absolute top-4 left-4 right-4 flex justify-between items-center z-10 pointer-events-none">
         <div class="bg-white rounded-lg shadow-sm border border-slate-200 px-4 py-2 flex items-center gap-3 pointer-events-auto">
           <div>
-            <h1 class="font-bold text-slate-800 text-base leading-tight">My First Workflow</h1>
-            <p class="text-xs text-slate-500">Last saved 2m ago</p>
+            <h1 class="font-bold text-slate-800 text-base leading-tight">{{ getCurrentWorkflowName() }}</h1>
+            <p class="text-xs text-slate-500">Builder mode</p>
           </div>
-          <div class="h-6 w-px bg-slate-200 mx-1"></div>
-          <span class="px-2 py-1 bg-green-100 border border-green-200 text-green-700 text-[10px] font-bold uppercase tracking-wider rounded">Active</span>
         </div>
-        
+
         <div class="flex gap-2 pointer-events-auto">
-          <button 
+          <button
             @click="handleSave"
             class="bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 px-4 py-2 rounded-lg flex items-center gap-2 transition-colors font-semibold text-sm shadow-sm"
           >
             <Save class="w-4 h-4" /> Save
           </button>
-          <button 
+          <button
             @click="handleExecute"
             :disabled="workflowStore.loading"
             class="bg-brand-500 hover:bg-brand-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors font-semibold text-sm disabled:opacity-70 shadow-sm"
           >
             <Loader2 v-if="workflowStore.loading" class="w-4 h-4 animate-spin" />
-            <Play v-else class="w-4 h-4 fill-current" /> 
+            <Play v-else class="w-4 h-4 fill-current" />
             {{ workflowStore.loading ? 'Executing...' : 'Execute Workflow' }}
           </button>
         </div>
       </div>
 
-      <!-- Add Node FAB -->
+      <div
+        v-if="executionNotice"
+        :class="[
+          'absolute top-20 left-4 right-4 z-20 p-3 rounded-lg border text-sm font-medium pointer-events-auto',
+          executionNotice.type === 'success'
+            ? 'bg-green-50 border-green-200 text-green-700'
+            : 'bg-red-50 border-red-200 text-red-700',
+        ]"
+      >
+        {{ executionNotice.message }}
+      </div>
+
       <div class="absolute bottom-6 right-6 z-10 pointer-events-auto">
-        <button 
+        <button
           @click="showNodeCreator = true"
           class="w-12 h-12 bg-brand-500 shadow-lg text-white rounded-full flex items-center justify-center hover:bg-brand-600 hover:scale-105 transition-all"
         >
@@ -303,7 +448,6 @@ function onDrop(event: DragEvent) {
         </button>
       </div>
 
-      <!-- Vue Flow Canvas -->
       <div class="h-full w-full bg-[#f8f9fa]" @drop="onDrop" @dragover.prevent>
         <VueFlow
           v-model:nodes="nodes"
@@ -322,26 +466,23 @@ function onDrop(event: DragEvent) {
       </div>
     </div>
 
-    <!-- Node Creator Overlay -->
-    <NodeCreator 
-      :show="showNodeCreator" 
-      @close="showNodeCreator = false" 
-      @dragstart="onDragStart"
-    />
+    <NodeCreator :show="showNodeCreator" @close="showNodeCreator = false" @dragstart="onDragStart" />
 
-    <!-- Properties Panel Overlay -->
-    <NodePanel :node="selectedNode" @close="selectedNode = null" />
+    <NodePanel
+      :node="selectedNode"
+      :test-state="nodeTestState"
+      @close="selectedNode = null"
+      @test-node="handleTestNode"
+    />
   </div>
 </template>
 
 <style>
-/* n8n grid background */
 .n8n-canvas {
   background-image: radial-gradient(#e5e7eb 1px, transparent 1px);
   background-size: 20px 20px;
 }
 
-/* Vue Flow overrides to match theme */
 .vue-flow__edge-path {
   stroke-dasharray: 5;
   animation: dash 1s linear infinite;
