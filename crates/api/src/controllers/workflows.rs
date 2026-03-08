@@ -4,7 +4,6 @@ use axum::{
     extract::{Json, Path, State},
     routing::{get, put},
     Router,
-    response::IntoResponse,
 };
 use barqflow_db::models::WorkflowEntity;
 use crate::repositories::workflow::WorkflowRepository;
@@ -19,7 +18,10 @@ pub struct AppState {
 pub fn workflow_routes(state: AppState) -> Router {
     Router::new()
         .route("/workflows", get(get_workflows).post(create_workflow))
-        .route("/workflows/{id}", get(get_workflow).put(update_workflow))
+        .route(
+            "/workflows/{id}",
+            get(get_workflow).put(update_workflow).delete(delete_workflow),
+        )
         .route("/workflows/{id}/activate", put(toggle_workflow_active))
         .with_state(state)
 }
@@ -120,4 +122,22 @@ async fn toggle_workflow_active(
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Workflow not found".into()))?;
 
     Ok(Json(updated_wf))
+}
+
+async fn delete_workflow(
+    _claims: Claims,
+    State(state): State<AppState>,
+    Path(id): Path<uuid::Uuid>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let deleted = state
+        .workflow_repo
+        .delete(id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    if deleted {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err((StatusCode::NOT_FOUND, "Workflow not found".into()))
+    }
 }
