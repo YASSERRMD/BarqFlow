@@ -160,6 +160,7 @@ async fn handle_webhook(
         execution_id: None,
         parent_execution_id: None,
         cancellation_token: None,
+        stop_after_node_id: None,
     };
 
     // Fire and forget — webhook responses should be fast

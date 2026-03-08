@@ -241,6 +241,7 @@ impl ActiveWorkflowManager {
                         execution_id: None,
                         parent_execution_id: None,
                         cancellation_token: None,
+                        stop_after_node_id: None,
                     };
 
                     if let Err(err) = runner.run_workflow(ctx).await {

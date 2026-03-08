@@ -47,8 +47,10 @@ pub struct ExecutionListQuery {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateExecutionRequest {
     pub manual: Option<bool>,
+    pub stop_at_node_id: Option<String>,
 }
 
 async fn list_executions(
@@ -120,7 +122,13 @@ async fn execute_workflow(
     Path(workflow_id): Path<uuid::Uuid>,
     Json(payload): Json<CreateExecutionRequest>,
 ) -> Result<Json<ExecutionEntity>, (StatusCode, String)> {
-    let execution = run_workflow_execution(&state, workflow_id, payload.manual.unwrap_or(true)).await?;
+    let execution = run_workflow_execution(
+        &state,
+        workflow_id,
+        payload.manual.unwrap_or(true),
+        payload.stop_at_node_id,
+    )
+    .await?;
     Ok(Json(execution))
 }
 
@@ -136,7 +144,7 @@ async fn retry_execution(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Execution not found".into()))?;
 
-    let retried = run_workflow_execution(&state, execution.workflow_id, true).await?;
+    let retried = run_workflow_execution(&state, execution.workflow_id, true, None).await?;
     Ok(Json(retried))
 }
 
@@ -443,6 +451,7 @@ async fn resume_execution(
         execution_id: Some(execution_id),
         parent_execution_id: None,
         cancellation_token: None,
+        stop_after_node_id: None,
     };
 
     let result = runner
@@ -485,6 +494,7 @@ async fn run_workflow_execution(
     state: &AppState,
     workflow_id: Uuid,
     manual: bool,
+    stop_after_node_id: Option<String>,
 ) -> Result<ExecutionEntity, (StatusCode, String)> {
     use barqflow_exec::runner::{WorkflowRunner, ExecutionConfig, WorkflowRunContext};
     use barqflow_core::types::RunId;
@@ -548,6 +558,7 @@ async fn run_workflow_execution(
         execution_id: Some(new_exec.id),
         parent_execution_id: None,
         cancellation_token: Some(cancellation_token.clone()),
+        stop_after_node_id,
     };
 
     let run_task = tokio::spawn(async move { runner.run_workflow(ctx).await });

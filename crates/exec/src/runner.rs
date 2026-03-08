@@ -11,7 +11,7 @@ use barqflow_core::types::{IDataObject, NodeId, RunId};
 use barqflow_flow::graph::{GraphTraversal, ParsedGraph, WorkflowDef, WorkflowNode};
 use barqflow_registry::registry::NodeRegistry;
 use petgraph::graph::NodeIndex;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use futures::FutureExt;
 use tokio_util::sync::CancellationToken;
@@ -68,6 +68,9 @@ pub struct WorkflowRunContext {
     pub parent_execution_id: Option<uuid::Uuid>,
     /// Optional cancellation token for runtime stop requests.
     pub cancellation_token: Option<CancellationToken>,
+    /// Optional target node id/name for partial execution.
+    /// When set, runner executes only target ancestors + target and stops after target runs.
+    pub stop_after_node_id: Option<String>,
 }
 
 /// The core workflow execution engine.
@@ -179,6 +182,43 @@ impl WorkflowRunner {
             execution_order.len()
         );
 
+        let scoped_execution: Option<(String, HashSet<NodeIndex>)> =
+            if let Some(target) = context.stop_after_node_id.clone() {
+                let target_index = execution_order
+                    .iter()
+                    .copied()
+                    .find(|idx| {
+                        let node = &parsed.graph[*idx];
+                        node.id.to_string() == target || node.name == target
+                    })
+                    .ok_or_else(|| BarqError::WorkflowConfigurationError {
+                        message: format!(
+                            "Target test node '{}' was not found in workflow",
+                            target
+                        ),
+                    })?;
+
+                let mut required_nodes = HashSet::new();
+                let mut stack = vec![target_index];
+                while let Some(current) = stack.pop() {
+                    if !required_nodes.insert(current) {
+                        continue;
+                    }
+                    for parent in GraphTraversal::get_parents(&parsed.graph, current) {
+                        stack.push(parent);
+                    }
+                }
+
+                info!(
+                    "Executing partial workflow for target '{}' with {} scoped nodes",
+                    target,
+                    required_nodes.len()
+                );
+                Some((target, required_nodes))
+            } else {
+                None
+            };
+
         // Group nodes into parallel executable layers
         let mut node_layers: HashMap<NodeIndex, usize> = HashMap::new();
         let mut max_layer = 0;
@@ -203,6 +243,7 @@ impl WorkflowRunner {
         let mut results = HashMap::new();
         let mut data_cache: HashMap<NodeId, NodeExecutionResult> = HashMap::new();
         let workflow_cache = Arc::new(tokio::sync::RwLock::new(HashMap::new()));
+        let mut stop_reached = false;
 
         for mut layer in layers {
             if Self::is_cancelled(&context) {
@@ -217,6 +258,12 @@ impl WorkflowRunner {
             
             for &node_index in &layer {
                 let node = &parsed.graph[node_index];
+
+                if let Some((_, scope)) = &scoped_execution {
+                    if !scope.contains(&node_index) {
+                        continue;
+                    }
+                }
 
                 if let Some(inode) = context.workflow.nodes.iter().find(|n| n.id == node.id) {
                     if inode.disabled {
@@ -359,6 +406,17 @@ impl WorkflowRunner {
                 
                 data_cache.insert(node.id.clone(), result.clone());
                 results.insert(node.name.clone(), result);
+
+                if let Some((target, _)) = &scoped_execution {
+                    if node.id.to_string() == *target || node.name == *target {
+                        stop_reached = true;
+                    }
+                }
+            }
+
+            if stop_reached {
+                info!("Reached target node; stopping partial execution");
+                break;
             }
         }
 
@@ -1019,6 +1077,61 @@ mod tests {
         }
     }
 
+    fn create_targeted_scope_workflow() -> CoreWorkflowDef {
+        let node_a = INode {
+            id: NodeId::new("node_a"),
+            name: "NodeA".to_string(),
+            r#type: "mockPassThrough".to_string(),
+            type_version: 1.0,
+            position: [0.0, 0.0],
+            parameters: INodeParameters::default(),
+            credentials: vec![],
+            disabled: false,
+        };
+        let node_b = INode {
+            id: NodeId::new("node_b"),
+            name: "NodeB".to_string(),
+            r#type: "mockPassThrough".to_string(),
+            type_version: 1.0,
+            position: [100.0, 0.0],
+            parameters: INodeParameters::default(),
+            credentials: vec![],
+            disabled: false,
+        };
+        let node_c = INode {
+            id: NodeId::new("node_c"),
+            name: "NodeC".to_string(),
+            r#type: "mockPassThrough".to_string(),
+            type_version: 1.0,
+            position: [200.0, 0.0],
+            parameters: INodeParameters::default(),
+            credentials: vec![],
+            disabled: false,
+        };
+
+        let mut connections = HashMap::new();
+        connections.insert(
+            "NodeA".to_string(),
+            barqflow_core::schema::INodeConnections(HashMap::from([(
+                NodeConnectionType::Main,
+                vec![vec![IConnection {
+                    node: "NodeB".to_string(),
+                    r#type: NodeConnectionType::Main,
+                    index: 0,
+                }]],
+            )])),
+        );
+
+        CoreWorkflowDef {
+            id: WorkflowId::new(),
+            name: "Targeted Scope Workflow".to_string(),
+            nodes: vec![node_a, node_b, node_c],
+            connections,
+            active: true,
+            settings: IWorkflowSettings::default(),
+        }
+    }
+
     #[tokio::test]
     async fn test_runner_creation() {
         let registry = create_mock_registry();
@@ -1043,6 +1156,7 @@ mod tests {
             execution_id: None,
             parent_execution_id: None,
             cancellation_token: None,
+            stop_after_node_id: None,
         };
 
         let results = runner.run_workflow(context).await.unwrap();
@@ -1053,6 +1167,29 @@ mod tests {
         let result = &results["TestNode"];
         assert!(result.success);
         assert_eq!(result.outputs.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_run_workflow_can_stop_at_target_node() {
+        let registry = create_mock_registry();
+        let runner = WorkflowRunner::new(registry, ExecutionConfig::default());
+        let workflow = create_targeted_scope_workflow();
+
+        let context = WorkflowRunContext {
+            run_id: RunId::new(),
+            workflow,
+            static_data: None,
+            manual: true,
+            execution_id: None,
+            parent_execution_id: None,
+            cancellation_token: None,
+            stop_after_node_id: Some("node_b".to_string()),
+        };
+
+        let results = runner.run_workflow(context).await.unwrap();
+        assert!(results.contains_key("NodeA"));
+        assert!(results.contains_key("NodeB"));
+        assert!(!results.contains_key("NodeC"));
     }
 
     #[tokio::test]
@@ -1073,6 +1210,7 @@ mod tests {
             execution_id: None,
             parent_execution_id: None,
             cancellation_token: None,
+            stop_after_node_id: None,
         };
 
         let results = runner.run_workflow(context).await.unwrap();
@@ -1099,6 +1237,7 @@ mod tests {
             execution_id: None,
             parent_execution_id: None,
             cancellation_token: None,
+            stop_after_node_id: None,
         };
 
         assert!(!context.manual);
@@ -1121,6 +1260,7 @@ mod tests {
             execution_id: Some(uuid::Uuid::new_v4()),
             parent_execution_id: None,
             cancellation_token: Some(token),
+            stop_after_node_id: None,
         };
 
         let err = runner.run_workflow(context).await.unwrap_err();
@@ -1251,6 +1391,7 @@ mod tests {
                 execution_id: None,
                 parent_execution_id: None,
                 cancellation_token: None,
+                stop_after_node_id: None,
             })
             .await
             .unwrap();
@@ -1332,6 +1473,7 @@ mod tests {
                 execution_id: None,
                 parent_execution_id: None,
                 cancellation_token: None,
+                stop_after_node_id: None,
             })
             .await
             .unwrap_err();
