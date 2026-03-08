@@ -10,10 +10,14 @@ export const useWorkflowStore = defineStore('workflows', {
         error: null as string | null,
     }),
     actions: {
-        async fetchWorkflows() {
+        async fetchWorkflows(params: {
+            active?: boolean;
+            search?: string;
+            limit?: number;
+        } = {}) {
             this.loading = true;
             try {
-                const response = await api.get('/workflows');
+                const response = await api.get('/workflows', { params });
                 this.workflows = response.data;
             } catch (err: any) {
                 this.error = err.message;

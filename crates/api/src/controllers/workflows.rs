@@ -1,7 +1,7 @@
 use crate::auth::Claims;
 use axum::http::StatusCode;
 use axum::{
-    extract::{Json, Path, State},
+    extract::{Json, Path, Query, State},
     routing::{get, put},
     Router,
 };
@@ -39,15 +39,42 @@ pub struct ToggleActiveRequest {
     pub active: bool,
 }
 
+#[derive(Deserialize)]
+pub struct WorkflowListQuery {
+    pub active: Option<bool>,
+    pub search: Option<String>,
+    pub limit: Option<usize>,
+}
+
 async fn get_workflows(
     _claims: Claims,
     State(state): State<AppState>,
+    Query(query): Query<WorkflowListQuery>,
 ) -> Result<Json<Vec<WorkflowEntity>>, (StatusCode, String)> {
-    let workflows = state
-        .workflow_repo
-        .find_all()
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let mut workflows = if let Some(active) = query.active {
+        state
+            .workflow_repo
+            .find_all_by_active(active)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    } else {
+        state
+            .workflow_repo
+            .find_all()
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    };
+
+    if let Some(search) = query.search {
+        let needle = search.trim().to_lowercase();
+        if !needle.is_empty() {
+            workflows.retain(|wf| wf.name.to_lowercase().contains(&needle));
+        }
+    }
+
+    if let Some(limit) = query.limit {
+        workflows.truncate(limit);
+    }
 
     Ok(Json(workflows))
 }
