@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Plus, Search, MoreVertical, Calendar, Trash2, Edit2, Loader2, Workflow, Power } from 'lucide-vue-next'
+import { Plus, Search, MoreVertical, Calendar, Trash2, Edit2, Loader2, Workflow, Power, Copy } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { useWorkflowStore } from '../stores/workflows'
 
@@ -61,6 +61,15 @@ async function toggleWorkflowActive(id: string, current: boolean) {
     }
   } catch (err) {
     console.error('Failed to update workflow activation', err)
+  }
+}
+
+async function duplicateWorkflow(id: string) {
+  try {
+    const duplicated = await workflowStore.duplicateWorkflow(id)
+    router.push(`/workflow/${duplicated.id}`)
+  } catch (err) {
+    console.error('Failed to duplicate workflow', err)
   }
 }
 
@@ -169,6 +178,7 @@ async function createWorkflow() {
               </span>
             </div>
             <div class="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-300 translate-x-4 group-hover:translate-x-0">
+               <button @click.stop="duplicateWorkflow(wf.id)" class="w-9 h-9 flex items-center justify-center rounded-xl bg-white border border-slate-100 text-slate-400 hover:text-sky-600 hover:border-sky-200 hover:bg-sky-50 transition-all shadow-sm"><Copy class="w-4 h-4" /></button>
                <button @click.stop="toggleWorkflowActive(wf.id, wf.active)" class="w-9 h-9 flex items-center justify-center rounded-xl bg-white border border-slate-100 text-slate-400 hover:text-amber-600 hover:border-amber-200 hover:bg-amber-50 transition-all shadow-sm"><Power class="w-4 h-4" /></button>
                <button @click.stop="editWorkflow(wf.id)" class="w-9 h-9 flex items-center justify-center rounded-xl bg-white border border-slate-100 text-slate-400 hover:text-brand-600 hover:border-brand-200 hover:bg-brand-50 transition-all shadow-sm"><Edit2 class="w-4 h-4" /></button>
                <button @click.stop="deleteWorkflow(wf.id)" class="w-9 h-9 flex items-center justify-center rounded-xl bg-white border border-slate-100 text-slate-400 hover:text-red-500 hover:border-red-200 hover:bg-red-50 transition-all shadow-sm"><Trash2 class="w-4 h-4" /></button>
