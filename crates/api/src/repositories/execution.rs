@@ -85,7 +85,9 @@ impl ExecutionRepository {
         let now = Utc::now();
         let stopped_at = if status == "success"
             || status == "error"
+            || status == "failed"
             || status == "cancelled"
+            || status == "stopped"
             || status == "crashed"
         {
             Some(now)

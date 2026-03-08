@@ -6,8 +6,17 @@ use crate::repositories::{
 use std::sync::Arc;
 use tokio_cron_scheduler::JobScheduler;
 use std::collections::HashMap;
+use tokio::sync::RwLock;
+use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
 
-pub type ActiveExecutionManager = Arc<std::sync::RwLock<HashMap<String, String>>>;
+#[derive(Clone)]
+pub struct ActiveExecutionControl {
+    pub cancellation_token: CancellationToken,
+    pub abort_handle: tokio::task::AbortHandle,
+}
+
+pub type ActiveExecutionManager = Arc<RwLock<HashMap<Uuid, ActiveExecutionControl>>>;
 use tower_http::services::{ServeDir, ServeFile};
 
 use crate::controllers::{
@@ -47,6 +56,7 @@ pub fn create_router(state: AppState) -> Router {
             workflow_repo: Arc::clone(&state.workflow_repo),
             node_registry: Arc::clone(&state.node_registry),
             credential_repo: Arc::clone(&state.credential_repo),
+            active_executions: Arc::clone(&state.active_executions),
         }))
         .merge(credential_routes(CredState {
             credential_repo: Arc::clone(&state.credential_repo),

@@ -12,6 +12,7 @@ tokio-cron-scheduler.workspace = true
 barqflow-nodes.workspace = true
 axum.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
