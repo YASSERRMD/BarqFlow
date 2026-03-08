@@ -27,6 +27,9 @@ const localNotice = ref<string | null>(null)
 const credentialOptions = ref<Record<string, any[]>>({})
 const credentialsLoading = ref(false)
 const credentialsError = ref<string | null>(null)
+const collectionDrafts = ref<Record<string, string>>({})
+const collectionErrors = ref<Record<string, string>>({})
+const activeCollectionNodeId = ref<string | null>(null)
 
 const FALLBACK_NODE_CREDENTIALS: Record<
   string,
@@ -80,6 +83,142 @@ function ensureNodeCredentialMap() {
   }
 }
 
+function ensureNodePropertyMap() {
+  if (!props.node) return
+  if (!props.node.data.properties || typeof props.node.data.properties !== 'object') {
+    props.node.data.properties = {}
+  }
+}
+
+function propertyType(prop: any): string {
+  const rawType = prop?.type
+  if (typeof rawType === 'string') return rawType
+
+  if (rawType && typeof rawType === 'object') {
+    if (typeof rawType.type === 'string') return rawType.type
+    if (rawType.fixedCollection) return 'fixedCollection'
+  }
+
+  return ''
+}
+
+function valueMatches(left: any, right: any): boolean {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
+function isPropertyVisible(prop: any): boolean {
+  if (!props.node) return true
+  const show = prop?.displayOptions?.show
+  if (!show) return true
+
+  const sourceProperty = String(show?.property || '')
+  if (!sourceProperty) return true
+
+  const actualValue = props.node.data.properties?.[sourceProperty]
+  const expectedValues = Array.isArray(show?.values) ? show.values : []
+  if (expectedValues.length === 0) return true
+
+  return expectedValues.some((expected: any) => valueMatches(actualValue, expected))
+}
+
+function toCollectionDraft(value: any): string {
+  if (value === undefined || value === null || value === '') {
+    return '[]'
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return '[]'
+
+    try {
+      return JSON.stringify(JSON.parse(trimmed), null, 2)
+    } catch {
+      return value
+    }
+  }
+
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return '[]'
+  }
+}
+
+function syncCollectionDrafts(force = false) {
+  if (!props.node || !nodeSchema.value) return
+  ensureNodePropertyMap()
+
+  const nodeId = String(props.node.id || '')
+  if (force || activeCollectionNodeId.value !== nodeId) {
+    activeCollectionNodeId.value = nodeId
+    collectionDrafts.value = {}
+    collectionErrors.value = {}
+  }
+
+  const schemaProperties = Array.isArray((nodeSchema.value as any)?.properties)
+    ? (nodeSchema.value as any).properties
+    : []
+
+  schemaProperties.forEach((prop: any) => {
+    const type = propertyType(prop)
+    if (type !== 'collection' && type !== 'fixedCollection') return
+
+    const propName = String(prop?.name || '')
+    if (!propName) return
+
+    if (force || collectionDrafts.value[propName] === undefined) {
+      const currentValue =
+        props.node?.data?.properties?.[propName] !== undefined
+          ? props.node.data.properties[propName]
+          : prop?.default
+      collectionDrafts.value[propName] = toCollectionDraft(currentValue)
+    }
+  })
+}
+
+function onCollectionInput(propName: string, event: Event) {
+  if (!props.node) return
+  const target = event.target as HTMLTextAreaElement | null
+  const raw = target?.value ?? ''
+  ensureNodePropertyMap()
+
+  collectionDrafts.value[propName] = raw
+  if (!raw.trim()) {
+    props.node.data.properties[propName] = []
+    delete collectionErrors.value[propName]
+    return
+  }
+
+  try {
+    props.node.data.properties[propName] = JSON.parse(raw)
+    delete collectionErrors.value[propName]
+  } catch {
+    collectionErrors.value[propName] = 'Invalid JSON'
+  }
+}
+
+function formatCollectionDraft(propName: string) {
+  if (!props.node) return
+  ensureNodePropertyMap()
+  const raw = String(collectionDrafts.value[propName] || '').trim()
+
+  if (!raw) {
+    collectionDrafts.value[propName] = '[]'
+    props.node.data.properties[propName] = []
+    delete collectionErrors.value[propName]
+    return
+  }
+
+  try {
+    const parsed = JSON.parse(raw)
+    props.node.data.properties[propName] = parsed
+    collectionDrafts.value[propName] = JSON.stringify(parsed, null, 2)
+    delete collectionErrors.value[propName]
+  } catch {
+    collectionErrors.value[propName] = 'Invalid JSON. Expected array or object.'
+  }
+}
+
 async function loadCredentialOptions() {
   if (!props.node) return
   ensureNodeCredentialMap()
@@ -116,6 +255,14 @@ watch(
   { immediate: true },
 )
 
+watch(
+  () => `${String(props.node?.id || '')}:${String((nodeSchema.value as any)?.name || '')}`,
+  () => {
+    syncCollectionDrafts(true)
+  },
+  { immediate: true },
+)
+
 function getCategoryColor(type: string) {
   switch (type) {
     case 'trigger':
@@ -138,22 +285,27 @@ const panelTestState = computed(() => {
 const isTesting = computed(() => panelTestState.value?.status === 'running')
 
 function mockValueForProperty(prop: any) {
+  const type = propertyType(prop)
   const name = String(prop?.name || '').toLowerCase()
 
-  if (prop?.type === 'options') {
+  if (type === 'options') {
     return prop?.options?.[0]?.value ?? null
   }
 
-  if (prop?.type === 'boolean') {
+  if (type === 'boolean') {
     return true
   }
 
-  if (prop?.type === 'string' || prop?.type === 'text') {
+  if (type === 'string' || type === 'text') {
     if (name.includes('url')) return 'http://localhost:11434'
     if (name.includes('model')) return 'llama3.2'
     if (name.includes('prompt')) return 'Write one sentence about workflow automation.'
     if (name.includes('api') && name.includes('key')) return 'test-key'
     return 'sample-value'
+  }
+
+  if (type === 'collection' || type === 'fixedCollection') {
+    return []
   }
 
   return null
@@ -180,6 +332,7 @@ function applyMockData() {
   }
 
   props.node.data.properties = { ...target }
+  syncCollectionDrafts()
   localNotice.value =
     updated > 0
       ? `Injected mock values for ${updated} parameter(s).`
@@ -228,10 +381,10 @@ function onDeleteNode() {
 
           <div v-if="nodeSchema && nodeSchema.properties" class="space-y-4">
             <template v-for="(prop, pIdx) in nodeSchema.properties" :key="pIdx">
-              <div>
+              <div v-if="isPropertyVisible(prop)">
                 <label class="block text-sm font-medium text-slate-700 mb-1.5">{{ prop.displayName }}</label>
 
-                <div v-if="prop.type === 'string' || prop.type === 'text'" class="relative">
+                <div v-if="propertyType(prop) === 'string'" class="relative">
                   <input
                     v-model="node.data.properties[prop.name]"
                     type="text"
@@ -240,7 +393,16 @@ function onDeleteNode() {
                   />
                 </div>
 
-                <div v-else-if="prop.type === 'number'" class="relative">
+                <div v-else-if="propertyType(prop) === 'text'" class="relative">
+                  <textarea
+                    v-model="node.data.properties[prop.name]"
+                    rows="5"
+                    :placeholder="prop.placeholder || ''"
+                    class="w-full px-3 py-2 bg-white border border-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500 rounded-md text-sm text-slate-900 shadow-sm font-mono"
+                  />
+                </div>
+
+                <div v-else-if="propertyType(prop) === 'number'" class="relative">
                   <input
                     v-model.number="node.data.properties[prop.name]"
                     type="number"
@@ -248,18 +410,18 @@ function onDeleteNode() {
                   />
                 </div>
 
-                <div v-else-if="prop.type === 'options'">
+                <div v-else-if="propertyType(prop) === 'options'">
                   <select
                     v-model="node.data.properties[prop.name]"
                     class="w-full px-3 py-2 bg-white border border-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500 rounded-md text-sm text-slate-900 shadow-sm"
                   >
-                    <option v-for="opt in prop.options" :key="opt.value" :value="opt.value">
+                    <option v-for="opt in prop.options || []" :key="opt.value" :value="opt.value">
                       {{ opt.name }}
                     </option>
                   </select>
                 </div>
 
-                <div v-else-if="prop.type === 'boolean'" class="flex items-center mt-2">
+                <div v-else-if="propertyType(prop) === 'boolean'" class="flex items-center mt-2">
                   <input
                     v-model="node.data.properties[prop.name]"
                     type="checkbox"
@@ -268,13 +430,26 @@ function onDeleteNode() {
                   <label class="ml-2 text-sm text-slate-700">{{ prop.description || prop.displayName }}</label>
                 </div>
 
-                <div v-else-if="prop.type === 'collection' || prop.type === 'fixedCollection'">
-                  <button class="w-full py-2 bg-slate-50 border border-dashed border-slate-300 rounded-md text-sm font-medium text-slate-600 hover:border-brand-500 hover:text-brand-600 transition-colors">
-                    + Add {{ prop.displayName }}
-                  </button>
+                <div v-else-if="propertyType(prop) === 'collection' || propertyType(prop) === 'fixedCollection'" class="space-y-2">
+                  <textarea
+                    :value="collectionDrafts[prop.name] || '[]'"
+                    rows="6"
+                    class="w-full px-3 py-2 bg-white border border-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500 rounded-md text-sm text-slate-900 shadow-sm font-mono"
+                    @input="onCollectionInput(prop.name, $event)"
+                    @blur="formatCollectionDraft(prop.name)"
+                  />
+                  <p class="text-xs text-slate-500">Provide valid JSON (array or object).</p>
+                  <p v-if="collectionErrors[prop.name]" class="text-xs text-red-600">
+                    {{ collectionErrors[prop.name] }}
+                  </p>
                 </div>
 
-                <p v-if="prop.description && prop.type !== 'boolean'" class="mt-1 text-xs text-slate-500">{{ prop.description }}</p>
+                <p v-if="prop.description && propertyType(prop) !== 'boolean'" class="mt-1 text-xs text-slate-500">
+                  {{ prop.description }}
+                </p>
+                <p v-if="prop.hint" class="mt-1 text-xs text-slate-400">
+                  Hint: {{ prop.hint }}
+                </p>
               </div>
             </template>
           </div>

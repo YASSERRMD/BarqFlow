@@ -80,7 +80,13 @@ function buildDefaultProperties(schema: any): Record<string, any> {
   const defaults: Record<string, any> = {}
   if (schema?.properties) {
     schema.properties.forEach((p: any) => {
-      if (p.default !== undefined) defaults[p.name] = p.default
+      if (p.default === undefined) return
+
+      if (p.default !== null && typeof p.default === 'object') {
+        defaults[p.name] = JSON.parse(JSON.stringify(p.default))
+      } else {
+        defaults[p.name] = p.default
+      }
     })
   }
   return defaults
