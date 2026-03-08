@@ -284,6 +284,52 @@ const panelTestState = computed(() => {
 
 const isTesting = computed(() => panelTestState.value?.status === 'running')
 
+function isMissingRequiredPropertyValue(prop: any, value: any): boolean {
+  if (value === undefined || value === null) return true
+
+  const type = propertyType(prop)
+  if (typeof value === 'string') {
+    return value.trim().length === 0
+  }
+
+  if ((type === 'collection' || type === 'fixedCollection') && Array.isArray(value)) {
+    return value.length === 0
+  }
+
+  return false
+}
+
+const missingRequiredParameters = computed(() => {
+  if (!props.node || !nodeSchema.value) return []
+
+  const schemaProperties = Array.isArray((nodeSchema.value as any)?.properties)
+    ? (nodeSchema.value as any).properties
+    : []
+  const properties = props.node?.data?.properties || {}
+
+  return schemaProperties
+    .filter((prop: any) => prop?.required === true)
+    .filter((prop: any) => isPropertyVisible(prop))
+    .filter((prop: any) => isMissingRequiredPropertyValue(prop, properties[prop.name]))
+    .map((prop: any) => String(prop?.displayName || prop?.name || 'unknown'))
+})
+
+const missingRequiredCredentials = computed(() => {
+  if (!props.node) return []
+  const credentials = props.node?.data?.credentials || {}
+
+  return nodeCredentialRefs.value
+    .filter((ref: any) => ref?.required)
+    .filter((ref: any) => !String(credentials?.[ref.credentialType] || '').trim())
+    .map((ref: any) => String(ref.displayName || ref.credentialType || 'credential'))
+})
+
+const canTestNode = computed(
+  () =>
+    missingRequiredParameters.value.length === 0 &&
+    missingRequiredCredentials.value.length === 0,
+)
+
 function mockValueForProperty(prop: any) {
   const type = propertyType(prop)
   const name = String(prop?.name || '').toLowerCase()
@@ -498,6 +544,18 @@ function onDeleteNode() {
             <ExternalLink class="w-4 h-4" /> View Documentation
           </a>
         </div>
+
+        <div
+          v-if="missingRequiredParameters.length > 0 || missingRequiredCredentials.length > 0"
+          class="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-700"
+        >
+          <p v-if="missingRequiredParameters.length > 0">
+            Missing required parameters: {{ missingRequiredParameters.join(', ') }}
+          </p>
+          <p v-if="missingRequiredCredentials.length > 0">
+            Missing required credentials: {{ missingRequiredCredentials.join(', ') }}
+          </p>
+        </div>
       </div>
 
       <div
@@ -533,7 +591,7 @@ function onDeleteNode() {
           </button>
           <button
             @click="emit('test-node', node)"
-            :disabled="isTesting"
+            :disabled="isTesting || !canTestNode"
             class="px-4 py-2 text-sm font-medium text-white bg-brand-600 rounded-lg hover:bg-brand-700 shadow-sm flex items-center gap-2 disabled:opacity-60"
           >
             <Play class="w-4 h-4 fill-current" /> {{ isTesting ? 'Testing...' : 'Test Step' }}
