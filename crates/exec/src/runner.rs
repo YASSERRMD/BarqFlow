@@ -864,6 +864,7 @@ mod tests {
     use barqflow_core::schema::{IConnection, NodeConnectionType};
     use barqflow_core::traits::IExecuteFunctions;
     use barqflow_core::types::WorkflowId;
+    use uuid::Uuid;
 
     use super::*;
     use barqflow_core::schema::{INode, INodeParameters, IWorkflowSettings};
@@ -896,6 +897,61 @@ mod tests {
         }
     }
 
+    struct MockSubworkflowCallNode;
+
+    #[async_trait]
+    impl barqflow_core::traits::INodeType for MockSubworkflowCallNode {
+        fn get_description(&self) -> IDataObject {
+            IDataObject::from(json!({
+                "name": "mockSubworkflowCall",
+                "displayName": "Mock Subworkflow Call",
+                "description": "Triggers sub-workflow execution from tests"
+            }))
+        }
+
+        async fn execute(
+            &self,
+            context: &dyn IExecuteFunctions,
+        ) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
+            let workflow_id = context
+                .get_node_parameter("workflowId", None)
+                .await
+                .map(|v| v.as_str().unwrap_or("").to_string())
+                .unwrap_or_default();
+            let input_data = serde_json::to_value(context.get_input_data(0).await.unwrap_or_default())
+                .unwrap_or(serde_json::Value::Null);
+
+            Err(BarqError::ExecuteSubWorkflow {
+                workflow_id,
+                input_data,
+            })
+        }
+    }
+
+    struct MockSubworkflowExecutor {
+        expected_workflow_id: Uuid,
+    }
+
+    #[async_trait]
+    impl crate::subworkflow::SubWorkflowExecutor for MockSubworkflowExecutor {
+        async fn execute_subworkflow(
+            &self,
+            _parent: crate::subworkflow::SubWorkflowParentContext,
+            child_workflow_id: Uuid,
+            input: Vec<INodeExecutionData>,
+        ) -> Result<crate::subworkflow::SubWorkflowExecutionResult, BarqError> {
+            assert_eq!(child_workflow_id, self.expected_workflow_id);
+            assert_eq!(input.len(), 1);
+
+            Ok(crate::subworkflow::SubWorkflowExecutionResult {
+                child_execution_id: "child-exec-test".to_string(),
+                outputs: vec![vec![INodeExecutionData::new(IDataObject::from(json!({
+                    "childResult": true,
+                })))]] ,
+            })
+        }
+    }
+
     fn create_mock_registry() -> Arc<NodeRegistry> {
         let registry = Arc::new(NodeRegistry::new());
 
@@ -916,6 +972,23 @@ mod tests {
         };
 
         registry.register_node(node_info).unwrap();
+
+        let subworkflow_node = barqflow_registry::registry::NodeInfo {
+            name: "mockSubworkflowCall".to_string(),
+            display_name: "Mock Subworkflow Call".to_string(),
+            version: 1.0,
+            description: "A mock node that requests sub-workflow execution".to_string(),
+            properties: INodeProperties {
+                display_name: Some("Mock Subworkflow".to_string()),
+                properties: vec![],
+                required_values: None,
+            },
+            is_trigger: false,
+            max_inputs: 1,
+            node_impl: Arc::new(MockSubworkflowCallNode),
+        };
+
+        registry.register_node(subworkflow_node).unwrap();
 
         registry
     }
@@ -1104,5 +1177,164 @@ mod tests {
 
         let parsed = WorkflowToGraphParser::parse(&flow).expect("workflow should parse");
         assert_eq!(parsed.graph.edge_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_run_workflow_executes_subworkflow_via_runtime_executor() {
+        let registry = create_mock_registry();
+        let expected_child_id = Uuid::new_v4();
+
+        let source = INode {
+            id: NodeId::new("source"),
+            name: "Source".to_string(),
+            r#type: "mockPassThrough".to_string(),
+            type_version: 1.0,
+            position: [0.0, 0.0],
+            parameters: INodeParameters::default(),
+            credentials: vec![],
+            disabled: false,
+        };
+        let call = INode {
+            id: NodeId::new("call"),
+            name: "CallChild".to_string(),
+            r#type: "mockSubworkflowCall".to_string(),
+            type_version: 1.0,
+            position: [120.0, 0.0],
+            parameters: INodeParameters(HashMap::from([(
+                "workflowId".to_string(),
+                json!(expected_child_id.to_string()),
+            )])),
+            credentials: vec![],
+            disabled: false,
+        };
+
+        let mut connections = HashMap::new();
+        connections.insert(
+            "Source".to_string(),
+            barqflow_core::schema::INodeConnections(HashMap::from([(
+                NodeConnectionType::Main,
+                vec![vec![IConnection {
+                    node: "CallChild".to_string(),
+                    r#type: NodeConnectionType::Main,
+                    index: 0,
+                }]],
+            )])),
+        );
+
+        let workflow = CoreWorkflowDef {
+            id: WorkflowId::new(),
+            name: "Parent".to_string(),
+            nodes: vec![source, call],
+            connections,
+            active: true,
+            settings: IWorkflowSettings::default(),
+        };
+
+        let runner = WorkflowRunner::new(registry, ExecutionConfig::default()).with_subworkflow_executor(
+            Arc::new(MockSubworkflowExecutor {
+                expected_workflow_id: expected_child_id,
+            }),
+        );
+
+        let results = runner
+            .run_workflow(WorkflowRunContext {
+                run_id: RunId::new(),
+                workflow,
+                static_data: None,
+                manual: true,
+                execution_id: None,
+                parent_execution_id: None,
+                cancellation_token: None,
+            })
+            .await
+            .unwrap();
+
+        let child_result = results.get("CallChild").expect("call child result");
+        let output_item = child_result
+            .outputs
+            .first()
+            .and_then(|stream| stream.first())
+            .expect("child output item");
+        assert_eq!(
+            output_item
+                .json
+                .0
+                .get("childResult")
+                .and_then(|value| value.as_bool()),
+            Some(true)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_run_workflow_subworkflow_without_executor_returns_error() {
+        let registry = create_mock_registry();
+        let expected_child_id = Uuid::new_v4();
+
+        let source = INode {
+            id: NodeId::new("source"),
+            name: "Source".to_string(),
+            r#type: "mockPassThrough".to_string(),
+            type_version: 1.0,
+            position: [0.0, 0.0],
+            parameters: INodeParameters::default(),
+            credentials: vec![],
+            disabled: false,
+        };
+        let call = INode {
+            id: NodeId::new("call"),
+            name: "CallChild".to_string(),
+            r#type: "mockSubworkflowCall".to_string(),
+            type_version: 1.0,
+            position: [120.0, 0.0],
+            parameters: INodeParameters(HashMap::from([(
+                "workflowId".to_string(),
+                json!(expected_child_id.to_string()),
+            )])),
+            credentials: vec![],
+            disabled: false,
+        };
+
+        let mut connections = HashMap::new();
+        connections.insert(
+            "Source".to_string(),
+            barqflow_core::schema::INodeConnections(HashMap::from([(
+                NodeConnectionType::Main,
+                vec![vec![IConnection {
+                    node: "CallChild".to_string(),
+                    r#type: NodeConnectionType::Main,
+                    index: 0,
+                }]],
+            )])),
+        );
+
+        let workflow = CoreWorkflowDef {
+            id: WorkflowId::new(),
+            name: "Parent".to_string(),
+            nodes: vec![source, call],
+            connections,
+            active: true,
+            settings: IWorkflowSettings::default(),
+        };
+
+        let runner = WorkflowRunner::new(registry, ExecutionConfig::default());
+        let err = runner
+            .run_workflow(WorkflowRunContext {
+                run_id: RunId::new(),
+                workflow,
+                static_data: None,
+                manual: true,
+                execution_id: None,
+                parent_execution_id: None,
+                cancellation_token: None,
+            })
+            .await
+            .unwrap_err();
+
+        match err {
+            BarqError::NodeOperationError { message, .. } => {
+                assert!(message.contains("Subworkflow executor is not configured"));
+            }
+            other => panic!("expected NodeOperationError, got {}", other),
+        }
     }
 }
