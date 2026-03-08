@@ -115,6 +115,13 @@ fn summarize_cron_jobs(active_cron_jobs: &HashMap<Uuid, Vec<Uuid>>) -> (usize, u
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::routes::ActiveExecutionControl;
+    use axum::{
+        body::{to_bytes, Body},
+        http::Request,
+    };
+    use tokio_util::sync::CancellationToken;
+    use tower::ServiceExt;
 
     #[test]
     fn summarize_webhooks_counts_unique_workflows() {
@@ -161,5 +168,61 @@ mod tests {
         let (workflow_count, job_count) = summarize_cron_jobs(&active);
         assert_eq!(workflow_count, 2);
         assert_eq!(job_count, 3);
+    }
+
+    #[tokio::test]
+    async fn trigger_health_endpoint_reports_runtime_counts() {
+        let workflow_id = Uuid::new_v4();
+        let mut webhook_map = HashMap::new();
+        webhook_map.insert(
+            "hook-a".to_string(),
+            WebhookEndpoint {
+                workflow_id,
+                node_id: "node-a".to_string(),
+                http_method: "POST".to_string(),
+            },
+        );
+
+        let webhook_registry = std::sync::Arc::new(std::sync::RwLock::new(webhook_map));
+        let active_cron_jobs = std::sync::Arc::new(tokio::sync::RwLock::new(HashMap::from([(
+            workflow_id,
+            vec![Uuid::new_v4()],
+        )])));
+
+        let noop_task = tokio::spawn(async {});
+        let execution_id = Uuid::new_v4();
+        let active_executions = std::sync::Arc::new(tokio::sync::RwLock::new(HashMap::from([(
+            execution_id,
+            ActiveExecutionControl {
+                cancellation_token: CancellationToken::new(),
+                abort_handle: noop_task.abort_handle(),
+            },
+        )])));
+
+        let app = health_routes(AppState {
+            webhook_registry,
+            active_cron_jobs,
+            active_executions,
+        });
+
+        let request = Request::builder()
+            .uri("/health/triggers")
+            .method("GET")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(payload["webhooks"]["endpoint_count"], 1);
+        assert_eq!(payload["webhooks"]["workflow_count"], 1);
+        assert_eq!(payload["cron"]["workflow_count"], 1);
+        assert_eq!(payload["cron"]["job_count"], 1);
+        assert_eq!(payload["executions"]["running_count"], 1);
+        assert_eq!(payload["polling"]["active_count"], 0);
+        assert!(payload["generated_at"].as_str().is_some());
     }
 }
