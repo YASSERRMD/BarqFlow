@@ -17,7 +17,8 @@ use tracing::{debug, span, Level};
 pub trait CredentialProvider: Send + Sync {
     async fn get_credentials(
         &self,
-        name: &str,
+        node_id: &str,
+        credential_type: &str,
     ) -> Result<HashMap<String, GenericValue>, BarqError>;
 }
 
@@ -239,28 +240,15 @@ impl IExecuteFunctions for NodeExecutionContext {
         &self.node
     }
 
-    fn get_input_data(&self, input_index: usize) -> Result<&Vec<INodeExecutionData>, BarqError> {
-        // We know we're in a synchronous context when this is called from the node
-        // The RwLock is a blocking lock here because we only read from it
-        let data = self.input_data.try_read().map_err(|_| BarqError::NodeOperationError {
+    async fn get_input_data(&self, input_index: usize) -> Result<Vec<INodeExecutionData>, BarqError> {
+        let data = self.input_data.read().await;
+        data.0
+            .get(&input_index)
+            .cloned()
+            .ok_or_else(|| BarqError::NodeOperationError {
                 node_name: self.node.name.clone(),
-                message: "Input data is temporarily unavailable".to_string(),
-            })?;
-
-        let slice = unsafe {
-            // SAFE: We are extending the lifetime of the borrow to match the traits requirements.
-            // The underlying data is stored in the WorkflowRunner and lives for the entire execution.
-            // When executing, the node only reads the data sequentially, so no concurrent mutable access occurs.
-            std::mem::transmute::<&Vec<INodeExecutionData>, &'static Vec<INodeExecutionData>>(
-                data.0
-                    .get(&input_index)
-                    .ok_or_else(|| BarqError::NodeOperationError {
-                        node_name: self.node.name.clone(),
-                        message: format!("Input branch {} not found", input_index),
-                    })?,
-            )
-        };
-        Ok(slice)
+                message: format!("Input branch {} not found", input_index),
+            })
     }
 
     async fn get_credentials(
@@ -271,14 +259,17 @@ impl IExecuteFunctions for NodeExecutionContext {
             BarqError::NodeOperationError {
                 node_name: self.node.name.clone(),
                 message: format!(
-                    "Credential provider is not configured; cannot resolve '{}'",
-                    name
+                    "Credential provider is not configured; cannot resolve '{}' for node '{}'",
+                    name, self.node.id
                 ),
             }
         })?;
 
-        let creds = provider.get_credentials(name).await?;
-        self.log(&format!("Resolved credentials for '{}'", name));
+        let creds = provider.get_credentials(&self.node.id.0, name).await?;
+        self.log(&format!(
+            "Resolved credentials for '{}' on node '{}'",
+            name, self.node.id
+        ));
         Ok(creds)
     }
 
@@ -455,6 +446,7 @@ mod tests {
             type_version: 1.0,
             position: [0.0, 0.0],
             parameters: barqflow_core::schema::INodeParameters(params),
+            credentials: vec![],
             disabled: false,
         }
     }
@@ -465,6 +457,7 @@ mod tests {
     impl CredentialProvider for MockCredentialProvider {
         async fn get_credentials(
             &self,
+            _node_id: &str,
             name: &str,
         ) -> Result<HashMap<String, GenericValue>, BarqError> {
             if name != "openAiApi" {
@@ -577,7 +570,7 @@ mod tests {
             Arc::new(RwLock::new(HashMap::new())),
         );
 
-        let input = context.get_input_data(0).unwrap();
+        let input = context.get_input_data(0).await.unwrap();
         assert_eq!(input.len(), 1);
     }
 
@@ -618,6 +611,7 @@ mod tests {
             type_version: 1.0,
             position: [0.0, 0.0],
             parameters: barqflow_core::schema::INodeParameters(params),
+            credentials: vec![],
             disabled: false,
         };
 

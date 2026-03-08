@@ -123,6 +123,29 @@ pub struct INodeConnections(pub HashMap<NodeConnectionType, Vec<Vec<IConnection>
 #[serde(transparent)]
 pub struct INodeParameters(pub HashMap<String, crate::types::GenericValue>);
 
+/// Declares a credential type required by a node schema.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialReference {
+    pub credential_type: String,
+    #[serde(default = "default_required")]
+    pub required: bool,
+    pub display_name: String,
+}
+
+fn default_required() -> bool {
+    true
+}
+
+/// Stores the selected credential instance for a workflow node.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeCredentialBinding {
+    pub node_id: String,
+    pub credential_type: String,
+    pub credential_id: uuid::Uuid,
+}
+
 /// Represents a single configured Node entity inside a Workflow.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -133,6 +156,8 @@ pub struct INode {
     pub type_version: f32,
     pub position: [f32; 2],
     pub parameters: INodeParameters,
+    #[serde(default)]
+    pub credentials: Vec<NodeCredentialBinding>,
     #[serde(default)]
     pub disabled: bool,
 }

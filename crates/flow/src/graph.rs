@@ -306,6 +306,7 @@ mod tests {
             type_version: 1.0,
             position: [100.0, 200.0],
             parameters: INodeParameters::default(),
+            credentials: vec![],
             disabled: false,
         };
 

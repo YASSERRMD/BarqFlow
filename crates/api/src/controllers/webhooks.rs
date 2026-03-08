@@ -127,6 +127,11 @@ async fn handle_webhook(
     let settings: IWorkflowSettings =
         serde_json::from_value(wf_entity.settings.clone()).unwrap_or_default();
 
+    let credential_provider = Arc::new(crate::credentials_provider::RepositoryCredentialProvider::new(
+        Arc::clone(&state.credential_repo),
+        &nodes,
+    ));
+
     let workflow_def = WorkflowDef {
         id: WorkflowId(wf_entity.id),
         name: wf_entity.name.clone(),
@@ -135,10 +140,6 @@ async fn handle_webhook(
         active: wf_entity.active,
         settings,
     };
-
-    let credential_provider = Arc::new(crate::credentials_provider::RepositoryCredentialProvider::new(
-        Arc::clone(&state.credential_repo),
-    ));
     let runner = WorkflowRunner::new(state.node_registry.clone(), ExecutionConfig::default())
         .with_credential_provider(credential_provider);
     let run_id = RunId::new();

@@ -191,7 +191,6 @@ mod tests {
     use barqflow_core::schema::{INode, INodeParameters};
     use barqflow_core::types::{GenericValue, NodeId};
     use async_trait::async_trait;
-    use std::sync::Arc;
     use mockito::Server;
 
     struct MockContext {
@@ -213,6 +212,7 @@ mod tests {
                     type_version: 1.0,
                     position: [0.0, 0.0],
                     parameters: INodeParameters(std::collections::HashMap::new()),
+                    credentials: vec![],
                     disabled: false,
                 },
             }

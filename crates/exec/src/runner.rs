@@ -768,6 +768,7 @@ mod tests {
                 type_version: 1.0,
                 position: [0.0, 0.0],
                 parameters: INodeParameters::default(),
+                credentials: vec![],
                 disabled: false,
             }],
             connections: HashMap::new(),
@@ -865,6 +866,7 @@ mod tests {
             type_version: 1.0,
             position: [0.0, 0.0],
             parameters: INodeParameters::default(),
+            credentials: vec![],
             disabled: false,
         };
         let sink = INode {
@@ -874,6 +876,7 @@ mod tests {
             type_version: 1.0,
             position: [100.0, 0.0],
             parameters: INodeParameters::default(),
+            credentials: vec![],
             disabled: false,
         };
 
