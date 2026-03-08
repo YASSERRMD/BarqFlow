@@ -29,6 +29,7 @@ use crate::controllers::{
     workflows::{workflow_routes, AppState as WfState},
     nodes::{node_routes, AppState as NodeState},
 };
+use crate::active_workflows::ActiveCronJobs;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -41,6 +42,7 @@ pub struct AppState {
     pub webhook_registry: WebhookRegistry,
     pub job_scheduler: JobScheduler,
     pub active_executions: ActiveExecutionManager,
+    pub active_cron_jobs: ActiveCronJobs,
 }
 
 pub fn create_router(state: AppState) -> Router {
@@ -50,6 +52,11 @@ pub fn create_router(state: AppState) -> Router {
         }))
         .merge(workflow_routes(WfState {
             workflow_repo: Arc::clone(&state.workflow_repo),
+            credential_repo: Arc::clone(&state.credential_repo),
+            node_registry: Arc::clone(&state.node_registry),
+            webhook_registry: Arc::clone(&state.webhook_registry),
+            job_scheduler: state.job_scheduler.clone(),
+            active_cron_jobs: Arc::clone(&state.active_cron_jobs),
         }))
         .merge(execution_routes(ExecState {
             execution_repo: Arc::clone(&state.exec_repo),

@@ -1,4 +1,5 @@
 use crate::auth::Claims;
+use crate::active_workflows::{ActiveCronJobs, ActiveWorkflowManager};
 use axum::http::StatusCode;
 use axum::{
     extract::{Json, Path, Query, State},
@@ -6,13 +7,22 @@ use axum::{
     Router,
 };
 use barqflow_db::models::WorkflowEntity;
+use crate::controllers::webhooks::WebhookRegistry;
+use crate::repositories::credential::CredentialRepository;
 use crate::repositories::workflow::WorkflowRepository;
+use barqflow_registry::registry::NodeRegistry;
 use serde::Deserialize;
 use std::sync::Arc;
+use tokio_cron_scheduler::JobScheduler;
 
 #[derive(Clone)]
 pub struct AppState {
     pub workflow_repo: Arc<WorkflowRepository>,
+    pub credential_repo: Arc<CredentialRepository>,
+    pub node_registry: Arc<NodeRegistry>,
+    pub webhook_registry: WebhookRegistry,
+    pub job_scheduler: JobScheduler,
+    pub active_cron_jobs: ActiveCronJobs,
 }
 
 pub fn workflow_routes(state: AppState) -> Router {
@@ -142,12 +152,26 @@ async fn toggle_workflow_active(
     Path(id): Path<uuid::Uuid>,
     Json(payload): Json<ToggleActiveRequest>,
 ) -> Result<Json<WorkflowEntity>, (StatusCode, String)> {
-    let updated_wf = state
-        .workflow_repo
-        .toggle_active(id, payload.active)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "Workflow not found".into()))?;
+    let manager = ActiveWorkflowManager::new(
+        Arc::clone(&state.workflow_repo),
+        Arc::clone(&state.credential_repo),
+        Arc::clone(&state.node_registry),
+        Arc::clone(&state.webhook_registry),
+        state.job_scheduler.clone(),
+        Arc::clone(&state.active_cron_jobs),
+    );
+
+    let updated_wf = if payload.active {
+        manager
+            .activate(id)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
+    } else {
+        manager
+            .deactivate(id)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
+    };
 
     Ok(Json(updated_wf))
 }
