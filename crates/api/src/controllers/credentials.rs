@@ -1,13 +1,13 @@
 use crate::auth::Claims;
+use crate::repositories::credential::CredentialRepository;
 use axum::http::StatusCode;
 use axum::{
     extract::{Json, Path, Query, State},
-    routing::{get, post},
+    routing::{get, post, put},
     Router,
 };
-use barqflow_registry::registry::CredentialRegistry;
-use crate::repositories::credential::CredentialRepository;
 use barqflow_db::models::CredentialEntity;
+use barqflow_registry::registry::CredentialRegistry;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone)]
@@ -56,7 +56,10 @@ fn mask_credential_data(data: &serde_json::Value) -> serde_json::Value {
 pub fn credential_routes(state: AppState) -> Router {
     Router::new()
         .route("/credentials", get(get_credentials).post(create_credential))
-        .route("/credentials/{id}", axum::routing::delete(delete_credential))
+        .route(
+            "/credentials/{id}",
+            put(update_credential).delete(delete_credential),
+        )
         .route("/credentials/types", get(get_credential_types))
         .route("/credentials/test", post(test_credential))
         .with_state(state)
@@ -67,6 +70,12 @@ pub struct CreateCredentialRequest {
     pub name: String,
     pub cred_type: String,
     pub data: serde_json::Value,
+}
+
+#[derive(Deserialize)]
+pub struct UpdateCredentialRequest {
+    pub name: Option<String>,
+    pub data: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize)]
@@ -99,7 +108,9 @@ async fn get_credentials(
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
     };
 
-    Ok(Json(creds.into_iter().map(CredentialResponse::from).collect()))
+    Ok(Json(
+        creds.into_iter().map(CredentialResponse::from).collect(),
+    ))
 }
 
 async fn get_credential_types(
@@ -107,10 +118,11 @@ async fn get_credential_types(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<barqflow_core::properties::ICredentialProperties>>, (StatusCode, String)> {
     let creds = state.credential_registry.get_all_credentials();
-    let schema_list: Vec<_> = creds.into_iter()
+    let schema_list: Vec<_> = creds
+        .into_iter()
         .map(|info| info.cred_impl.get_description())
         .collect();
-    
+
     Ok(Json(schema_list))
 }
 
@@ -128,6 +140,68 @@ async fn create_credential(
     Ok(Json(CredentialResponse::from(new_cred)))
 }
 
+fn merge_credential_data(
+    existing: &serde_json::Value,
+    patch: Option<&serde_json::Value>,
+) -> Result<serde_json::Value, (StatusCode, String)> {
+    let mut merged = existing.as_object().cloned().ok_or_else(|| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Stored credential payload is not an object".to_string(),
+        )
+    })?;
+
+    let Some(patch_value) = patch else {
+        return Ok(serde_json::Value::Object(merged));
+    };
+
+    let patch_obj = patch_value.as_object().ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            "Credential update payload `data` must be a JSON object".to_string(),
+        )
+    })?;
+
+    for (key, value) in patch_obj {
+        merged.insert(key.clone(), value.clone());
+    }
+
+    Ok(serde_json::Value::Object(merged))
+}
+
+async fn update_credential(
+    _claims: Claims,
+    State(state): State<AppState>,
+    Path(id): Path<uuid::Uuid>,
+    Json(payload): Json<UpdateCredentialRequest>,
+) -> Result<Json<CredentialResponse>, (StatusCode, String)> {
+    let existing = state
+        .credential_repo
+        .find_by_id(id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Credential not found".to_string()))?;
+
+    let next_name = payload
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .unwrap_or(existing.name.as_str())
+        .to_string();
+
+    let merged_data = merge_credential_data(&existing.data, payload.data.as_ref())?;
+
+    let updated = state
+        .credential_repo
+        .update(id, &next_name, merged_data)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Credential not found".to_string()))?;
+
+    Ok(Json(CredentialResponse::from(updated)))
+}
+
 async fn test_credential(
     _claims: Claims,
     State(state): State<AppState>,
@@ -139,14 +213,17 @@ async fn test_credential(
         .ok_or_else(|| {
             (
                 StatusCode::NOT_FOUND,
-                format!("Credential type '{}' not found in registry", payload.cred_type),
+                format!(
+                    "Credential type '{}' not found in registry",
+                    payload.cred_type
+                ),
             )
         })?;
 
     // Check if the credential type provides standard API ping rules
     if let Some(rules) = cred_info.cred_impl.test_request() {
         let client = reqwest::Client::new();
-        
+
         // Parse HTTP Method
         let method = match rules.method.to_uppercase().as_str() {
             "GET" => reqwest::Method::GET,
@@ -165,7 +242,12 @@ async fn test_credential(
             .request(method, &rules.url)
             .send()
             .await
-            .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Failed to reach test URL: {}", e)))?;
+            .map_err(|e| {
+                (
+                    StatusCode::BAD_GATEWAY,
+                    format!("Failed to reach test URL: {}", e),
+                )
+            })?;
 
         let status = response.status().as_u16();
         if !rules.expected_status.contains(&status) {
@@ -213,14 +295,14 @@ mod tests {
         body::Body,
         http::{Request, StatusCode},
     };
+    use barqflow_core::traits::{ICredentialTestRequest, ICredentialType};
+    use barqflow_registry::registry::CredentialInfo;
     use serde_json::json;
     use sqlx::PgPool;
     use std::sync::Arc;
     use tower::ServiceExt;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
-    use barqflow_registry::registry::CredentialInfo;
-    use barqflow_core::traits::{ICredentialType, ICredentialTestRequest};
 
     #[test]
     fn test_mask_credential_data_hides_values() {
@@ -261,7 +343,10 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn test_credential_ping_success(pool: PgPool) {
-        std::env::set_var("BARQFLOW_ENCRYPTION_KEY", "12345678901234567890123456789012");
+        std::env::set_var(
+            "BARQFLOW_ENCRYPTION_KEY",
+            "12345678901234567890123456789012",
+        );
         let mock_server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/ping"))
@@ -270,12 +355,14 @@ mod tests {
             .await;
 
         let registry = CredentialRegistry::new();
-        registry.register_credential(CredentialInfo {
-            name: "testAuth".to_string(),
-            cred_impl: Arc::new(TestCredential {
-                test_url: format!("{}/ping", mock_server.uri()),
-            }),
-        }).unwrap();
+        registry
+            .register_credential(CredentialInfo {
+                name: "testAuth".to_string(),
+                cred_impl: Arc::new(TestCredential {
+                    test_url: format!("{}/ping", mock_server.uri()),
+                }),
+            })
+            .unwrap();
 
         let state = AppState {
             credential_repo: Arc::new(CredentialRepository::new(pool)),
@@ -289,20 +376,9 @@ mod tests {
             "data": {}
         });
 
-        let request = Request::builder()
-            .uri("/credentials/test")
-            .method("POST")
-            .header("content-type", "application/json")
-            // Pass authorization if needed? We need claims to bypass auth middleware!
-            // Wait, does the router have auth layer? `credential_routes` currently does not wrap the routes in `from_extractor::<Claims>()` as middleware, it uses `_claims: Claims` as an extractor in the handler.
-            // If the handler uses `Claims`, then we MUST provide a valid JWT!
-            .body(Body::from(req_body.to_string()))
-            .unwrap();
-        
-        // Wait, if we use `Claims`, we must send `Authorization: Bearer <valid_token>`.
-        // Let's generate a valid token.
-        let token = crate::auth::generate_jwt("00000000-0000-0000-0000-000000000000", "admin").unwrap();
-        
+        let token =
+            crate::auth::generate_jwt("00000000-0000-0000-0000-000000000000", "admin").unwrap();
+
         let request = Request::builder()
             .uri("/credentials/test")
             .method("POST")
@@ -313,5 +389,58 @@ mod tests {
 
         let response = app.oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn test_update_credential_merges_existing_payload(pool: PgPool) {
+        std::env::set_var(
+            "BARQFLOW_ENCRYPTION_KEY",
+            "12345678901234567890123456789012",
+        );
+
+        let registry = CredentialRegistry::new();
+        let repo = Arc::new(CredentialRepository::new(pool.clone()));
+        let state = AppState {
+            credential_repo: Arc::clone(&repo),
+            credential_registry: Arc::new(registry),
+        };
+        let app = credential_routes(state);
+
+        let created = repo
+            .create(
+                "OpenAI Prod",
+                "openAiApi",
+                json!({
+                    "apiKey": "sk-old",
+                    "baseUrl": "https://api.openai.com/v1"
+                }),
+            )
+            .await
+            .unwrap();
+
+        let token =
+            crate::auth::generate_jwt("00000000-0000-0000-0000-000000000000", "admin").unwrap();
+        let update_body = json!({
+            "name": "OpenAI Prod Renamed",
+            "data": {
+                "apiKey": "sk-new"
+            }
+        });
+
+        let request = Request::builder()
+            .uri(format!("/credentials/{}", created.id))
+            .method("PUT")
+            .header("content-type", "application/json")
+            .header("Authorization", format!("Bearer {}", token))
+            .body(Body::from(update_body.to_string()))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let reloaded = repo.find_by_id(created.id).await.unwrap().unwrap();
+        assert_eq!(reloaded.name, "OpenAI Prod Renamed");
+        assert_eq!(reloaded.data["apiKey"], "sk-new");
+        assert_eq!(reloaded.data["baseUrl"], "https://api.openai.com/v1");
     }
 }
