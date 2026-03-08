@@ -33,6 +33,14 @@ pub struct RegisterRequest {
 pub struct AuthResponse {
     pub token: String,
     pub user_id: String,
+    pub user: AuthUser,
+}
+
+#[derive(Serialize)]
+pub struct AuthUser {
+    pub id: String,
+    pub email: String,
+    pub role: String,
 }
 
 #[derive(Deserialize)]
@@ -66,6 +74,11 @@ async fn register_user(
     Ok(Json(AuthResponse {
         token,
         user_id: new_user.id.to_string(),
+        user: AuthUser {
+            id: new_user.id.to_string(),
+            email: new_user.email,
+            role: new_user.global_role,
+        },
     }))
 }
 
@@ -96,6 +109,11 @@ async fn login_user(
     Ok(Json(AuthResponse {
         token,
         user_id: user.id.to_string(),
+        user: AuthUser {
+            id: user.id.to_string(),
+            email: user.email,
+            role: user.global_role,
+        },
     }))
 }
 
