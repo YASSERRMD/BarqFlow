@@ -15,6 +15,42 @@ pub fn register_all_credentials(registry: &barqflow_registry::registry::Credenti
     credentials::register_all_credentials(registry);
 }
 
+pub fn is_node_ui_exposed(name: &str) -> bool {
+    matches!(
+        name,
+        "n8n-nodes-base.httpRequest"
+            | "n8n-nodes-base.if"
+            | "n8n-nodes-base.switch"
+            | "n8n-nodes-base.merge"
+            | "n8n-nodes-base.set"
+            | "n8n-nodes-base.filter"
+            | "n8n-nodes-base.itemLists"
+            | "n8n-nodes-base.code"
+            | "n8n-nodes-base.manualTrigger"
+            | "barqflow-nodes.wait"
+            | "barqflow-nodes.errorTrigger"
+            | "barqflow-nodes.webhook"
+            | "barqflow-nodes.cronTrigger"
+            | "barqflow-nodes.executeWorkflow"
+            | "barqflow-nodes.postgres"
+            | "barqflow-nodes.openai"
+            | "barqflow-nodes.ollama"
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_node_ui_exposed;
+
+    #[test]
+    fn test_ui_exposure_hides_scaffold_integrations() {
+        assert!(is_node_ui_exposed("barqflow-nodes.openai"));
+        assert!(is_node_ui_exposed("barqflow-nodes.postgres"));
+        assert!(!is_node_ui_exposed("barqflow-nodes.slack"));
+        assert!(!is_node_ui_exposed("barqflow-nodes.github"));
+    }
+}
+
 pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) {
     use barqflow_registry::registry::NodeInfo;
     use barqflow_core::properties::INodeProperties;
