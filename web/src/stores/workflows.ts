@@ -35,13 +35,30 @@ export const useWorkflowStore = defineStore('workflows', {
         async saveWorkflow(workflow: any) {
             try {
                 if (workflow.id) {
-                    await api.put(`/workflows/${workflow.id}`, workflow);
+                    const response = await api.put(`/workflows/${workflow.id}`, workflow);
+                    this.workflows = this.workflows.map((wf) =>
+                        wf.id === workflow.id ? response.data : wf
+                    );
+                    this.activeWorkflow = response.data;
                 } else {
                     const response = await api.post('/workflows', workflow);
                     this.workflows.push(response.data);
+                    this.activeWorkflow = response.data;
                 }
             } catch (err: any) {
                 this.error = err.message;
+            }
+        },
+        async deleteWorkflow(id: string) {
+            try {
+                await api.delete(`/workflows/${id}`);
+                this.workflows = this.workflows.filter((wf) => wf.id !== id);
+                if (this.activeWorkflow?.id === id) {
+                    this.activeWorkflow = null;
+                }
+            } catch (err: any) {
+                this.error = err.message;
+                throw err;
             }
         },
         async executeWorkflow(workflowId: string, payload: any = {}) {

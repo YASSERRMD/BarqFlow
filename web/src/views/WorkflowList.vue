@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { Plus, Search, MoreVertical, Play, Calendar, Trash2, Edit2 } from 'lucide-vue-next'
+import { Plus, Search, MoreVertical, Calendar, Trash2, Edit2, Loader2, Workflow } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { useWorkflowStore } from '../stores/workflows'
 
@@ -13,6 +13,17 @@ onMounted(async () => {
 
 function editWorkflow(id: string) {
   router.push(`/workflow/${id}`)
+}
+
+async function deleteWorkflow(id: string) {
+  const confirmed = window.confirm('Delete this workflow permanently?')
+  if (!confirmed) return
+
+  try {
+    await workflowStore.deleteWorkflow(id)
+  } catch (err) {
+    console.error('Failed to delete workflow', err)
+  }
 }
 
 async function createWorkflow() {
@@ -110,8 +121,8 @@ async function createWorkflow() {
               <span class="px-2.5 py-1 bg-green-100 border border-green-200 text-green-700 text-[10px] font-black rounded-lg uppercase tracking-widest shadow-sm">Active</span>
             </div>
             <div class="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-300 translate-x-4 group-hover:translate-x-0">
-               <button class="w-9 h-9 flex items-center justify-center rounded-xl bg-white border border-slate-100 text-slate-400 hover:text-brand-600 hover:border-brand-200 hover:bg-brand-50 transition-all shadow-sm"><Edit2 class="w-4 h-4" /></button>
-               <button class="w-9 h-9 flex items-center justify-center rounded-xl bg-white border border-slate-100 text-slate-400 hover:text-red-500 hover:border-red-200 hover:bg-red-50 transition-all shadow-sm"><Trash2 class="w-4 h-4" /></button>
+               <button @click.stop="editWorkflow(wf.id)" class="w-9 h-9 flex items-center justify-center rounded-xl bg-white border border-slate-100 text-slate-400 hover:text-brand-600 hover:border-brand-200 hover:bg-brand-50 transition-all shadow-sm"><Edit2 class="w-4 h-4" /></button>
+               <button @click.stop="deleteWorkflow(wf.id)" class="w-9 h-9 flex items-center justify-center rounded-xl bg-white border border-slate-100 text-slate-400 hover:text-red-500 hover:border-red-200 hover:bg-red-50 transition-all shadow-sm"><Trash2 class="w-4 h-4" /></button>
             </div>
           </div>
         </div>
