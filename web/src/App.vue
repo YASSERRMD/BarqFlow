@@ -1,15 +1,25 @@
 <script setup lang="ts">
-import { RouterView, useRoute } from 'vue-router'
+import { computed } from 'vue'
+import { RouterView, useRoute, useRouter } from 'vue-router'
 import { 
   Menu, 
   Workflow, 
   History, 
   Settings, 
-  Puzzle, 
-  FolderGit2 
+  FolderGit2,
+  LogOut,
 } from 'lucide-vue-next'
+import { useAuthStore } from './stores/auth'
 
 const route = useRoute()
+const router = useRouter()
+const authStore = useAuthStore()
+const userEmail = computed(() => authStore.user?.email || 'local@workspace')
+const userName = computed(() => {
+  const name = authStore.user?.email?.split('@')[0]
+  return name ? name.charAt(0).toUpperCase() + name.slice(1) : 'User'
+})
+const userInitial = computed(() => userName.value.charAt(0).toUpperCase())
 
 const navItems = [
   { name: 'Workflows', path: '/workflows', icon: Workflow },
@@ -17,6 +27,11 @@ const navItems = [
   { name: 'Credentials', path: '/credentials', icon: FolderGit2 },
   { name: 'Settings', path: '/settings', icon: Settings },
 ]
+
+function handleLogout() {
+  authStore.logout()
+  router.push('/login')
+}
 </script>
 
 <template>
@@ -53,12 +68,19 @@ const navItems = [
 
       <div class="p-6 border-t border-white/30 bg-white/30 backdrop-blur-md flex items-center justify-start mt-4">
         <div class="w-10 h-10 rounded-2xl bg-gradient-to-tr from-brand-500 to-purple-500 flex items-center justify-center text-white font-bold text-sm shadow-[0_8px_30px_rgb(14,165,233,0.3)]">
-          A
+          {{ userInitial }}
         </div>
         <div class="ml-4">
-          <p class="text-sm font-bold text-slate-800 leading-none mb-1">Admin User</p>
-          <p class="text-[10px] text-slate-500 font-medium uppercase tracking-widest">Workspace: local</p>
+          <p class="text-sm font-bold text-slate-800 leading-none mb-1">{{ userName }}</p>
+          <p class="text-[10px] text-slate-500 font-medium tracking-wide">{{ userEmail }}</p>
         </div>
+        <button
+          @click="handleLogout"
+          class="ml-auto p-2 rounded-xl text-slate-500 hover:text-red-600 hover:bg-red-50 transition-colors"
+          title="Logout"
+        >
+          <LogOut class="w-4 h-4" />
+        </button>
       </div>
     </aside>
 
