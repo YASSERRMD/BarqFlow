@@ -5,3 +5,4 @@ pub mod users;
 pub mod webhooks;
 pub mod workflows;
 pub mod nodes;
+pub mod settings;
