@@ -59,7 +59,7 @@ if (__VLS_ctx.node) {
         ...{ class: "flex items-center gap-3" },
     });
     __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-        ...{ class: (['w-8 h-8 rounded flex items-center justify-center', __VLS_ctx.getCategoryColor(__VLS_ctx.node.data.type)]) },
+        ...{ class: (['w-8 h-8 rounded flex items-center justify-center', __VLS_ctx.getCategoryColor(__VLS_ctx.node.data.kind || __VLS_ctx.node.data.type)]) },
     });
     const __VLS_0 = {}.Settings2;
     /** @type {[typeof __VLS_components.Settings2, ]} */ ;
@@ -78,7 +78,7 @@ if (__VLS_ctx.node) {
     __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
         ...{ class: "text-[10px] font-semibold uppercase tracking-wider text-slate-500 mt-0.5" },
     });
-    (__VLS_ctx.node.data.type);
+    (__VLS_ctx.node.data.kind || __VLS_ctx.node.data.type);
     __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
         ...{ onClick: (...[$event]) => {
                 if (!(__VLS_ctx.node))
@@ -188,7 +188,7 @@ if (__VLS_ctx.node) {
             }
         }
     }
-    else if (__VLS_ctx.node.data.type === 'action') {
+    else if ((__VLS_ctx.node.data.kind || __VLS_ctx.node.data.type) === 'action') {
         __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
             ...{ class: "space-y-4" },
         });

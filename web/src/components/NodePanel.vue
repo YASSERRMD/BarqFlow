@@ -46,13 +46,13 @@ function getCategoryColor(type: string) {
       <!-- Header -->
       <div class="px-6 py-4 border-b border-slate-200 bg-white flex items-center justify-between">
         <div class="flex items-center gap-3">
-          <div :class="['w-8 h-8 rounded flex items-center justify-center', getCategoryColor(node.data.type)]">
+          <div :class="['w-8 h-8 rounded flex items-center justify-center', getCategoryColor(node.data.kind || node.data.type)]">
             <Settings2 class="w-5 h-5" />
           </div>
           <div>
             <h2 class="text-lg font-bold text-slate-800 leading-tight">{{ node.data.label }}</h2>
             <div class="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mt-0.5">
-              {{ node.data.type }} Node
+              {{ node.data.kind || node.data.type }} Node
             </div>
           </div>
         </div>
@@ -117,7 +117,7 @@ function getCategoryColor(type: string) {
           </div>
 
           <!-- Fallback Hardcoded UI -->
-          <div v-else-if="node.data.type === 'action'" class="space-y-4">
+          <div v-else-if="(node.data.kind || node.data.type) === 'action'" class="space-y-4">
             <p class="text-xs text-amber-600 bg-amber-50 p-2 rounded border border-amber-200">No dynamic schema available from backend. Using fallback rendering.</p>
             <div>
               <label class="block text-sm font-medium text-slate-700 mb-1.5">Request Method</label>

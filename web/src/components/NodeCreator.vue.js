@@ -1,10 +1,31 @@
-import { ref } from 'vue';
-import { Search, Settings2, X, Plus } from 'lucide-vue-next';
+import { ref, computed } from 'vue';
+import { Search, X, Plus } from 'lucide-vue-next';
 import { useNodeStore } from '../stores/nodes';
+import { getNodeVisuals } from '../utils/nodeVisuals';
 const props = defineProps();
 const emit = defineEmits();
 const nodeStore = useNodeStore();
 const searchQuery = ref('');
+const activeCategory = ref('All');
+const categories = ['All', 'Triggers', 'Integrations', 'Data & Logic', 'Core'];
+const filteredNodes = computed(() => {
+    let nodes = nodeStore.nodeTypes;
+    if (searchQuery.value) {
+        const q = searchQuery.value.toLowerCase();
+        nodes = nodes.filter((n) => n.name.toLowerCase().includes(q) || n.description.toLowerCase().includes(q) || n.schema?.name?.toLowerCase().includes(q));
+    }
+    if (activeCategory.value !== 'All') {
+        nodes = nodes.filter((n) => n.category === activeCategory.value);
+    }
+    const grouped = {};
+    nodes.forEach((n) => {
+        const cat = n.category || 'Core';
+        if (!grouped[cat])
+            grouped[cat] = [];
+        grouped[cat].push(n);
+    });
+    return grouped;
+});
 function onDragStart(event, nodeTypeObj) {
     emit('dragstart', event, nodeTypeObj);
 }
@@ -47,10 +68,10 @@ const __VLS_6 = __VLS_5({
     ...{ class: "w-5 h-5" },
 }, ...__VLS_functionalComponentArgsRest(__VLS_5));
 __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-    ...{ class: "p-4 border-b border-slate-100" },
+    ...{ class: "px-4 pt-4 border-b border-slate-100 bg-white" },
 });
 __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-    ...{ class: "relative" },
+    ...{ class: "relative mb-3" },
 });
 const __VLS_8 = {}.Search;
 /** @type {[typeof __VLS_components.Search, ]} */ ;
@@ -68,50 +89,78 @@ __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
     ...{ class: "w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent" },
 });
 __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-    ...{ class: "flex-1 overflow-y-auto p-4 space-y-2 bg-slate-50/50" },
+    ...{ class: "flex overflow-x-auto no-scrollbar gap-2 pb-3" },
 });
-for (const [nt] of __VLS_getVForSourceType((__VLS_ctx.nodeStore.nodeTypes))) {
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-        ...{ onDragstart: (...[$event]) => {
-                __VLS_ctx.onDragStart($event, nt);
+for (const [cat] of __VLS_getVForSourceType((__VLS_ctx.categories))) {
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+        ...{ onClick: (...[$event]) => {
+                __VLS_ctx.activeCategory = cat;
             } },
-        key: (nt.name),
-        ...{ class: "bg-white border border-slate-200 hover:border-brand-500 hover:shadow-sm p-3 rounded-lg cursor-grab active:cursor-grabbing transition-all group flex flex-col gap-1" },
-        draggable: "true",
+        key: (cat),
+        ...{ class: "whitespace-nowrap px-3 py-1 text-xs font-semibold rounded-full transition-colors" },
+        ...{ class: (__VLS_ctx.activeCategory === cat ? 'bg-brand-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200') },
     });
+    (cat);
+}
+__VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+    ...{ class: "flex-1 overflow-y-auto p-4 bg-slate-50/50" },
+});
+for (const [nodes, catName] of __VLS_getVForSourceType((__VLS_ctx.filteredNodes))) {
     __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-        ...{ class: "flex items-center gap-3" },
+        ...{ class: "mb-6" },
     });
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.h3, __VLS_intrinsicElements.h3)({
+        ...{ class: "text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 px-1" },
+    });
+    (catName);
     __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-        ...{ class: ([
-                'w-8 h-8 rounded shrink-0 flex items-center justify-center',
-                nt.type === 'trigger' ? 'bg-purple-100 text-purple-600' : 'bg-brand-100 text-brand-600'
-            ]) },
+        ...{ class: "space-y-2" },
     });
-    const __VLS_12 = {}.Settings2;
-    /** @type {[typeof __VLS_components.Settings2, ]} */ ;
-    // @ts-ignore
-    const __VLS_13 = __VLS_asFunctionalComponent(__VLS_12, new __VLS_12({
-        ...{ class: "w-5 h-5" },
-    }));
-    const __VLS_14 = __VLS_13({
-        ...{ class: "w-5 h-5" },
-    }, ...__VLS_functionalComponentArgsRest(__VLS_13));
+    for (const [nt] of __VLS_getVForSourceType((nodes))) {
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ onDragstart: (...[$event]) => {
+                    __VLS_ctx.onDragStart($event, nt);
+                } },
+            key: (nt.schema?.name || nt.name),
+            ...{ class: "bg-white border border-slate-200 hover:border-brand-500 hover:shadow-sm p-3 rounded-lg cursor-grab active:cursor-grabbing transition-all group flex flex-col gap-1" },
+            draggable: "true",
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "flex items-center gap-3" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "w-8 h-8 rounded shrink-0 flex items-center justify-center text-slate-600 bg-slate-100" },
+            ...{ style: ({ backgroundColor: __VLS_ctx.getNodeVisuals(nt.schema?.name || '').iconBgColor, color: __VLS_ctx.getNodeVisuals(nt.schema?.name || '').iconColor }) },
+        });
+        const __VLS_12 = ((__VLS_ctx.getNodeVisuals(nt.schema?.name || '').icon));
+        // @ts-ignore
+        const __VLS_13 = __VLS_asFunctionalComponent(__VLS_12, new __VLS_12({
+            ...{ class: "w-5 h-5" },
+        }));
+        const __VLS_14 = __VLS_13({
+            ...{ class: "w-5 h-5" },
+        }, ...__VLS_functionalComponentArgsRest(__VLS_13));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "flex-1 min-w-0" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.h4, __VLS_intrinsicElements.h4)({
+            ...{ class: "text-[13px] font-bold text-slate-900 truncate" },
+        });
+        (nt.name);
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+            ...{ class: "text-[10px] text-slate-500 font-medium uppercase tracking-wider" },
+        });
+        (nt.kind);
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
+            ...{ class: "text-[11px] text-slate-500 line-clamp-2 mt-1 px-1 leading-snug" },
+        });
+        (nt.description);
+    }
+}
+if (Object.keys(__VLS_ctx.filteredNodes).length === 0) {
     __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-        ...{ class: "flex-1 min-w-0" },
+        ...{ class: "text-center py-10 text-slate-500 text-sm" },
     });
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.h4, __VLS_intrinsicElements.h4)({
-        ...{ class: "text-sm font-semibold text-slate-900 truncate" },
-    });
-    (nt.name);
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
-        ...{ class: "text-xs text-slate-500 font-medium uppercase tracking-wider" },
-    });
-    (nt.type);
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({
-        ...{ class: "text-[11px] text-slate-500 line-clamp-2 mt-1" },
-    });
-    (nt.description);
 }
 /** @type {__VLS_StyleScopedClasses['fixed']} */ ;
 /** @type {__VLS_StyleScopedClasses['inset-y-0']} */ ;
@@ -152,10 +201,13 @@ for (const [nt] of __VLS_getVForSourceType((__VLS_ctx.nodeStore.nodeTypes))) {
 /** @type {__VLS_StyleScopedClasses['transition-colors']} */ ;
 /** @type {__VLS_StyleScopedClasses['w-5']} */ ;
 /** @type {__VLS_StyleScopedClasses['h-5']} */ ;
-/** @type {__VLS_StyleScopedClasses['p-4']} */ ;
+/** @type {__VLS_StyleScopedClasses['px-4']} */ ;
+/** @type {__VLS_StyleScopedClasses['pt-4']} */ ;
 /** @type {__VLS_StyleScopedClasses['border-b']} */ ;
 /** @type {__VLS_StyleScopedClasses['border-slate-100']} */ ;
+/** @type {__VLS_StyleScopedClasses['bg-white']} */ ;
 /** @type {__VLS_StyleScopedClasses['relative']} */ ;
+/** @type {__VLS_StyleScopedClasses['mb-3']} */ ;
 /** @type {__VLS_StyleScopedClasses['absolute']} */ ;
 /** @type {__VLS_StyleScopedClasses['left-3']} */ ;
 /** @type {__VLS_StyleScopedClasses['top-1/2']} */ ;
@@ -175,11 +227,31 @@ for (const [nt] of __VLS_getVForSourceType((__VLS_ctx.nodeStore.nodeTypes))) {
 /** @type {__VLS_StyleScopedClasses['focus:ring-2']} */ ;
 /** @type {__VLS_StyleScopedClasses['focus:ring-brand-500']} */ ;
 /** @type {__VLS_StyleScopedClasses['focus:border-transparent']} */ ;
+/** @type {__VLS_StyleScopedClasses['flex']} */ ;
+/** @type {__VLS_StyleScopedClasses['overflow-x-auto']} */ ;
+/** @type {__VLS_StyleScopedClasses['no-scrollbar']} */ ;
+/** @type {__VLS_StyleScopedClasses['gap-2']} */ ;
+/** @type {__VLS_StyleScopedClasses['pb-3']} */ ;
+/** @type {__VLS_StyleScopedClasses['whitespace-nowrap']} */ ;
+/** @type {__VLS_StyleScopedClasses['px-3']} */ ;
+/** @type {__VLS_StyleScopedClasses['py-1']} */ ;
+/** @type {__VLS_StyleScopedClasses['text-xs']} */ ;
+/** @type {__VLS_StyleScopedClasses['font-semibold']} */ ;
+/** @type {__VLS_StyleScopedClasses['rounded-full']} */ ;
+/** @type {__VLS_StyleScopedClasses['transition-colors']} */ ;
 /** @type {__VLS_StyleScopedClasses['flex-1']} */ ;
 /** @type {__VLS_StyleScopedClasses['overflow-y-auto']} */ ;
 /** @type {__VLS_StyleScopedClasses['p-4']} */ ;
-/** @type {__VLS_StyleScopedClasses['space-y-2']} */ ;
 /** @type {__VLS_StyleScopedClasses['bg-slate-50/50']} */ ;
+/** @type {__VLS_StyleScopedClasses['mb-6']} */ ;
+/** @type {__VLS_StyleScopedClasses['text-xs']} */ ;
+/** @type {__VLS_StyleScopedClasses['font-bold']} */ ;
+/** @type {__VLS_StyleScopedClasses['text-slate-400']} */ ;
+/** @type {__VLS_StyleScopedClasses['uppercase']} */ ;
+/** @type {__VLS_StyleScopedClasses['tracking-widest']} */ ;
+/** @type {__VLS_StyleScopedClasses['mb-3']} */ ;
+/** @type {__VLS_StyleScopedClasses['px-1']} */ ;
+/** @type {__VLS_StyleScopedClasses['space-y-2']} */ ;
 /** @type {__VLS_StyleScopedClasses['bg-white']} */ ;
 /** @type {__VLS_StyleScopedClasses['border']} */ ;
 /** @type {__VLS_StyleScopedClasses['border-slate-200']} */ ;
@@ -197,15 +269,24 @@ for (const [nt] of __VLS_getVForSourceType((__VLS_ctx.nodeStore.nodeTypes))) {
 /** @type {__VLS_StyleScopedClasses['flex']} */ ;
 /** @type {__VLS_StyleScopedClasses['items-center']} */ ;
 /** @type {__VLS_StyleScopedClasses['gap-3']} */ ;
+/** @type {__VLS_StyleScopedClasses['w-8']} */ ;
+/** @type {__VLS_StyleScopedClasses['h-8']} */ ;
+/** @type {__VLS_StyleScopedClasses['rounded']} */ ;
+/** @type {__VLS_StyleScopedClasses['shrink-0']} */ ;
+/** @type {__VLS_StyleScopedClasses['flex']} */ ;
+/** @type {__VLS_StyleScopedClasses['items-center']} */ ;
+/** @type {__VLS_StyleScopedClasses['justify-center']} */ ;
+/** @type {__VLS_StyleScopedClasses['text-slate-600']} */ ;
+/** @type {__VLS_StyleScopedClasses['bg-slate-100']} */ ;
 /** @type {__VLS_StyleScopedClasses['w-5']} */ ;
 /** @type {__VLS_StyleScopedClasses['h-5']} */ ;
 /** @type {__VLS_StyleScopedClasses['flex-1']} */ ;
 /** @type {__VLS_StyleScopedClasses['min-w-0']} */ ;
-/** @type {__VLS_StyleScopedClasses['text-sm']} */ ;
-/** @type {__VLS_StyleScopedClasses['font-semibold']} */ ;
+/** @type {__VLS_StyleScopedClasses['text-[13px]']} */ ;
+/** @type {__VLS_StyleScopedClasses['font-bold']} */ ;
 /** @type {__VLS_StyleScopedClasses['text-slate-900']} */ ;
 /** @type {__VLS_StyleScopedClasses['truncate']} */ ;
-/** @type {__VLS_StyleScopedClasses['text-xs']} */ ;
+/** @type {__VLS_StyleScopedClasses['text-[10px]']} */ ;
 /** @type {__VLS_StyleScopedClasses['text-slate-500']} */ ;
 /** @type {__VLS_StyleScopedClasses['font-medium']} */ ;
 /** @type {__VLS_StyleScopedClasses['uppercase']} */ ;
@@ -214,17 +295,25 @@ for (const [nt] of __VLS_getVForSourceType((__VLS_ctx.nodeStore.nodeTypes))) {
 /** @type {__VLS_StyleScopedClasses['text-slate-500']} */ ;
 /** @type {__VLS_StyleScopedClasses['line-clamp-2']} */ ;
 /** @type {__VLS_StyleScopedClasses['mt-1']} */ ;
+/** @type {__VLS_StyleScopedClasses['px-1']} */ ;
+/** @type {__VLS_StyleScopedClasses['leading-snug']} */ ;
+/** @type {__VLS_StyleScopedClasses['text-center']} */ ;
+/** @type {__VLS_StyleScopedClasses['py-10']} */ ;
+/** @type {__VLS_StyleScopedClasses['text-slate-500']} */ ;
+/** @type {__VLS_StyleScopedClasses['text-sm']} */ ;
 var __VLS_dollars;
 const __VLS_self = (await import('vue')).defineComponent({
     setup() {
         return {
             Search: Search,
-            Settings2: Settings2,
             X: X,
             Plus: Plus,
+            getNodeVisuals: getNodeVisuals,
             emit: emit,
-            nodeStore: nodeStore,
             searchQuery: searchQuery,
+            activeCategory: activeCategory,
+            categories: categories,
+            filteredNodes: filteredNodes,
             onDragStart: onDragStart,
         };
     },

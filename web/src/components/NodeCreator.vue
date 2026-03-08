@@ -112,7 +112,7 @@ function onDragStart(event: DragEvent, nodeTypeObj: any) {
                 </div>
                 <div class="flex-1 min-w-0">
                   <h4 class="text-[13px] font-bold text-slate-900 truncate">{{ nt.name }}</h4>
-                  <p class="text-[10px] text-slate-500 font-medium uppercase tracking-wider">{{ nt.type }}</p>
+                  <p class="text-[10px] text-slate-500 font-medium uppercase tracking-wider">{{ nt.kind }}</p>
                 </div>
               </div>
               <p class="text-[11px] text-slate-500 line-clamp-2 mt-1 px-1 leading-snug">{{ nt.description }}</p>
