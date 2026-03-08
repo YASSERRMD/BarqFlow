@@ -105,5 +105,20 @@ export const useWorkflowStore = defineStore('workflows', {
                 this.loading = false;
             }
         },
+        async executeWorkflowToNode(workflowId: string, nodeId: string, payload: any = {}) {
+            this.loading = true;
+            try {
+                const response = await api.post(
+                    `/executions/workflow/${workflowId}/test-node/${encodeURIComponent(nodeId)}`,
+                    payload,
+                );
+                return response.data;
+            } catch (err: any) {
+                this.error = err.message;
+                throw err;
+            } finally {
+                this.loading = false;
+            }
+        },
     },
 });

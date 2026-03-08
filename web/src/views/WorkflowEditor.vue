@@ -534,7 +534,9 @@ async function runWorkflow(
     }
   })
 
-  const result = await workflowStore.executeWorkflow(workflowId, payload)
+  const result = targetNodeId
+    ? await workflowStore.executeWorkflowToNode(workflowId, targetNodeId, payload)
+    : await workflowStore.executeWorkflow(workflowId, payload)
   applyExecutionResult(result, targetNodeId)
   return result
 }
@@ -670,7 +672,7 @@ async function handleTestNode(node: any) {
   try {
     const result = await runWorkflow(
       workflowId,
-      { manual: true, stopAtNodeId: String(node.id) },
+      { manual: true },
       String(node.id),
     )
     const nodeResult = result?.data?.[node.data.label]
