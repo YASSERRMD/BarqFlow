@@ -12,7 +12,11 @@ export default defineConfig({
   server: {
     port: 3001,
     proxy: {
-      '/api': {
+      '/rest': {
+        target: 'http://127.0.0.1:3000',
+        changeOrigin: true
+      },
+      '/webhook': {
         target: 'http://127.0.0.1:3000',
         changeOrigin: true
       }
