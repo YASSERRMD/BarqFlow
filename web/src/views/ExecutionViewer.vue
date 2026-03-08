@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { Clock, CheckCircle2, XCircle, Loader2, Search, RefreshCw, RotateCcw, Square, Trash2 } from 'lucide-vue-next'
+import { Clock, CheckCircle2, XCircle, Loader2, Search, RefreshCw, RotateCcw, Square, Trash2, X } from 'lucide-vue-next'
 import api from '../api'
 
 interface ExecutionEntity {
@@ -13,6 +13,7 @@ interface ExecutionEntity {
 }
 
 const executions = ref<ExecutionEntity[]>([])
+const selectedExecution = ref<ExecutionEntity | null>(null)
 const loading = ref(false)
 const actionLoading = ref(false)
 const error = ref<string | null>(null)
@@ -33,6 +34,25 @@ const filteredExecutions = computed(() => {
 
     return matchesStatus && matchesQuery
   })
+})
+
+const nodeResults = computed(() => {
+  const data = selectedExecution.value?.data
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return []
+
+  return Object.entries(data)
+    .filter(([_, value]) => value && typeof value === 'object')
+    .map(([nodeName, value]: [string, any]) => ({
+      nodeName,
+      success: value.success,
+      error: value.error,
+      outputsCount: Array.isArray(value.outputs) ? value.outputs.length : 0,
+    }))
+})
+
+const executionJson = computed(() => {
+  if (!selectedExecution.value) return ''
+  return JSON.stringify(selectedExecution.value.data, null, 2)
 })
 
 function formatDuration(exec: ExecutionEntity): string {
@@ -63,12 +83,25 @@ function formatRelativeTime(iso: string): string {
   return rtf.format(diffDays, 'day')
 }
 
+function openExecutionDetails(exec: ExecutionEntity) {
+  selectedExecution.value = exec
+}
+
+function closeExecutionDetails() {
+  selectedExecution.value = null
+}
+
 async function fetchExecutions() {
   loading.value = true
   error.value = null
   try {
     const res = await api.get('/executions', { params: { limit: 100 } })
     executions.value = res.data
+
+    if (selectedExecution.value) {
+      selectedExecution.value =
+        res.data.find((e: ExecutionEntity) => e.id === selectedExecution.value?.id) || null
+    }
   } catch (err: any) {
     error.value = err?.response?.data?.message || err?.message || 'Failed to fetch executions'
   } finally {
@@ -111,6 +144,9 @@ async function deleteExecution(id: string) {
   try {
     await api.delete(`/executions/${id}`)
     executions.value = executions.value.filter((exec) => exec.id !== id)
+    if (selectedExecution.value?.id === id) {
+      selectedExecution.value = null
+    }
   } catch (err: any) {
     error.value = err?.response?.data || err?.message || 'Failed to delete execution'
   } finally {
@@ -189,7 +225,8 @@ onMounted(fetchExecutions)
           <li
             v-for="exec in filteredExecutions"
             :key="exec.id"
-            class="p-5 hover:bg-slate-50 transition-colors"
+            class="p-5 hover:bg-slate-50 transition-colors cursor-pointer"
+            @click="openExecutionDetails(exec)"
           >
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-4">
@@ -233,7 +270,7 @@ onMounted(fetchExecutions)
                 </span>
                 <div class="mt-2 flex items-center justify-end gap-1">
                   <button
-                    @click="retryExecution(exec.id)"
+                    @click.stop="retryExecution(exec.id)"
                     :disabled="loading || actionLoading"
                     class="p-1.5 rounded-md border border-slate-200 text-slate-500 hover:text-brand-600 hover:border-brand-200 disabled:opacity-60"
                     title="Retry execution"
@@ -242,7 +279,7 @@ onMounted(fetchExecutions)
                   </button>
                   <button
                     v-if="exec.status === 'running'"
-                    @click="stopExecution(exec.id)"
+                    @click.stop="stopExecution(exec.id)"
                     :disabled="loading || actionLoading"
                     class="p-1.5 rounded-md border border-slate-200 text-slate-500 hover:text-amber-700 hover:border-amber-200 disabled:opacity-60"
                     title="Stop execution"
@@ -250,7 +287,7 @@ onMounted(fetchExecutions)
                     <Square class="w-4 h-4" />
                   </button>
                   <button
-                    @click="deleteExecution(exec.id)"
+                    @click.stop="deleteExecution(exec.id)"
                     :disabled="loading || actionLoading"
                     class="p-1.5 rounded-md border border-slate-200 text-slate-500 hover:text-red-600 hover:border-red-200 disabled:opacity-60"
                     title="Delete execution"
@@ -262,6 +299,48 @@ onMounted(fetchExecutions)
             </div>
           </li>
         </ul>
+      </div>
+
+      <div
+        v-if="selectedExecution"
+        class="mt-6 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden"
+      >
+        <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+          <div>
+            <h2 class="font-semibold text-slate-900">Execution #{{ selectedExecution.id.slice(0, 8) }}</h2>
+            <p class="text-xs text-slate-500 mt-1">Workflow {{ selectedExecution.workflow_id }}</p>
+          </div>
+          <button
+            @click="closeExecutionDetails"
+            class="p-2 rounded-lg border border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+          >
+            <X class="w-4 h-4" />
+          </button>
+        </div>
+
+        <div class="p-5 space-y-4">
+          <div v-if="nodeResults.length > 0" class="space-y-2">
+            <h3 class="text-sm font-semibold text-slate-700">Node results</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div
+                v-for="result in nodeResults"
+                :key="result.nodeName"
+                class="rounded-lg border p-3"
+                :class="result.success ? 'border-green-200 bg-green-50/50' : 'border-red-200 bg-red-50/50'"
+              >
+                <p class="font-medium text-sm text-slate-900">{{ result.nodeName }}</p>
+                <p class="text-xs mt-1" :class="result.success ? 'text-green-700' : 'text-red-700'">
+                  {{ result.success ? `Success (outputs: ${result.outputsCount})` : (result.error || 'Failed') }}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <h3 class="text-sm font-semibold text-slate-700 mb-2">Raw execution data</h3>
+            <pre class="bg-slate-900 text-slate-100 text-xs rounded-lg p-4 overflow-auto max-h-80">{{ executionJson }}</pre>
+          </div>
+        </div>
       </div>
     </div>
   </div>
