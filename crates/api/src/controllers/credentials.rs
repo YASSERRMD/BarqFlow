@@ -8,12 +8,49 @@ use axum::{
 use barqflow_registry::registry::CredentialRegistry;
 use crate::repositories::credential::CredentialRepository;
 use barqflow_db::models::CredentialEntity;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone)]
 pub struct AppState {
     pub credential_repo: std::sync::Arc<CredentialRepository>,
     pub credential_registry: std::sync::Arc<CredentialRegistry>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CredentialResponse {
+    pub id: uuid::Uuid,
+    pub name: String,
+    pub cred_type: String,
+    pub credential_type: String,
+    pub data: serde_json::Value,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl From<CredentialEntity> for CredentialResponse {
+    fn from(value: CredentialEntity) -> Self {
+        Self {
+            id: value.id,
+            name: value.name,
+            cred_type: value.cred_type.clone(),
+            credential_type: value.cred_type,
+            data: mask_credential_data(&value.data),
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+        }
+    }
+}
+
+fn mask_credential_data(data: &serde_json::Value) -> serde_json::Value {
+    let Some(object) = data.as_object() else {
+        return serde_json::json!({});
+    };
+
+    let masked: serde_json::Map<String, serde_json::Value> = object
+        .keys()
+        .map(|k| (k.clone(), serde_json::json!("******")))
+        .collect();
+    serde_json::Value::Object(masked)
 }
 
 pub fn credential_routes(state: AppState) -> Router {
@@ -40,14 +77,14 @@ pub struct TestCredentialRequest {
 async fn get_credentials(
     _claims: Claims,
     State(state): State<AppState>,
-) -> Result<Json<Vec<CredentialEntity>>, (StatusCode, String)> {
+) -> Result<Json<Vec<CredentialResponse>>, (StatusCode, String)> {
     let creds = state
         .credential_repo
         .find_all()
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    Ok(Json(creds))
+    Ok(Json(creds.into_iter().map(CredentialResponse::from).collect()))
 }
 
 async fn get_credential_types(
@@ -66,14 +103,14 @@ async fn create_credential(
     _claims: Claims,
     State(state): State<AppState>,
     Json(payload): Json<CreateCredentialRequest>,
-) -> Result<Json<CredentialEntity>, (StatusCode, String)> {
+) -> Result<Json<CredentialResponse>, (StatusCode, String)> {
     let new_cred = state
         .credential_repo
         .create(&payload.name, &payload.cred_type, payload.data)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    Ok(Json(new_cred))
+    Ok(Json(CredentialResponse::from(new_cred)))
 }
 
 async fn test_credential(
@@ -151,6 +188,17 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
     use barqflow_registry::registry::CredentialInfo;
     use barqflow_core::traits::{ICredentialType, ICredentialTestRequest};
+
+    #[test]
+    fn test_mask_credential_data_hides_values() {
+        let masked = mask_credential_data(&serde_json::json!({
+            "apiKey": "secret",
+            "password": "123456"
+        }));
+
+        assert_eq!(masked["apiKey"], "******");
+        assert_eq!(masked["password"], "******");
+    }
 
     struct TestCredential {
         test_url: String,
