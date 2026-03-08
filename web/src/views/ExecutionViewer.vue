@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { Clock, CheckCircle2, XCircle, Loader2, Search } from 'lucide-vue-next'
+import { Clock, CheckCircle2, XCircle, Loader2, Search, RefreshCw, RotateCcw, Square, Trash2 } from 'lucide-vue-next'
 import api from '../api'
 
 interface ExecutionEntity {
@@ -14,6 +14,7 @@ interface ExecutionEntity {
 
 const executions = ref<ExecutionEntity[]>([])
 const loading = ref(false)
+const actionLoading = ref(false)
 const error = ref<string | null>(null)
 const query = ref('')
 const statusFilter = ref('all')
@@ -75,6 +76,48 @@ async function fetchExecutions() {
   }
 }
 
+async function retryExecution(id: string) {
+  actionLoading.value = true
+  error.value = null
+  try {
+    await api.post(`/executions/${id}/retry`)
+    await fetchExecutions()
+  } catch (err: any) {
+    error.value = err?.response?.data || err?.message || 'Failed to retry execution'
+  } finally {
+    actionLoading.value = false
+  }
+}
+
+async function stopExecution(id: string) {
+  actionLoading.value = true
+  error.value = null
+  try {
+    await api.post(`/executions/${id}/stop`)
+    await fetchExecutions()
+  } catch (err: any) {
+    error.value = err?.response?.data || err?.message || 'Failed to stop execution'
+  } finally {
+    actionLoading.value = false
+  }
+}
+
+async function deleteExecution(id: string) {
+  const confirmed = window.confirm('Delete this execution record?')
+  if (!confirmed) return
+
+  actionLoading.value = true
+  error.value = null
+  try {
+    await api.delete(`/executions/${id}`)
+    executions.value = executions.value.filter((exec) => exec.id !== id)
+  } catch (err: any) {
+    error.value = err?.response?.data || err?.message || 'Failed to delete execution'
+  } finally {
+    actionLoading.value = false
+  }
+}
+
 onMounted(fetchExecutions)
 </script>
 
@@ -90,6 +133,14 @@ onMounted(fetchExecutions)
         </div>
 
         <div class="flex items-center gap-3">
+          <button
+            @click="fetchExecutions"
+            :disabled="loading || actionLoading"
+            class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-600 text-sm font-medium hover:bg-slate-50 disabled:opacity-60"
+          >
+            <RefreshCw class="w-4 h-4" />
+            Refresh
+          </button>
           <div class="relative">
             <Search class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
@@ -180,6 +231,33 @@ onMounted(fetchExecutions)
                 >
                   {{ exec.status }}
                 </span>
+                <div class="mt-2 flex items-center justify-end gap-1">
+                  <button
+                    @click="retryExecution(exec.id)"
+                    :disabled="loading || actionLoading"
+                    class="p-1.5 rounded-md border border-slate-200 text-slate-500 hover:text-brand-600 hover:border-brand-200 disabled:opacity-60"
+                    title="Retry execution"
+                  >
+                    <RotateCcw class="w-4 h-4" />
+                  </button>
+                  <button
+                    v-if="exec.status === 'running'"
+                    @click="stopExecution(exec.id)"
+                    :disabled="loading || actionLoading"
+                    class="p-1.5 rounded-md border border-slate-200 text-slate-500 hover:text-amber-700 hover:border-amber-200 disabled:opacity-60"
+                    title="Stop execution"
+                  >
+                    <Square class="w-4 h-4" />
+                  </button>
+                  <button
+                    @click="deleteExecution(exec.id)"
+                    :disabled="loading || actionLoading"
+                    class="p-1.5 rounded-md border border-slate-200 text-slate-500 hover:text-red-600 hover:border-red-200 disabled:opacity-60"
+                    title="Delete execution"
+                  >
+                    <Trash2 class="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             </div>
           </li>
