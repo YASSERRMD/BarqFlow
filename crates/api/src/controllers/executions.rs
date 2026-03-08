@@ -27,6 +27,7 @@ pub fn execution_routes(state: AppState) -> Router {
         .route("/executions", get(list_executions))
         .route("/executions/{id}", get(get_execution).delete(delete_execution))
         .route("/executions/{id}/retry", post(retry_execution))
+        .route("/executions/{id}/stop", post(stop_execution))
         .route("/executions/workflow/{workflow_id}", post(execute_workflow))
         .with_state(state)
 }
@@ -130,6 +131,39 @@ async fn retry_execution(
 
     let retried = run_workflow_execution(&state, execution.workflow_id, true).await?;
     Ok(Json(retried))
+}
+
+async fn stop_execution(
+    _claims: Claims,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<ExecutionEntity>, (StatusCode, String)> {
+    let execution = state
+        .execution_repo
+        .find_by_id(id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Execution not found".into()))?;
+
+    if !execution.status.eq_ignore_ascii_case("running") {
+        return Err((StatusCode::CONFLICT, "Execution is not running".into()));
+    }
+
+    let updated = state
+        .execution_repo
+        .update_status_and_data(
+            execution.id,
+            "cancelled",
+            serde_json::json!({
+                "cancelled": true,
+                "reason": "Stopped by user"
+            }),
+        )
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Execution not found".into()))?;
+
+    Ok(Json(updated))
 }
 
 async fn run_workflow_execution(
