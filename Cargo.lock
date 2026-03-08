@@ -370,6 +370,7 @@ dependencies = [
  "sqlx",
  "tokio",
  "tokio-cron-scheduler",
+ "uuid",
 ]
 
 [[package]]

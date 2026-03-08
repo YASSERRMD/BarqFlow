@@ -3,6 +3,7 @@ use barqflow_core::errors::BarqError;
 use barqflow_core::schema::INodeExecutionData;
 use barqflow_core::traits::{IExecuteFunctions, INodeType};
 use barqflow_core::types::IDataObject;
+use uuid::Uuid;
 
 pub struct WaitNode;
 
@@ -45,10 +46,11 @@ impl INodeType for WaitNode {
                 "externalId": null
             })
         } else if resume_string == "webhook" {
+            let resume_token = Uuid::new_v4().to_string();
             serde_json::json!({
                 "waitType": "webhook",
                 "durationMs": null,
-                "webhookPath": "webhookpath/placeholder",
+                "webhookPath": resume_token,
                 "externalId": null
             })
         } else {

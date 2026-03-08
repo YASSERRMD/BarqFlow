@@ -35,6 +35,17 @@ pub struct ExecutionEntity {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct WaitResumeEntity {
+    pub id: Uuid,
+    pub execution_id: Uuid,
+    pub node_name: String,
+    pub resume_token: String,
+    pub created_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+    pub resumed_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct StaticDataEntity {
     pub id: Uuid,
     pub node_id: String,
