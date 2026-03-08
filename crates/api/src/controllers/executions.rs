@@ -1,4 +1,5 @@
 use crate::auth::Claims;
+use crate::routes::{ActiveExecutionControl, ActiveExecutionManager};
 use axum::http::StatusCode;
 use axum::{
     extract::{Path, Query, State},
@@ -12,6 +13,8 @@ use crate::repositories::credential::CredentialRepository;
 use barqflow_db::models::ExecutionEntity;
 use serde::Deserialize;
 use std::sync::Arc;
+use tokio::time::{sleep, Duration, Instant};
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -20,6 +23,7 @@ pub struct AppState {
     pub workflow_repo: Arc<WorkflowRepository>,
     pub node_registry: Arc<barqflow_registry::registry::NodeRegistry>,
     pub credential_repo: Arc<CredentialRepository>,
+    pub active_executions: ActiveExecutionManager,
 }
 
 pub fn execution_routes(state: AppState) -> Router {
@@ -145,25 +149,97 @@ async fn stop_execution(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Execution not found".into()))?;
 
-    if !execution.status.eq_ignore_ascii_case("running") {
+    if !execution.status.eq_ignore_ascii_case("running")
+        && !execution.status.eq_ignore_ascii_case("stopping")
+    {
         return Err((StatusCode::CONFLICT, "Execution is not running".into()));
     }
 
-    let updated = state
+    let control = {
+        let active = state.active_executions.read().await;
+        active.get(&id).cloned()
+    };
+
+    let Some(control) = control else {
+        let updated = state
+            .execution_repo
+            .update_status_and_data(
+                execution.id,
+                "stopped",
+                serde_json::json!({
+                    "stopped": true,
+                    "reason": "Execution was not active in runtime registry"
+                }),
+            )
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+            .ok_or_else(|| (StatusCode::NOT_FOUND, "Execution not found".into()))?;
+        return Ok(Json(updated));
+    };
+
+    control.cancellation_token.cancel();
+
+    let _ = state
         .execution_repo
         .update_status_and_data(
             execution.id,
-            "cancelled",
+            "stopping",
             serde_json::json!({
-                "cancelled": true,
-                "reason": "Stopped by user"
+                "stopping": true,
+                "reason": "Stop requested by user"
+            }),
+        )
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let still_running = {
+            let active = state.active_executions.read().await;
+            active.contains_key(&id)
+        };
+        if !still_running {
+            break;
+        }
+
+        if Instant::now() >= deadline {
+            control.abort_handle.abort();
+            let mut active = state.active_executions.write().await;
+            active.remove(&id);
+            break;
+        }
+
+        sleep(Duration::from_millis(200)).await;
+    }
+
+    let latest = state
+        .execution_repo
+        .find_by_id(id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Execution not found".into()))?;
+
+    if !latest.status.eq_ignore_ascii_case("running")
+        && !latest.status.eq_ignore_ascii_case("stopping")
+    {
+        return Ok(Json(latest));
+    }
+
+    let stopped = state
+        .execution_repo
+        .update_status_and_data(
+            execution.id,
+            "stopped",
+            serde_json::json!({
+                "stopped": true,
+                "reason": "Stopped by user",
             }),
         )
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Execution not found".into()))?;
 
-    Ok(Json(updated))
+    Ok(Json(stopped))
 }
 
 async fn run_workflow_execution(
@@ -205,16 +281,6 @@ async fn run_workflow_execution(
         active: wf_entity.active,
         settings,
     };
-    let runner = WorkflowRunner::new(state.node_registry.clone(), ExecutionConfig::default())
-        .with_credential_provider(credential_provider);
-    let run_id = RunId::new();
-    let ctx = WorkflowRunContext {
-        run_id,
-        workflow: core_wf,
-        static_data: None,
-        manual,
-    };
-
     // Save initial state
     let new_exec = state
         .execution_repo
@@ -222,8 +288,45 @@ async fn run_workflow_execution(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    // Run Engine
-    let results = runner.run_workflow(ctx).await;
+    let runner = WorkflowRunner::new(state.node_registry.clone(), ExecutionConfig::default())
+        .with_credential_provider(credential_provider);
+    let run_id = RunId::new();
+    let cancellation_token = CancellationToken::new();
+    let ctx = WorkflowRunContext {
+        run_id,
+        workflow: core_wf,
+        static_data: None,
+        manual,
+        execution_id: Some(new_exec.id),
+        cancellation_token: Some(cancellation_token.clone()),
+    };
+
+    let run_task = tokio::spawn(async move { runner.run_workflow(ctx).await });
+    {
+        let mut active = state.active_executions.write().await;
+        active.insert(
+            new_exec.id,
+            ActiveExecutionControl {
+                cancellation_token,
+                abort_handle: run_task.abort_handle(),
+            },
+        );
+    }
+
+    let results = match run_task.await {
+        Ok(result) => result,
+        Err(join_err) if join_err.is_cancelled() => Err(barqflow_core::errors::BarqError::ExecutionCancelledError {
+            execution_id: new_exec.id.to_string(),
+        }),
+        Err(join_err) => Err(barqflow_core::errors::BarqError::InternalError(format!(
+            "Execution task join error: {}",
+            join_err
+        ))),
+    };
+    {
+        let mut active = state.active_executions.write().await;
+        active.remove(&new_exec.id);
+    }
 
     // Convert results to generic Value
     let (status, data) = match results {
@@ -243,6 +346,13 @@ async fn run_workflow_execution(
             let status = if all_success { "success" } else { "failed" };
             (status, serde_json::Value::Object(summary))
         },
+        Err(barqflow_core::errors::BarqError::ExecutionCancelledError { .. }) => (
+            "stopped",
+            serde_json::json!({
+                "stopped": true,
+                "reason": "Execution cancelled",
+            }),
+        ),
         Err(e) => {
             ("failed", serde_json::json!({"error": e.to_string()}))
         }

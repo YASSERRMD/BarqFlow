@@ -104,6 +104,8 @@ pub async fn run_boot_sequence(
                             workflow: workflow_def,
                             static_data: None,
                             manual: false,
+                            execution_id: None,
+                            cancellation_token: None,
                         };
 
                         if let Err(e) = runner.run_workflow(ctx).await {

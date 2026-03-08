@@ -150,6 +150,8 @@ async fn handle_webhook(
         workflow: workflow_def,
         static_data: Some(trigger_output),
         manual: false,
+        execution_id: None,
+        cancellation_token: None,
     };
 
     // Fire and forget — webhook responses should be fast

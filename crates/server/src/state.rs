@@ -38,7 +38,7 @@ impl AppState {
 
         // Setup Scheduler and active execution map
         let job_scheduler = JobScheduler::new().await?;
-        let active_executions = Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+        let active_executions = Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
 
         Ok(Self {
             db_pool: pool.clone(),

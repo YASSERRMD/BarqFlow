@@ -14,6 +14,7 @@ use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
 use std::sync::Arc;
 use futures::FutureExt;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, instrument};
 
 /// Configuration for workflow execution.
@@ -61,6 +62,10 @@ pub struct WorkflowRunContext {
     pub static_data: Option<IDataObject>,
     /// Whether this is a manual execution
     pub manual: bool,
+    /// Optional execution id persisted in DB for status updates.
+    pub execution_id: Option<uuid::Uuid>,
+    /// Optional cancellation token for runtime stop requests.
+    pub cancellation_token: Option<CancellationToken>,
 }
 
 /// The core workflow execution engine.
@@ -76,6 +81,23 @@ pub struct WorkflowRunner {
 }
 
 impl WorkflowRunner {
+    fn cancellation_error(context: &WorkflowRunContext) -> BarqError {
+        BarqError::ExecutionCancelledError {
+            execution_id: context
+                .execution_id
+                .map(|id| id.to_string())
+                .unwrap_or_else(|| context.run_id.to_string()),
+        }
+    }
+
+    fn is_cancelled(context: &WorkflowRunContext) -> bool {
+        context
+            .cancellation_token
+            .as_ref()
+            .map(|token| token.is_cancelled())
+            .unwrap_or(false)
+    }
+
     /// Create a new workflow runner.
     ///
     /// # Arguments
@@ -110,6 +132,10 @@ impl WorkflowRunner {
         context: WorkflowRunContext,
     ) -> Result<HashMap<String, NodeExecutionResult>, BarqError> {
         info!("Starting workflow execution");
+
+        if Self::is_cancelled(&context) {
+            return Err(Self::cancellation_error(&context));
+        }
 
         // Convert core workflow to flow workflow
         let flow_workflow = self.convert_workflow(&context.workflow);
@@ -166,6 +192,10 @@ impl WorkflowRunner {
         let workflow_cache = Arc::new(tokio::sync::RwLock::new(HashMap::new()));
 
         for mut layer in layers {
+            if Self::is_cancelled(&context) {
+                return Err(Self::cancellation_error(&context));
+            }
+
             // Sort layer to run deterministically
             layer.sort_by_key(|n| execution_order.iter().position(|x| x == n).unwrap());
 
@@ -213,6 +243,10 @@ impl WorkflowRunner {
             let mut futures = Vec::new();
 
             for (node_index, input_opt) in layer_inputs {
+                if Self::is_cancelled(&context) {
+                    return Err(Self::cancellation_error(&context));
+                }
+
                 match input_opt {
                     None => {
                         // Skip disabled entirely (no future)
@@ -318,6 +352,10 @@ impl WorkflowRunner {
     ) -> Result<HashMap<String, NodeExecutionResult>, BarqError> {
         info!("Resuming workflow execution for run {}", checkpoint.run_id);
 
+        if Self::is_cancelled(&context) {
+            return Err(Self::cancellation_error(&context));
+        }
+
         let flow_workflow = self.convert_workflow(&context.workflow);
         let parsed = WorkflowToGraphParser::parse(&flow_workflow).map_err(|e| {
             BarqError::WorkflowConfigurationError { message: e.to_string() }
@@ -354,6 +392,10 @@ impl WorkflowRunner {
         let mut resume_started = false;
 
         for mut layer in layers {
+            if Self::is_cancelled(&context) {
+                return Err(Self::cancellation_error(&context));
+            }
+
             layer.sort_by_key(|n| execution_order.iter().position(|x| x == n).unwrap());
 
             let mut layer_inputs = Vec::new();
@@ -425,6 +467,10 @@ impl WorkflowRunner {
             let mut futures = Vec::new();
 
             for (node_index, input_opt) in layer_inputs {
+                if Self::is_cancelled(&context) {
+                    return Err(Self::cancellation_error(&context));
+                }
+
                 match input_opt {
                     None => {},
                     Some((input_data, Some(early_result))) => {
@@ -798,6 +844,8 @@ mod tests {
             workflow,
             static_data: None,
             manual: true,
+            execution_id: None,
+            cancellation_token: None,
         };
 
         let results = runner.run_workflow(context).await.unwrap();
@@ -825,6 +873,8 @@ mod tests {
             workflow,
             static_data: None,
             manual: true,
+            execution_id: None,
+            cancellation_token: None,
         };
 
         let results = runner.run_workflow(context).await.unwrap();
@@ -848,10 +898,36 @@ mod tests {
             workflow,
             static_data: None,
             manual: false,
+            execution_id: None,
+            cancellation_token: None,
         };
 
         assert!(!context.manual);
         assert_eq!(context.workflow.name, "Test Workflow");
+    }
+
+    #[tokio::test]
+    async fn test_run_workflow_honors_cancellation_token() {
+        let registry = create_mock_registry();
+        let runner = WorkflowRunner::new(registry, ExecutionConfig::default());
+        let workflow = create_test_workflow();
+        let token = CancellationToken::new();
+        token.cancel();
+
+        let context = WorkflowRunContext {
+            run_id: RunId::new(),
+            workflow,
+            static_data: None,
+            manual: true,
+            execution_id: Some(uuid::Uuid::new_v4()),
+            cancellation_token: Some(token),
+        };
+
+        let err = runner.run_workflow(context).await.unwrap_err();
+        match err {
+            BarqError::ExecutionCancelledError { .. } => {}
+            other => panic!("expected ExecutionCancelledError, got: {}", other),
+        }
     }
 
     #[tokio::test]
