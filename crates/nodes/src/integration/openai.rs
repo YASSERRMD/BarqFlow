@@ -3,8 +3,10 @@ use barqflow_core::errors::BarqError;
 use barqflow_core::schema::INodeExecutionData;
 use barqflow_core::traits::{IExecuteFunctions, INodeType};
 use barqflow_core::types::IDataObject;
+use futures_util::FutureExt;
 use reqwest::{Client, StatusCode};
 use serde_json::{json, Value};
+use std::panic::AssertUnwindSafe;
 use std::time::Duration;
 
 pub struct OpenAINode {
@@ -68,8 +70,25 @@ impl INodeType for OpenAINode {
         &self,
         context: &dyn IExecuteFunctions,
     ) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
-        let input_data = context.get_input_data(0).await?;
-        let run_count = if input_data.is_empty() { 1 } else { input_data.len() };
+        let run_count = match AssertUnwindSafe(context.get_input_data(0))
+            .catch_unwind()
+            .await
+        {
+            Ok(Ok(input_data)) => {
+                if input_data.is_empty() {
+                    1
+                } else {
+                    input_data.len()
+                }
+            }
+            Ok(Err(_)) => 1,
+            Err(_) => {
+                context.log(
+                    "Input data probe panicked; defaulting OpenAI node to single-item execution.",
+                );
+                1
+            }
+        };
         let mut output_items = Vec::new();
 
         let creds = context.get_credentials("openAiApi").await?;
@@ -137,13 +156,19 @@ impl INodeType for OpenAINode {
                 .get_node_parameter_at_item("temperature", item_index, None)
                 .await
                 .ok()
-                .and_then(|v| v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse::<f64>().ok())))
+                .and_then(|v| {
+                    v.as_f64()
+                        .or_else(|| v.as_str().and_then(|s| s.parse::<f64>().ok()))
+                })
                 .unwrap_or(0.7);
             let max_tokens = context
                 .get_node_parameter_at_item("maxTokens", item_index, None)
                 .await
                 .ok()
-                .and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse::<u64>().ok())));
+                .and_then(|v| {
+                    v.as_u64()
+                        .or_else(|| v.as_str().and_then(|s| s.parse::<u64>().ok()))
+                });
             let timeout_ms = context
                 .get_node_parameter_at_item("timeout", item_index, None)
                 .await
@@ -158,10 +183,7 @@ impl INodeType for OpenAINode {
                 .and_then(|v| v.as_str().map(|s| s.trim().to_string()))
                 .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| credential_base_url.clone());
-            let endpoint = format!(
-                "{}/chat/completions",
-                endpoint_base.trim_end_matches('/')
-            );
+            let endpoint = format!("{}/chat/completions", endpoint_base.trim_end_matches('/'));
 
             let mut messages = Vec::new();
             if !system_prompt.trim().is_empty() {
@@ -222,10 +244,14 @@ impl INodeType for OpenAINode {
                 });
             }
 
-            let json_response: Value = response.json().await.map_err(|e| BarqError::NodeOperationError {
-                node_name: "OpenAI".to_string(),
-                message: format!("Failed to parse OpenAI response: {}", e),
-            })?;
+            let json_response: Value =
+                response
+                    .json()
+                    .await
+                    .map_err(|e| BarqError::NodeOperationError {
+                        node_name: "OpenAI".to_string(),
+                        message: format!("Failed to parse OpenAI response: {}", e),
+                    })?;
 
             let output = json!({
                 "model": model,
@@ -253,6 +279,7 @@ mod tests {
         params: HashMap<String, GenericValue>,
         creds: HashMap<String, GenericValue>,
         node: INode,
+        panic_on_input_probe: bool,
     }
 
     impl MockContext {
@@ -271,7 +298,13 @@ mod tests {
                     credentials: vec![],
                     disabled: false,
                 },
+                panic_on_input_probe: false,
             }
+        }
+
+        fn with_panicking_input_probe(mut self) -> Self {
+            self.panic_on_input_probe = true;
+            self
         }
 
         fn add_param(&mut self, key: &str, value: Value) {
@@ -308,18 +341,28 @@ mod tests {
             _item_index: usize,
             fallback_value: Option<GenericValue>,
         ) -> Result<GenericValue, BarqError> {
-            self.get_node_parameter(parameter_name, fallback_value).await
+            self.get_node_parameter(parameter_name, fallback_value)
+                .await
         }
 
         fn get_node(&self) -> &INode {
             &self.node
         }
 
-        async fn get_input_data(&self, _input_index: usize) -> Result<Vec<INodeExecutionData>, BarqError> {
+        async fn get_input_data(
+            &self,
+            _input_index: usize,
+        ) -> Result<Vec<INodeExecutionData>, BarqError> {
+            if self.panic_on_input_probe {
+                panic!("Cannot block the current thread from within a runtime.");
+            }
             Ok(self.input_data.clone())
         }
 
-        async fn get_credentials(&self, _name: &str) -> Result<HashMap<String, GenericValue>, BarqError> {
+        async fn get_credentials(
+            &self,
+            _name: &str,
+        ) -> Result<HashMap<String, GenericValue>, BarqError> {
             Ok(self.creds.clone())
         }
 
@@ -328,7 +371,8 @@ mod tests {
 
     #[tokio::test]
     async fn openai_requires_api_key() {
-        let mut context = MockContext::new(vec![INodeExecutionData::new(IDataObject::from(json!({})))]);
+        let mut context =
+            MockContext::new(vec![INodeExecutionData::new(IDataObject::from(json!({})))]);
         context.add_param("prompt", json!("hello"));
 
         let node = OpenAINode::new();
@@ -376,7 +420,8 @@ mod tests {
 
     #[tokio::test]
     async fn openai_requires_prompt() {
-        let mut context = MockContext::new(vec![INodeExecutionData::new(IDataObject::from(json!({})))]);
+        let mut context =
+            MockContext::new(vec![INodeExecutionData::new(IDataObject::from(json!({})))]);
         context.add_credential("apiKey", json!("test-key"));
 
         let node = OpenAINode::new();
@@ -387,5 +432,38 @@ mod tests {
             }
             _ => panic!("expected node operation error"),
         }
+    }
+
+    #[tokio::test]
+    async fn openai_executes_when_input_probe_panics() {
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock("POST", "/chat/completions")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"choices":[{"message":{"content":"ok"}}],"usage":{"total_tokens":3}}"#)
+            .create_async()
+            .await;
+
+        let mut context = MockContext::new(vec![]).with_panicking_input_probe();
+        context.add_param("prompt", json!("Say OK"));
+        context.add_param("model", json!("gpt-4o-mini"));
+        context.add_param("baseUrl", json!(server.url()));
+        context.add_credential("apiKey", json!("test-key"));
+
+        let node = OpenAINode::new();
+        let result = node.execute(&context).await.unwrap();
+
+        mock.assert_async().await;
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].len(), 1);
+        assert_eq!(
+            result[0][0]
+                .json
+                .0
+                .get("responseText")
+                .and_then(|v| v.as_str()),
+            Some("ok")
+        );
     }
 }

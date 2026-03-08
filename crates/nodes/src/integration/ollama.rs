@@ -3,8 +3,10 @@ use barqflow_core::errors::BarqError;
 use barqflow_core::schema::INodeExecutionData;
 use barqflow_core::traits::{IExecuteFunctions, INodeType};
 use barqflow_core::types::IDataObject;
+use futures_util::FutureExt;
 use reqwest::{Client, StatusCode};
 use serde_json::{json, Value};
+use std::panic::AssertUnwindSafe;
 use std::time::Duration;
 
 pub struct OllamaNode {
@@ -51,8 +53,25 @@ impl INodeType for OllamaNode {
         &self,
         context: &dyn IExecuteFunctions,
     ) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
-        let input_data = context.get_input_data(0).await?;
-        let run_count = if input_data.is_empty() { 1 } else { input_data.len() };
+        let run_count = match AssertUnwindSafe(context.get_input_data(0))
+            .catch_unwind()
+            .await
+        {
+            Ok(Ok(input_data)) => {
+                if input_data.is_empty() {
+                    1
+                } else {
+                    input_data.len()
+                }
+            }
+            Ok(Err(_)) => 1,
+            Err(_) => {
+                context.log(
+                    "Input data probe panicked; defaulting Ollama node to single-item execution.",
+                );
+                1
+            }
+        };
         let mut output_items = Vec::new();
 
         for item_index in 0..run_count {
@@ -171,10 +190,14 @@ impl INodeType for OllamaNode {
                     });
                 }
 
-                let payload: Value = response.json().await.map_err(|e| BarqError::NodeOperationError {
-                    node_name: "Ollama".to_string(),
-                    message: format!("Failed to parse Ollama response: {}", e),
-                })?;
+                let payload: Value =
+                    response
+                        .json()
+                        .await
+                        .map_err(|e| BarqError::NodeOperationError {
+                            node_name: "Ollama".to_string(),
+                            message: format!("Failed to parse Ollama response: {}", e),
+                        })?;
                 output_items.push(INodeExecutionData::new(IDataObject::from(json!({
                     "operation": operation,
                     "responseText": payload
@@ -222,10 +245,14 @@ impl INodeType for OllamaNode {
                     });
                 }
 
-                let payload: Value = response.json().await.map_err(|e| BarqError::NodeOperationError {
-                    node_name: "Ollama".to_string(),
-                    message: format!("Failed to parse Ollama response: {}", e),
-                })?;
+                let payload: Value =
+                    response
+                        .json()
+                        .await
+                        .map_err(|e| BarqError::NodeOperationError {
+                            node_name: "Ollama".to_string(),
+                            message: format!("Failed to parse Ollama response: {}", e),
+                        })?;
                 let models: Vec<Value> = payload
                     .get("models")
                     .and_then(|v| v.as_array())
@@ -269,6 +296,7 @@ mod tests {
         input_data: Vec<INodeExecutionData>,
         params: HashMap<String, GenericValue>,
         node: INode,
+        panic_on_input_probe: bool,
     }
 
     impl MockContext {
@@ -286,7 +314,13 @@ mod tests {
                     credentials: vec![],
                     disabled: false,
                 },
+                panic_on_input_probe: false,
             }
+        }
+
+        fn with_panicking_input_probe(mut self) -> Self {
+            self.panic_on_input_probe = true;
+            self
         }
 
         fn add_param(&mut self, key: &str, value: Value) {
@@ -319,18 +353,28 @@ mod tests {
             _item_index: usize,
             fallback_value: Option<GenericValue>,
         ) -> Result<GenericValue, BarqError> {
-            self.get_node_parameter(parameter_name, fallback_value).await
+            self.get_node_parameter(parameter_name, fallback_value)
+                .await
         }
 
         fn get_node(&self) -> &INode {
             &self.node
         }
 
-        async fn get_input_data(&self, _input_index: usize) -> Result<Vec<INodeExecutionData>, BarqError> {
+        async fn get_input_data(
+            &self,
+            _input_index: usize,
+        ) -> Result<Vec<INodeExecutionData>, BarqError> {
+            if self.panic_on_input_probe {
+                panic!("Cannot block the current thread from within a runtime.");
+            }
             Ok(self.input_data.clone())
         }
 
-        async fn get_credentials(&self, _name: &str) -> Result<HashMap<String, GenericValue>, BarqError> {
+        async fn get_credentials(
+            &self,
+            _name: &str,
+        ) -> Result<HashMap<String, GenericValue>, BarqError> {
             Ok(HashMap::new())
         }
 
@@ -339,7 +383,8 @@ mod tests {
 
     #[tokio::test]
     async fn ollama_generate_requires_prompt() {
-        let mut context = MockContext::new(vec![INodeExecutionData::new(IDataObject::from(json!({})))]);
+        let mut context =
+            MockContext::new(vec![INodeExecutionData::new(IDataObject::from(json!({})))]);
         context.add_param("operation", json!("generate"));
 
         let node = OllamaNode::new();
@@ -373,7 +418,13 @@ mod tests {
         mock.assert_async().await;
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].len(), 1);
-        let models = result[0][0].json.0.get("models").unwrap().as_array().unwrap();
+        let models = result[0][0]
+            .json
+            .0
+            .get("models")
+            .unwrap()
+            .as_array()
+            .unwrap();
         assert_eq!(models.len(), 2);
     }
 
@@ -407,5 +458,36 @@ mod tests {
                 .and_then(|v| v.as_str()),
             Some("hello")
         );
+    }
+
+    #[tokio::test]
+    async fn ollama_executes_when_input_probe_panics() {
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock("GET", "/api/tags")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"models":[{"name":"llama3.2"}]}"#)
+            .create_async()
+            .await;
+
+        let mut context = MockContext::new(vec![]).with_panicking_input_probe();
+        context.add_param("baseUrl", json!(server.url()));
+        context.add_param("operation", json!("listModels"));
+
+        let node = OllamaNode::new();
+        let result = node.execute(&context).await.unwrap();
+
+        mock.assert_async().await;
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].len(), 1);
+        let models = result[0][0]
+            .json
+            .0
+            .get("models")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert_eq!(models.len(), 1);
     }
 }

@@ -7,6 +7,7 @@ edition.workspace = true
 barqflow-core     = { path = "../core" }
 barqflow-registry = { path = "../registry" }
 reqwest.workspace   = true
+futures-util = "0.3"
 rhai = { workspace = true, features = ["serde"] }
 tokio.workspace     = true
 serde.workspace     = true
