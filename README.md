@@ -62,9 +62,12 @@ The fastest and most reliable way to experience BarqFlow is via the provided `do
 
 2. **Spin up the stack (Postgres + Engine + UI):**
    *(Note: The `docker-compose.yml` and `Dockerfile` are neatly organized under the `docker/` folder rather than cluttering the root directory!)*
+   We've included a robust `deploy.sh` script to ensure you always build fresh images and wipe old cache variables:
    ```bash
-   docker-compose -f docker/docker-compose.yml up --build -d
+   ./deploy.sh
    ```
+   
+   *(Alternatively, you can manually run `docker-compose -f docker/docker-compose.yml up --build -d`)*
 
 3. **Access the application:**
    Navigate your browser to `http://localhost:3000`. You will see the login screen and can begin dragging nodes onto the canvas!
