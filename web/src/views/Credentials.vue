@@ -19,6 +19,10 @@ const newCredentialName = ref('')
 
 const saveLoading = ref(false)
 const testLoading = ref(false)
+const rowTestLoading = ref<Record<string, boolean>>({})
+const rowTestResult = ref<
+  Record<string, { status: 'valid' | 'invalid' | 'error'; message: string }>
+>({})
 const modalError = ref<string | null>(null)
 const modalSuccess = ref<string | null>(null)
 const lastTestValid = ref<boolean | null>(null)
@@ -158,6 +162,45 @@ async function fetchCredentials() {
   }
 }
 
+function credentialRuntimeStatus(
+  credId: string,
+): { label: string; dotClass: string; textClass: string; title: string } {
+  const result = rowTestResult.value[credId]
+  if (!result) {
+    return {
+      label: 'Saved',
+      dotClass: 'bg-green-500',
+      textClass: 'text-green-600',
+      title: 'Credential is saved. Click Test to verify runtime connectivity.',
+    }
+  }
+
+  if (result.status === 'valid') {
+    return {
+      label: 'Validated',
+      dotClass: 'bg-emerald-500',
+      textClass: 'text-emerald-600',
+      title: result.message,
+    }
+  }
+
+  if (result.status === 'invalid') {
+    return {
+      label: 'Invalid',
+      dotClass: 'bg-red-500',
+      textClass: 'text-red-600',
+      title: result.message,
+    }
+  }
+
+  return {
+    label: 'Error',
+    dotClass: 'bg-amber-500',
+    textClass: 'text-amber-600',
+    title: result.message,
+  }
+}
+
 function compactCredentialData(raw: Record<string, any>) {
   const compacted: Record<string, any> = {}
   Object.entries(raw || {}).forEach(([key, value]) => {
@@ -251,6 +294,40 @@ async function saveCredential() {
   }
 }
 
+async function testSavedCredential(id: string) {
+  rowTestLoading.value = {
+    ...rowTestLoading.value,
+    [id]: true,
+  }
+
+  try {
+    const res = await api.post(`/credentials/${id}/test`)
+    const valid = !!res.data?.valid
+    rowTestResult.value = {
+      ...rowTestResult.value,
+      [id]: {
+        status: valid ? 'valid' : 'invalid',
+        message: valid
+          ? 'Credential runtime test passed.'
+          : 'Credential runtime test returned invalid.',
+      },
+    }
+  } catch (err: any) {
+    rowTestResult.value = {
+      ...rowTestResult.value,
+      [id]: {
+        status: 'error',
+        message: err?.response?.data || err?.message || 'Credential runtime test failed.',
+      },
+    }
+  } finally {
+    rowTestLoading.value = {
+      ...rowTestLoading.value,
+      [id]: false,
+    }
+  }
+}
+
 async function deleteCredential(id: string) {
   const confirmed = window.confirm('Delete this credential?')
   if (!confirmed) return
@@ -258,6 +335,8 @@ async function deleteCredential(id: string) {
   try {
     await api.delete(`/credentials/${id}`)
     credentials.value = credentials.value.filter((c) => c.id !== id)
+    delete rowTestResult.value[id]
+    delete rowTestLoading.value[id]
   } catch (err) {
     console.error('Failed to delete credential', err)
   }
@@ -333,9 +412,17 @@ async function deleteCredential(id: string) {
                 <span class="text-sm font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-lg">{{ cred.credential_type }}</span>
               </td>
               <td class="px-8 py-6">
-                <div class="flex items-center gap-2">
-                  <div class="w-2 h-2 rounded-full bg-green-500"></div>
-                  <span class="text-sm font-bold capitalize text-green-600">Saved</span>
+                <div class="flex items-center gap-2" :title="credentialRuntimeStatus(cred.id).title">
+                  <div
+                    class="w-2 h-2 rounded-full"
+                    :class="credentialRuntimeStatus(cred.id).dotClass"
+                  />
+                  <span
+                    class="text-sm font-bold capitalize"
+                    :class="credentialRuntimeStatus(cred.id).textClass"
+                  >
+                    {{ credentialRuntimeStatus(cred.id).label }}
+                  </span>
                 </div>
               </td>
               <td class="px-8 py-6">
@@ -345,6 +432,14 @@ async function deleteCredential(id: string) {
               </td>
               <td class="px-8 py-6 text-right">
                 <div class="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    @click="testSavedCredential(cred.id)"
+                    :disabled="rowTestLoading[cred.id]"
+                    class="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Loader2 v-if="rowTestLoading[cred.id]" class="w-4 h-4 animate-spin" />
+                    <FlaskConical v-else class="w-4 h-4" />
+                  </button>
                   <button @click="openEditModal(cred)" class="p-2 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-all"><Edit2 class="w-4 h-4" /></button>
                   <button @click="deleteCredential(cred.id)" class="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"><Trash2 class="w-4 h-4" /></button>
                 </div>
