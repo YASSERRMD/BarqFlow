@@ -37,11 +37,35 @@ impl INodeType for PostgresNode {
 
         // Get credentials
         let creds = context.get_credentials("postgresApi").await?;
-        let host = creds.get("host").and_then(|v| v.as_str()).unwrap_or("localhost");
+        let host = creds.get("host").and_then(|v| v.as_str()).unwrap_or("");
         let port = creds.get("port").and_then(|v| v.as_i64()).unwrap_or(5432);
-        let database = creds.get("database").and_then(|v| v.as_str()).unwrap_or("postgres");
-        let username = creds.get("user").and_then(|v| v.as_str()).unwrap_or("postgres");
+        let database = creds.get("database").and_then(|v| v.as_str()).unwrap_or("");
+        let username = creds.get("user").and_then(|v| v.as_str()).unwrap_or("");
         let password = creds.get("password").and_then(|v| v.as_str()).unwrap_or("");
+
+        let mut missing = Vec::new();
+        if host.is_empty() {
+            missing.push("host");
+        }
+        if database.is_empty() {
+            missing.push("database");
+        }
+        if username.is_empty() {
+            missing.push("user");
+        }
+        if password.is_empty() {
+            missing.push("password");
+        }
+
+        if !missing.is_empty() {
+            return Err(BarqError::NodeOperationError {
+                node_name: "Postgres".to_string(),
+                message: format!(
+                    "Missing Postgres credential fields: {}. Go to /credentials and update 'postgresApi'.",
+                    missing.join(", ")
+                ),
+            });
+        }
 
         let conn_str = format!("postgres://{}:{}@{}:{}/{}", username, password, host, port, database);
 
