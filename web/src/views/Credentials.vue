@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { Plus, Search, Shield, Key, Lock, X, Trash2, FlaskConical, CheckCircle2, XCircle, Loader2 } from 'lucide-vue-next'
+import { Plus, Search, Shield, Key, Lock, X, Trash2, Edit2, FlaskConical, CheckCircle2, XCircle, Loader2 } from 'lucide-vue-next'
 import api from '../api'
 
 const credentials = ref<any[]>([])
@@ -11,6 +11,8 @@ const activeCategory = ref('All')
 const searchTerm = ref('')
 
 const isModalOpen = ref(false)
+const isEditMode = ref(false)
+const editingCredentialId = ref<string | null>(null)
 const selectedType = ref<any>(null)
 const newCredentialData = ref<any>({})
 const newCredentialName = ref('')
@@ -100,9 +102,38 @@ function resetModalState() {
 
 function openCreateModal() {
   isModalOpen.value = true
+  isEditMode.value = false
+  editingCredentialId.value = null
   selectedType.value = null
   newCredentialData.value = {}
   newCredentialName.value = ''
+  resetModalState()
+}
+
+function credentialTypeName(cred: any): string {
+  return String(cred?.credential_type || cred?.cred_type || '')
+}
+
+async function openEditModal(cred: any) {
+  if (credentialTypes.value.length === 0) {
+    await fetchCredentialTypes()
+  }
+
+  const credType = credentialTypeName(cred)
+  const matchedType = credentialTypes.value.find((type: any) => type.name === credType)
+
+  isModalOpen.value = true
+  isEditMode.value = true
+  editingCredentialId.value = String(cred.id)
+  selectedType.value =
+    matchedType ||
+    ({
+      name: credType,
+      displayName: credType,
+      properties: [],
+    } as any)
+  newCredentialName.value = String(cred.name || '')
+  newCredentialData.value = {}
   resetModalState()
 }
 
@@ -125,6 +156,15 @@ async function fetchCredentials() {
   } catch (err) {
     console.error(err)
   }
+}
+
+function compactCredentialData(raw: Record<string, any>) {
+  const compacted: Record<string, any> = {}
+  Object.entries(raw || {}).forEach(([key, value]) => {
+    if (value === undefined) return
+    compacted[key] = value
+  })
+  return compacted
 }
 
 async function fetchCredentialTypes() {
@@ -167,7 +207,7 @@ async function testCredential() {
 async function saveCredential() {
   if (!selectedType.value || !newCredentialName.value) return
 
-  if (lastTestValid.value !== true) {
+  if (!isEditMode.value && lastTestValid.value !== true) {
     modalError.value = 'Run and pass credential test before saving.'
     return
   }
@@ -177,13 +217,28 @@ async function saveCredential() {
   modalSuccess.value = null
 
   try {
-    await api.post('/credentials', {
-      name: newCredentialName.value,
-      cred_type: selectedType.value.name,
-      data: newCredentialData.value,
-    })
+    const dataPayload = compactCredentialData(newCredentialData.value)
+
+    if (isEditMode.value) {
+      if (!editingCredentialId.value) {
+        throw new Error('Missing credential id for edit operation')
+      }
+
+      await api.put(`/credentials/${editingCredentialId.value}`, {
+        name: newCredentialName.value,
+        data: dataPayload,
+      })
+    } else {
+      await api.post('/credentials', {
+        name: newCredentialName.value,
+        cred_type: selectedType.value.name,
+        data: dataPayload,
+      })
+    }
 
     isModalOpen.value = false
+    isEditMode.value = false
+    editingCredentialId.value = null
     newCredentialData.value = {}
     newCredentialName.value = ''
     selectedType.value = null
@@ -290,6 +345,7 @@ async function deleteCredential(id: string) {
               </td>
               <td class="px-8 py-6 text-right">
                 <div class="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button @click="openEditModal(cred)" class="p-2 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-all"><Edit2 class="w-4 h-4" /></button>
                   <button @click="deleteCredential(cred.id)" class="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"><Trash2 class="w-4 h-4" /></button>
                 </div>
               </td>
@@ -312,7 +368,9 @@ async function deleteCredential(id: string) {
     <div v-if="isModalOpen" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div class="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
         <div class="px-8 py-6 border-b border-slate-100 flex items-center justify-between">
-          <h2 class="text-2xl font-black text-slate-900">Add Credential</h2>
+          <h2 class="text-2xl font-black text-slate-900">
+            {{ isEditMode ? 'Edit Credential' : 'Add Credential' }}
+          </h2>
           <button @click="isModalOpen = false" class="p-2 text-slate-400 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 rounded-xl transition-colors">
             <X class="w-5 h-5" />
           </button>
@@ -344,9 +402,16 @@ async function deleteCredential(id: string) {
                 </div>
                 <div>
                   <h3 class="font-bold text-slate-900">{{ selectedType.displayName || selectedType.name }}</h3>
-                  <button @click="changeType" class="text-xs font-bold text-brand-600 hover:text-brand-700">Change Type</button>
+                  <button v-if="!isEditMode" @click="changeType" class="text-xs font-bold text-brand-600 hover:text-brand-700">Change Type</button>
                 </div>
               </div>
+            </div>
+
+            <div
+              v-if="isEditMode"
+              class="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2"
+            >
+              Leave fields empty to keep their existing values.
             </div>
 
             <div v-if="modalError" class="flex items-center gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
@@ -393,7 +458,7 @@ async function deleteCredential(id: string) {
         <div class="px-8 py-6 border-t border-slate-100 bg-white flex justify-end gap-3">
           <button @click="isModalOpen = false" class="px-6 py-3 font-bold text-slate-500 hover:bg-slate-50 rounded-xl transition-colors">Cancel</button>
           <button
-            v-if="selectedType"
+            v-if="selectedType && !isEditMode"
             @click="testCredential"
             :disabled="testLoading"
             class="px-6 py-3 font-bold text-slate-700 bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-200 rounded-xl transition-all flex items-center gap-2"
@@ -405,11 +470,11 @@ async function deleteCredential(id: string) {
           <button
             v-if="selectedType"
             @click="saveCredential"
-            :disabled="!newCredentialName || saveLoading || lastTestValid !== true"
+            :disabled="!newCredentialName || saveLoading || (!isEditMode && lastTestValid !== true)"
             class="px-8 py-3 font-bold text-white bg-slate-900 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-800 rounded-xl transition-all shadow-xl shadow-slate-900/10 hover:-translate-y-0.5 active:translate-y-0 flex items-center gap-2"
           >
             <Loader2 v-if="saveLoading" class="w-4 h-4 animate-spin" />
-            Save Credential
+            {{ isEditMode ? 'Update Credential' : 'Save Credential' }}
           </button>
         </div>
       </div>
