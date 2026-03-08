@@ -649,3 +649,28 @@ async fn run_workflow_execution(
 
     Ok(updated_exec)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::CreateExecutionRequest;
+
+    #[test]
+    fn create_execution_request_deserializes_stop_at_node_id() {
+        let payload = serde_json::json!({
+            "manual": true,
+            "stopAtNodeId": "node-123",
+        });
+
+        let request: CreateExecutionRequest = serde_json::from_value(payload).unwrap();
+        assert_eq!(request.manual, Some(true));
+        assert_eq!(request.stop_at_node_id.as_deref(), Some("node-123"));
+    }
+
+    #[test]
+    fn create_execution_request_allows_missing_optional_fields() {
+        let payload = serde_json::json!({});
+        let request: CreateExecutionRequest = serde_json::from_value(payload).unwrap();
+        assert!(request.manual.is_none());
+        assert!(request.stop_at_node_id.is_none());
+    }
+}
