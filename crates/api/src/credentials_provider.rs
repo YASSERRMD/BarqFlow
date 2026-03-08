@@ -46,7 +46,10 @@ impl CredentialProvider for RepositoryCredentialProvider {
 
         let credential = by_type.or(by_name).ok_or_else(|| BarqError::NodeOperationError {
                 node_name: "CredentialResolver".to_string(),
-                message: format!("No credential found for reference '{}'", name),
+                message: format!(
+                    "No credential found for reference '{}'. Go to /credentials and create one.",
+                    name
+                ),
             })?;
 
         let object = credential.data.as_object().ok_or_else(|| BarqError::NodeOperationError {

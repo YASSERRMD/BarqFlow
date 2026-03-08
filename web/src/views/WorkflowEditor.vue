@@ -12,6 +12,7 @@ import NodePanel from '../components/NodePanel.vue'
 import { useWorkflowStore } from '../stores/workflows'
 import { useNodeStore } from '../stores/nodes'
 import { useRoute, useRouter } from 'vue-router'
+import api from '../api'
 
 const route = useRoute()
 const router = useRouter()
@@ -23,8 +24,13 @@ const nodes = ref<any[]>([])
 const edges = ref<any[]>([])
 const selectedNode = ref<any>(null)
 const showNodeCreator = ref(false)
-const executionNotice = ref<{ type: 'success' | 'error'; message: string } | null>(null)
+const executionNotice = ref<{ type: 'success' | 'error'; message: string; showCredentialsAction?: boolean } | null>(null)
 const nodeTestState = ref<{ nodeId: string; status: 'running' | 'success' | 'error'; message: string } | null>(null)
+
+const NODE_CREDENTIAL_REQUIREMENTS: Record<string, { credType: string; label: string }> = {
+  'barqflow-nodes.openai': { credType: 'openAiApi', label: 'OpenAI API credential' },
+  'barqflow-nodes.postgres': { credType: 'postgresApi', label: 'Postgres credential' },
+}
 
 function buildDefaultProperties(schema: any): Record<string, any> {
   const defaults: Record<string, any> = {}
@@ -166,6 +172,59 @@ function getCurrentWorkflowId(): string | null {
   return workflowStore.activeWorkflow?.id || null
 }
 
+function openCredentialsPage() {
+  router.push('/credentials')
+}
+
+function isCredentialErrorMessage(message: string): boolean {
+  const text = message.toLowerCase()
+  return (
+    text.includes('no credential found') ||
+    text.includes('missing openai api key') ||
+    text.includes('missing postgres credential fields') ||
+    text.includes('go to /credentials')
+  )
+}
+
+async function ensureRequiredCredentialsPresent(): Promise<{ ok: boolean; message?: string }> {
+  const needed = new Map<string, string>()
+
+  nodes.value.forEach((node: any) => {
+    const nodeType = node?.data?.schema?.name || node?.data?.type
+    const requirement = NODE_CREDENTIAL_REQUIREMENTS[nodeType]
+    if (requirement) {
+      needed.set(requirement.credType, requirement.label)
+    }
+  })
+
+  if (needed.size === 0) {
+    return { ok: true }
+  }
+
+  try {
+    const response = await api.get('/credentials')
+    const available = new Set(
+      (response.data || []).map((cred: any) => cred?.cred_type || cred?.credential_type),
+    )
+
+    const missing = Array.from(needed.entries())
+      .filter(([credType]) => !available.has(credType))
+      .map(([_, label]) => label)
+
+    if (missing.length > 0) {
+      return {
+        ok: false,
+        message: `Missing required credentials: ${missing.join(', ')}. Open Credentials to add them.`,
+      }
+    }
+
+    return { ok: true }
+  } catch {
+    // Do not block execution if preflight lookup fails; runtime handler will still surface concrete errors.
+    return { ok: true }
+  }
+}
+
 function applyExecutionResult(result: any) {
   nodes.value.forEach((n) => {
     const nodeName = n.data.label
@@ -250,6 +309,16 @@ async function handleExecute() {
     return
   }
 
+  const preflight = await ensureRequiredCredentialsPresent()
+  if (!preflight.ok) {
+    executionNotice.value = {
+      type: 'error',
+      message: preflight.message || 'Missing required credentials.',
+      showCredentialsAction: true,
+    }
+    return
+  }
+
   try {
     const result = await runWorkflow(workflowId)
     if (result?.status === 'success') {
@@ -258,9 +327,11 @@ async function handleExecute() {
         message: 'Workflow executed successfully.',
       }
     } else {
+      const message = extractNodeError(result)
       executionNotice.value = {
         type: 'error',
-        message: extractNodeError(result),
+        message,
+        showCredentialsAction: isCredentialErrorMessage(message),
       }
     }
   } catch (err: any) {
@@ -268,9 +339,11 @@ async function handleExecute() {
       n.data.status = 'error'
     })
 
+    const message = err?.response?.data || err?.message || 'Execution failed.'
     executionNotice.value = {
       type: 'error',
-      message: err?.response?.data || err?.message || 'Execution failed.',
+      message,
+      showCredentialsAction: isCredentialErrorMessage(String(message)),
     }
   }
 }
@@ -300,6 +373,22 @@ async function handleTestNode(node: any) {
     return
   }
 
+  const preflight = await ensureRequiredCredentialsPresent()
+  if (!preflight.ok) {
+    const message = preflight.message || 'Missing required credentials.'
+    nodeTestState.value = {
+      nodeId: node.id,
+      status: 'error',
+      message,
+    }
+    executionNotice.value = {
+      type: 'error',
+      message,
+      showCredentialsAction: true,
+    }
+    return
+  }
+
   try {
     const result = await runWorkflow(workflowId)
     const nodeResult = result?.data?.[node.data.label]
@@ -314,17 +403,29 @@ async function handleTestNode(node: any) {
         message: `Test passed. Outputs: ${outputsCount}`,
       }
     } else {
+      const message = extractNodeError(result, node.data.label)
       nodeTestState.value = {
         nodeId: node.id,
         status: 'error',
-        message: extractNodeError(result, node.data.label),
+        message,
+      }
+      executionNotice.value = {
+        type: 'error',
+        message,
+        showCredentialsAction: isCredentialErrorMessage(message),
       }
     }
   } catch (err: any) {
+    const message = err?.response?.data || err?.message || 'Node test failed.'
     nodeTestState.value = {
       nodeId: node.id,
       status: 'error',
-      message: err?.response?.data || err?.message || 'Node test failed.',
+      message,
+    }
+    executionNotice.value = {
+      type: 'error',
+      message,
+      showCredentialsAction: isCredentialErrorMessage(String(message)),
     }
   }
 }
@@ -447,6 +548,13 @@ function onDrop(event: DragEvent) {
         ]"
       >
         {{ executionNotice.message }}
+        <button
+          v-if="executionNotice.showCredentialsAction"
+          @click="openCredentialsPage"
+          class="ml-3 inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold border border-current/30 hover:bg-white/30"
+        >
+          Open Credentials
+        </button>
       </div>
 
       <div class="absolute bottom-6 right-6 z-10 pointer-events-auto">

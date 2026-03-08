@@ -551,6 +551,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_get_input_data_inside_runtime_does_not_panic() {
+        let node = create_test_node("InputNode");
+        let mut input_data = ITaskDataConnections::new();
+        input_data.push(0, vec![INodeExecutionData::new(IDataObject::from(json!({ "foo": "bar" })))]);
+
+        let context = NodeExecutionContext::new(
+            node,
+            input_data,
+            None,
+            uuid::Uuid::new_v4(),
+            Arc::new(RwLock::new(HashMap::new())),
+        );
+
+        let input = context.get_input_data(0).unwrap();
+        assert_eq!(input.len(), 1);
+    }
+
+    #[tokio::test]
     async fn test_builder_pattern() {
         let node = create_test_node("BuilderNode");
         let run_id = uuid::Uuid::new_v4();
