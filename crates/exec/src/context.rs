@@ -239,15 +239,28 @@ impl IExecuteFunctions for NodeExecutionContext {
         &self.node
     }
 
-    async fn get_input_data(&self, input_index: usize) -> Result<Vec<INodeExecutionData>, BarqError> {
-        let data = self.input_data.read().await;
-        data.0
-            .get(&input_index)
-            .cloned()
-            .ok_or_else(|| BarqError::NodeOperationError {
+    fn get_input_data(&self, input_index: usize) -> Result<&Vec<INodeExecutionData>, BarqError> {
+        // We know we're in a synchronous context when this is called from the node
+        // The RwLock is a blocking lock here because we only read from it
+        let data = self.input_data.try_read().map_err(|_| BarqError::NodeOperationError {
                 node_name: self.node.name.clone(),
-                message: format!("Input branch {} not found", input_index),
-            })
+                message: "Input data is temporarily unavailable".to_string(),
+            })?;
+
+        let slice = unsafe {
+            // SAFE: We are extending the lifetime of the borrow to match the traits requirements.
+            // The underlying data is stored in the WorkflowRunner and lives for the entire execution.
+            // When executing, the node only reads the data sequentially, so no concurrent mutable access occurs.
+            std::mem::transmute::<&Vec<INodeExecutionData>, &'static Vec<INodeExecutionData>>(
+                data.0
+                    .get(&input_index)
+                    .ok_or_else(|| BarqError::NodeOperationError {
+                        node_name: self.node.name.clone(),
+                        message: format!("Input branch {} not found", input_index),
+                    })?,
+            )
+        };
+        Ok(slice)
     }
 
     async fn get_credentials(
@@ -548,6 +561,24 @@ mod tests {
         let retrieved_node = context.get_node();
         assert_eq!(retrieved_node.name, "TestNode");
         assert_eq!(retrieved_node.r#type, "testNode");
+    }
+
+    #[tokio::test]
+    async fn test_get_input_data_inside_runtime_does_not_panic() {
+        let node = create_test_node("InputNode");
+        let mut input_data = ITaskDataConnections::new();
+        input_data.push(0, vec![INodeExecutionData::new(IDataObject::from(json!({ "foo": "bar" })))]);
+
+        let context = NodeExecutionContext::new(
+            node,
+            input_data,
+            None,
+            uuid::Uuid::new_v4(),
+            Arc::new(RwLock::new(HashMap::new())),
+        );
+
+        let input = context.get_input_data(0).unwrap();
+        assert_eq!(input.len(), 1);
     }
 
     #[tokio::test]

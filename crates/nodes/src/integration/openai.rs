@@ -46,7 +46,7 @@ impl INodeType for OpenAINode {
         if api_key.is_empty() {
             return Err(BarqError::NodeOperationError {
                 node_name: "OpenAI".to_string(),
-                message: "Missing 'apiKey' from credentials".to_string(),
+                message: "Missing OpenAI API key in credential 'openAiApi'. Go to /credentials and add or update it.".to_string(),
             });
         }
 
