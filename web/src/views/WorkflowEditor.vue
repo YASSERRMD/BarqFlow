@@ -249,7 +249,79 @@ function isCredentialErrorMessage(message: string): boolean {
   )
 }
 
-async function ensureRequiredCredentialsPresent(): Promise<{ ok: boolean; message?: string }> {
+function matchesDisplayValue(actual: any, expected: any): boolean {
+  return JSON.stringify(actual) === JSON.stringify(expected)
+}
+
+function isPropertyVisibleForNode(prop: any, properties: Record<string, any>): boolean {
+  const show = prop?.displayOptions?.show
+  if (!show) return true
+
+  const sourceName = String(show?.property || '')
+  if (!sourceName) return true
+
+  const expectedValues = Array.isArray(show?.values) ? show.values : []
+  if (expectedValues.length === 0) return true
+
+  const actualValue = properties?.[sourceName]
+  return expectedValues.some((expected: any) => matchesDisplayValue(actualValue, expected))
+}
+
+function isMissingRequiredValue(prop: any, value: any): boolean {
+  if (value === undefined || value === null) return true
+
+  if (typeof value === 'string') {
+    return value.trim().length === 0
+  }
+
+  const type = String(prop?.type || '')
+  if ((type === 'collection' || type === 'fixedCollection') && Array.isArray(value)) {
+    return value.length === 0
+  }
+
+  return false
+}
+
+function collectMissingRequiredProperties(node: any): string[] {
+  const schemaProperties = Array.isArray(node?.data?.schema?.properties)
+    ? node.data.schema.properties
+    : []
+  const properties = node?.data?.properties || {}
+
+  return schemaProperties
+    .filter((prop: any) => prop?.required === true)
+    .filter((prop: any) => isPropertyVisibleForNode(prop, properties))
+    .filter((prop: any) => isMissingRequiredValue(prop, properties[prop.name]))
+    .map((prop: any) => String(prop?.displayName || prop?.name || 'unknown'))
+}
+
+function validateRequiredParameters(scopeNodeIds?: Set<string>): { ok: boolean; message?: string } {
+  const missingByNode: string[] = []
+
+  nodes.value.forEach((node: any) => {
+    const nodeId = String(node?.id || '')
+    if (scopeNodeIds && !scopeNodeIds.has(nodeId)) return
+
+    const missing = collectMissingRequiredProperties(node)
+    if (missing.length > 0) {
+      const label = String(node?.data?.label || nodeId || 'Node')
+      missingByNode.push(`${label} -> ${missing.join(', ')}`)
+    }
+  })
+
+  if (missingByNode.length > 0) {
+    return {
+      ok: false,
+      message: `Missing required parameters: ${missingByNode.join('; ')}`,
+    }
+  }
+
+  return { ok: true }
+}
+
+async function ensureRequiredCredentialsPresent(
+  scopeNodeIds?: Set<string>,
+): Promise<{ ok: boolean; message?: string }> {
   const requiredByNode: Array<{
     nodeId: string
     nodeLabel: string
@@ -258,12 +330,15 @@ async function ensureRequiredCredentialsPresent(): Promise<{ ok: boolean; messag
   }> = []
 
   nodes.value.forEach((node: any) => {
+    const nodeId = String(node?.id || '')
+    if (scopeNodeIds && !scopeNodeIds.has(nodeId)) return
+
     const refs = nodeCredentialReferences(node)
     refs
       .filter((ref) => ref.required)
       .forEach((ref) =>
         requiredByNode.push({
-          nodeId: String(node?.id || ''),
+          nodeId,
           nodeLabel: String(node?.data?.label || node?.id || 'Node'),
           credentialType: ref.credentialType,
           displayName: ref.displayName || ref.credentialType,
@@ -350,6 +425,46 @@ function extractNodeError(result: any, nodeLabel?: string): string {
   return 'Execution failed'
 }
 
+function truncatePreview(text: string, maxLength = 160): string {
+  const normalized = text.replace(/\s+/g, ' ').trim()
+  if (normalized.length <= maxLength) return normalized
+  return `${normalized.slice(0, maxLength - 3)}...`
+}
+
+function extractNodeOutputPreview(nodeResult: any): string | null {
+  const firstBranch = Array.isArray(nodeResult?.outputs) ? nodeResult.outputs[0] : null
+  const firstItem = Array.isArray(firstBranch) ? firstBranch[0] : null
+  const firstJson = firstItem?.json && typeof firstItem.json === 'object' ? firstItem.json : null
+  if (!firstJson) return null
+
+  const responseText = [
+    firstJson?.responseText,
+    firstJson?.text,
+    firstJson?.output,
+    firstJson?.body?.responseText,
+    firstJson?.body,
+  ].find((value) => typeof value === 'string' && String(value).trim().length > 0)
+
+  if (typeof responseText === 'string') {
+    return `Preview: ${truncatePreview(responseText)}`
+  }
+
+  if (Array.isArray(firstJson?.models) && firstJson.models.length > 0) {
+    const modelNames = firstJson.models
+      .slice(0, 3)
+      .map((model: any) => String(model))
+      .join(', ')
+    return `Models: ${modelNames}`
+  }
+
+  const keys = Object.keys(firstJson || {})
+  if (keys.length > 0) {
+    return `Output keys: ${keys.slice(0, 4).join(', ')}`
+  }
+
+  return null
+}
+
 async function handleSave() {
   const flow = toObject()
   const payloadNodes = flow.nodes.map((n: any) => toWorkflowNode(n))
@@ -398,6 +513,15 @@ async function handleExecute() {
     executionNotice.value = {
       type: 'error',
       message: 'Save workflow first before execution.',
+    }
+    return
+  }
+
+  const requiredParams = validateRequiredParameters()
+  if (!requiredParams.ok) {
+    executionNotice.value = {
+      type: 'error',
+      message: requiredParams.message || 'Missing required parameters.',
     }
     return
   }
@@ -466,7 +590,23 @@ async function handleTestNode(node: any) {
     return
   }
 
-  const preflight = await ensureRequiredCredentialsPresent()
+  const scopedNodes = new Set<string>([String(node.id)])
+  const requiredParams = validateRequiredParameters(scopedNodes)
+  if (!requiredParams.ok) {
+    const message = requiredParams.message || 'Missing required parameters.'
+    nodeTestState.value = {
+      nodeId: node.id,
+      status: 'error',
+      message,
+    }
+    executionNotice.value = {
+      type: 'error',
+      message,
+    }
+    return
+  }
+
+  const preflight = await ensureRequiredCredentialsPresent(scopedNodes)
   if (!preflight.ok) {
     const message = preflight.message || 'Missing required credentials.'
     nodeTestState.value = {
@@ -487,13 +627,20 @@ async function handleTestNode(node: any) {
     const nodeResult = result?.data?.[node.data.label]
 
     if (nodeResult?.success) {
-      const outputsCount = Array.isArray(nodeResult.outputs)
-        ? nodeResult.outputs.length
+      const outputsCount = Array.isArray(nodeResult?.outputs)
+        ? nodeResult.outputs.reduce(
+            (count: number, branch: any) => count + (Array.isArray(branch) ? branch.length : 0),
+            0,
+          )
         : 0
+      const preview = extractNodeOutputPreview(nodeResult)
       nodeTestState.value = {
         nodeId: node.id,
         status: 'success',
-        message: `Test passed. Outputs: ${outputsCount}`,
+        message:
+          preview || outputsCount > 0
+            ? `Test passed. ${preview || `Outputs: ${outputsCount}`}`
+            : 'Test passed. No output items returned.',
       }
     } else {
       const message = extractNodeError(result, node.data.label)
