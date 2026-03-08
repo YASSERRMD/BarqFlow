@@ -26,6 +26,7 @@ const selectedNode = ref<any>(null)
 const showNodeCreator = ref(false)
 const executionNotice = ref<{ type: 'success' | 'error'; message: string; showCredentialsAction?: boolean } | null>(null)
 const nodeTestState = ref<{ nodeId: string; status: 'running' | 'success' | 'error'; message: string } | null>(null)
+const executionInProgress = ref(false)
 
 const NODE_CREDENTIAL_REQUIREMENTS: Record<
   string,
@@ -543,11 +544,47 @@ async function runWorkflow(
     }
   })
 
-  const result = targetNodeId
+  const execution = targetNodeId
     ? await workflowStore.executeWorkflowToNode(workflowId, targetNodeId, payload)
     : await workflowStore.executeWorkflow(workflowId, payload)
-  applyExecutionResult(result, targetNodeId)
-  return result
+
+  const executionId = String(execution?.id || '')
+  if (!executionId) {
+    applyExecutionResult(execution, targetNodeId)
+    return execution
+  }
+
+  const isTerminal = (status: string) =>
+    ['success', 'failed', 'error', 'stopped', 'cancelled', 'crashed', 'waiting'].includes(
+      status.toLowerCase(),
+    )
+
+  executionInProgress.value = true
+  try {
+    let latest = execution
+    const startedAt = Date.now()
+    const timeoutMs = 120_000
+
+    while (!isTerminal(String(latest?.status || ''))) {
+      if (Date.now() - startedAt > timeoutMs) {
+        latest = {
+          ...latest,
+          status: 'failed',
+          data: { error: 'Execution polling timed out after 120 seconds.' },
+        }
+        break
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 500))
+      const response = await api.get(`/executions/${executionId}`)
+      latest = response.data
+    }
+
+    applyExecutionResult(latest, targetNodeId)
+    return latest
+  } finally {
+    executionInProgress.value = false
+  }
 }
 
 async function handleExecute() {
@@ -595,6 +632,11 @@ async function handleExecute() {
       executionNotice.value = {
         type: 'success',
         message: 'Workflow executed successfully.',
+      }
+    } else if (result?.status === 'waiting') {
+      executionNotice.value = {
+        type: 'success',
+        message: 'Workflow is waiting for external resume input.',
       }
     } else {
       const message = extractNodeError(result)
@@ -684,6 +726,15 @@ async function handleTestNode(node: any) {
       { manual: true },
       String(node.id),
     )
+    if (result?.status === 'waiting') {
+      nodeTestState.value = {
+        nodeId: node.id,
+        status: 'success',
+        message: 'Test reached a Wait state and is awaiting resume input.',
+      }
+      return
+    }
+
     const nodeResult = result?.data?.[node.data.label]
 
     if (nodeResult?.success) {
@@ -829,12 +880,12 @@ function onDrop(event: DragEvent) {
           </button>
           <button
             @click="handleExecute"
-            :disabled="workflowStore.loading"
+            :disabled="workflowStore.loading || executionInProgress"
             class="bg-brand-500 hover:bg-brand-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors font-semibold text-sm disabled:opacity-70 shadow-sm"
           >
-            <Loader2 v-if="workflowStore.loading" class="w-4 h-4 animate-spin" />
+            <Loader2 v-if="workflowStore.loading || executionInProgress" class="w-4 h-4 animate-spin" />
             <Play v-else class="w-4 h-4 fill-current" />
-            {{ workflowStore.loading ? 'Executing...' : 'Execute Workflow' }}
+            {{ workflowStore.loading || executionInProgress ? 'Executing...' : 'Execute Workflow' }}
           </button>
         </div>
       </div>

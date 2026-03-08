@@ -603,51 +603,69 @@ async fn run_workflow_execution(
         );
     }
 
-    let results = match run_task.await {
-        Ok(result) => result,
-        Err(join_err) if join_err.is_cancelled() => Err(barqflow_core::errors::BarqError::ExecutionCancelledError {
-            execution_id: new_exec.id.to_string(),
-        }),
-        Err(join_err) => Err(barqflow_core::errors::BarqError::InternalError(format!(
-            "Execution task join error: {}",
-            join_err
-        ))),
-    };
-    {
-        let mut active = state.active_executions.write().await;
-        active.remove(&new_exec.id);
-    }
+    let state_for_completion = state.clone();
+    let execution_id = new_exec.id;
+    tokio::spawn(async move {
+        let results = match run_task.await {
+            Ok(result) => result,
+            Err(join_err) if join_err.is_cancelled() => {
+                Err(barqflow_core::errors::BarqError::ExecutionCancelledError {
+                    execution_id: execution_id.to_string(),
+                })
+            }
+            Err(join_err) => Err(barqflow_core::errors::BarqError::InternalError(format!(
+                "Execution task join error: {}",
+                join_err
+            ))),
+        };
 
-    // Convert results to generic Value
-    let (status, data) = match results {
-        Ok(res) => summarize_node_results(res),
-        Err(barqflow_core::errors::BarqError::SuspendExecution {
-            node_name,
-            wait_config,
-        }) => {
-            let waiting_data =
-                build_waiting_execution_data(&state, new_exec.id, node_name.as_str(), wait_config)
-                    .await?;
-            ("waiting".to_string(), waiting_data)
+        {
+            let mut active = state_for_completion.active_executions.write().await;
+            active.remove(&execution_id);
         }
-        Err(barqflow_core::errors::BarqError::ExecutionCancelledError { .. }) => (
-            "stopped".to_string(),
-            serde_json::json!({
-                "stopped": true,
-                "reason": "Execution cancelled",
-            }),
-        ),
-        Err(e) => ("failed".to_string(), serde_json::json!({"error": e.to_string()})),
-    };
 
-    let updated_exec = state
-        .execution_repo
-        .update_status_and_data(new_exec.id, status.as_str(), data)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .unwrap();
+        let (status, data) = match results {
+            Ok(res) => summarize_node_results(res),
+            Err(barqflow_core::errors::BarqError::SuspendExecution {
+                node_name,
+                wait_config,
+            }) => match build_waiting_execution_data(
+                &state_for_completion,
+                execution_id,
+                node_name.as_str(),
+                wait_config,
+            )
+            .await
+            {
+                Ok(waiting_data) => ("waiting".to_string(), waiting_data),
+                Err((code, message)) => (
+                    "failed".to_string(),
+                    serde_json::json!({
+                        "error": format!(
+                            "Failed to persist wait state ({}): {}",
+                            code.as_u16(),
+                            message
+                        )
+                    }),
+                ),
+            },
+            Err(barqflow_core::errors::BarqError::ExecutionCancelledError { .. }) => (
+                "stopped".to_string(),
+                serde_json::json!({
+                    "stopped": true,
+                    "reason": "Execution cancelled",
+                }),
+            ),
+            Err(e) => ("failed".to_string(), serde_json::json!({"error": e.to_string()})),
+        };
 
-    Ok(updated_exec)
+        let _ = state_for_completion
+            .execution_repo
+            .update_status_and_data(execution_id, status.as_str(), data)
+            .await;
+    });
+
+    Ok(new_exec)
 }
 
 #[cfg(test)]
