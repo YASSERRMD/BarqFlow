@@ -3,12 +3,14 @@ import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Plus, Search, MoreVertical, Calendar, Trash2, Edit2, Loader2, Workflow, Power, Copy } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { useWorkflowStore } from '../stores/workflows'
+import api from '../api'
 
 const router = useRouter()
 const workflowStore = useWorkflowStore()
 const searchTerm = ref('')
 const statusFilter = ref('all')
 let searchTimer: ReturnType<typeof setTimeout> | null = null
+const latestExecutionByWorkflow = ref<Record<string, any>>({})
 
 function formatRelativeTime(iso?: string | null): string {
   if (!iso) return 'Unknown'
@@ -62,7 +64,78 @@ async function fetchWorkflows() {
   await workflowStore.fetchWorkflows(buildListParams())
 }
 
-onMounted(fetchWorkflows)
+async function fetchExecutionMetadata() {
+  try {
+    const response = await api.get('/executions', { params: { limit: 500 } })
+    const executions = Array.isArray(response.data) ? response.data : []
+    const nextMap: Record<string, any> = {}
+
+    for (const exec of executions) {
+      const workflowId = String(exec?.workflow_id || '')
+      if (!workflowId) continue
+
+      const current = nextMap[workflowId]
+      const currentTs = current?.started_at
+        ? new Date(current.started_at).getTime()
+        : Number.NEGATIVE_INFINITY
+      const candidateTs = exec?.started_at
+        ? new Date(exec.started_at).getTime()
+        : Number.NEGATIVE_INFINITY
+
+      if (!current || candidateTs >= currentTs) {
+        nextMap[workflowId] = exec
+      }
+    }
+
+    latestExecutionByWorkflow.value = nextMap
+  } catch (err) {
+    console.error('Failed to fetch executions metadata', err)
+  }
+}
+
+function workflowNodeCount(wf: any): number {
+  const nodes = wf?.nodes
+  if (Array.isArray(nodes)) return nodes.length
+
+  if (typeof nodes === 'string') {
+    try {
+      const parsed = JSON.parse(nodes)
+      if (Array.isArray(parsed)) return parsed.length
+    } catch {
+      return 0
+    }
+  }
+
+  return 0
+}
+
+function nodeCountLabel(wf: any): string {
+  const count = workflowNodeCount(wf)
+  return `${count} node${count === 1 ? '' : 's'}`
+}
+
+function workflowLastExecutionIso(wf: any): string | null {
+  const execution = latestExecutionByWorkflow.value[String(wf?.id || '')]
+  return execution?.started_at || execution?.stopped_at || null
+}
+
+function workflowLastExecutionLabel(wf: any): string {
+  const iso = workflowLastExecutionIso(wf)
+  return iso ? formatRelativeTime(iso) : 'No runs yet'
+}
+
+function workflowLastExecutionTitle(wf: any): string {
+  const iso = workflowLastExecutionIso(wf)
+  if (!iso) return 'No runs yet'
+
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return 'No runs yet'
+  return date.toLocaleString()
+}
+
+onMounted(async () => {
+  await Promise.all([fetchWorkflows(), fetchExecutionMetadata()])
+})
 
 watch([searchTerm, statusFilter], () => {
   if (searchTimer) clearTimeout(searchTimer)
@@ -85,6 +158,7 @@ async function deleteWorkflow(id: string) {
 
   try {
     await workflowStore.deleteWorkflow(id)
+    await fetchExecutionMetadata()
   } catch (err) {
     console.error('Failed to delete workflow', err)
   }
@@ -93,6 +167,7 @@ async function deleteWorkflow(id: string) {
 async function toggleWorkflowActive(id: string, current: boolean) {
   try {
     await workflowStore.toggleWorkflowActive(id, !current)
+    await fetchExecutionMetadata()
     if (statusFilter.value !== 'all') {
       await fetchWorkflows()
     }
@@ -104,6 +179,7 @@ async function toggleWorkflowActive(id: string, current: boolean) {
 async function duplicateWorkflow(id: string) {
   try {
     const duplicated = await workflowStore.duplicateWorkflow(id)
+    await fetchExecutionMetadata()
     router.push(`/workflow/${duplicated.id}`)
   } catch (err) {
     console.error('Failed to duplicate workflow', err)
@@ -195,7 +271,12 @@ async function createWorkflow() {
             </div>
             
             <h3 class="text-2xl font-display font-bold text-slate-900 mb-2 truncate group-hover:text-brand-600 transition-colors">{{ wf.name }}</h3>
-            <p class="text-slate-500 font-medium line-clamp-2 leading-relaxed">Automate your data sync seamlessly connecting native integrations.</p>
+            <p class="text-slate-500 font-medium leading-relaxed">
+              {{ nodeCountLabel(wf) }} configured.
+            </p>
+            <p class="text-slate-400 text-sm font-medium mt-1" :title="workflowLastExecutionTitle(wf)">
+              Last run: {{ workflowLastExecutionLabel(wf) }}
+            </p>
           </div>
 
           <div class="flex items-center justify-between mt-6 relative z-10 border-t border-slate-100 pt-4">
