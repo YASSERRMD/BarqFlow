@@ -34,6 +34,7 @@ impl AppState {
         
         // Setup Credential Registry
         let credential_registry = Arc::new(CredentialRegistry::new());
+        barqflow_nodes::register_all_credentials(&credential_registry);
 
         // Setup Scheduler and active execution map
         let job_scheduler = JobScheduler::new().await?;
