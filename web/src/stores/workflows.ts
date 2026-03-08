@@ -41,16 +41,19 @@ export const useWorkflowStore = defineStore('workflows', {
                 if (workflow.id) {
                     const response = await api.put(`/workflows/${workflow.id}`, workflow);
                     this.workflows = this.workflows.map((wf) =>
-                        wf.id === workflow.id ? response.data : wf
+                        wf.id === workflow.id ? response.data : wf,
                     );
                     this.activeWorkflow = response.data;
-                } else {
-                    const response = await api.post('/workflows', workflow);
-                    this.workflows.push(response.data);
-                    this.activeWorkflow = response.data;
+                    return response.data;
                 }
+
+                const response = await api.post('/workflows', workflow);
+                this.workflows.push(response.data);
+                this.activeWorkflow = response.data;
+                return response.data;
             } catch (err: any) {
                 this.error = err.message;
+                throw err;
             }
         },
         async deleteWorkflow(id: string) {
@@ -69,7 +72,7 @@ export const useWorkflowStore = defineStore('workflows', {
             try {
                 const response = await api.put(`/workflows/${id}/activate`, { active });
                 this.workflows = this.workflows.map((wf) =>
-                    wf.id === id ? response.data : wf
+                    wf.id === id ? response.data : wf,
                 );
                 if (this.activeWorkflow?.id === id) {
                     this.activeWorkflow = response.data;
@@ -101,6 +104,6 @@ export const useWorkflowStore = defineStore('workflows', {
             } finally {
                 this.loading = false;
             }
-        }
+        },
     },
 });
