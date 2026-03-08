@@ -510,6 +510,18 @@ async fn run_workflow_execution(
     // 2. Parse nodes and connections into CoreWorkflowDef
     let nodes: Vec<barqflow_core::schema::INode> = serde_json::from_value(wf_entity.nodes.clone())
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to parse nodes: {}", e)))?;
+
+    if let Some(target) = stop_after_node_id.as_ref() {
+        let target_exists = nodes
+            .iter()
+            .any(|node| node.id.to_string() == *target || node.name == *target);
+        if !target_exists {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!("Target node '{}' was not found in this workflow", target),
+            ));
+        }
+    }
     
     let connections: std::collections::HashMap<String, barqflow_core::schema::INodeConnections> = serde_json::from_value(wf_entity.connections.clone())
         .unwrap_or_default();
