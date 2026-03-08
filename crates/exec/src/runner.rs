@@ -316,15 +316,17 @@ impl WorkflowRunner {
                             .with_workflow_id(context.workflow.id.0.to_string())
                             .with_node_index(n_idx.index())
                             .with_node_data(serde_json::to_value(&in_data).unwrap_or(serde_json::Value::Null))
-                            .with_wait_config(config)
+                            .with_wait_config(config.clone())
                             .build();
                             
                         if let Ok(cp) = checkpoint {
                             let _ = manager.save_checkpoint(cp).await;
                         }
 
-                        // For now, break the loop and return what we have computed so far.
-                        return Ok(results);
+                        return Err(BarqError::SuspendExecution {
+                            node_name: node.name.clone(),
+                            wait_config: serde_json::to_value(config).unwrap_or(serde_json::Value::Null),
+                        });
                     },
                     Err((n_idx, in_data, BarqError::ExecuteSubWorkflow { workflow_id, input_data })) => {
                         self.handle_subworkflow_execution(
@@ -524,6 +526,7 @@ impl WorkflowRunner {
                 let (node_index, result) = match execute_result {
                     Ok((n_idx, _in_data, res)) => (n_idx, res),
                     Err((n_idx, in_data, BarqError::SuspendExecution { node_name: _, wait_config })) => {
+                        let node = &parsed.graph[n_idx];
                         let config: crate::checkpoint::WaitConfig = serde_json::from_value(wait_config)
                             .unwrap_or(crate::checkpoint::WaitConfig {
                                 wait_type: crate::checkpoint::WaitType::Time,
@@ -540,12 +543,15 @@ impl WorkflowRunner {
                             .with_workflow_id(context.workflow.id.0.to_string())
                             .with_node_index(n_idx.index())
                             .with_node_data(serde_json::to_value(&in_data).unwrap_or(serde_json::Value::Null))
-                            .with_wait_config(config)
+                            .with_wait_config(config.clone())
                             .build();
                         if let Ok(cp) = checkpoint {
                             let _ = manager.save_checkpoint(cp).await;
                         }
-                        return Ok(results);
+                        return Err(BarqError::SuspendExecution {
+                            node_name: node.name.clone(),
+                            wait_config: serde_json::to_value(config).unwrap_or(serde_json::Value::Null),
+                        });
                     },
                     Err((n_idx, in_data, BarqError::ExecuteSubWorkflow { workflow_id, input_data })) => {
                         self.handle_subworkflow_execution(

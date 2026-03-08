@@ -1,4 +1,4 @@
-use barqflow_db::models::ExecutionEntity;
+use barqflow_db::models::{ExecutionEntity, WaitResumeEntity};
 use chrono::{DateTime, Utc};
 use sqlx::{PgPool, Result};
 use uuid::Uuid;
@@ -138,6 +138,83 @@ impl ExecutionRepository {
 
         Ok(result.rows_affected() > 0)
     }
+
+    pub async fn create_wait_resume(
+        &self,
+        execution_id: Uuid,
+        node_name: &str,
+        resume_token: &str,
+        expires_at: DateTime<Utc>,
+    ) -> Result<WaitResumeEntity> {
+        let id = Uuid::new_v4();
+        let now = Utc::now();
+
+        sqlx::query_as::<_, WaitResumeEntity>(
+            r#"
+            INSERT INTO wait_resumes (
+                id, execution_id, node_name, resume_token, created_at, expires_at, resumed_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, NULL)
+            RETURNING id, execution_id, node_name, resume_token, created_at, expires_at, resumed_at
+            "#,
+        )
+        .bind(id)
+        .bind(execution_id)
+        .bind(node_name)
+        .bind(resume_token)
+        .bind(now)
+        .bind(expires_at)
+        .fetch_one(&self.pool)
+        .await
+    }
+
+    pub async fn find_wait_resume(
+        &self,
+        execution_id: Uuid,
+        resume_token: &str,
+    ) -> Result<Option<WaitResumeEntity>> {
+        sqlx::query_as::<_, WaitResumeEntity>(
+            r#"
+            SELECT id, execution_id, node_name, resume_token, created_at, expires_at, resumed_at
+            FROM wait_resumes
+            WHERE execution_id = $1 AND resume_token = $2
+            "#,
+        )
+        .bind(execution_id)
+        .bind(resume_token)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    pub async fn mark_wait_resume_resumed(&self, id: Uuid) -> Result<Option<WaitResumeEntity>> {
+        let now = Utc::now();
+        sqlx::query_as::<_, WaitResumeEntity>(
+            r#"
+            UPDATE wait_resumes
+            SET resumed_at = $1
+            WHERE id = $2
+            RETURNING id, execution_id, node_name, resume_token, created_at, expires_at, resumed_at
+            "#,
+        )
+        .bind(now)
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    pub async fn delete_wait_resume(&self, id: Uuid) -> Result<bool> {
+        let result = sqlx::query(
+            r#"
+            DELETE FROM wait_resumes
+            WHERE id = $1
+            "#,
+        )
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
 }
 
 #[cfg(test)]
@@ -173,5 +250,47 @@ mod tests {
         let found = exec_repo.find_by_id(created.id).await.unwrap().unwrap();
         assert_eq!(found.status, "success");
         assert!(found.stopped_at.is_some());
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn test_wait_resume_lifecycle(pool: PgPool) {
+        let workflow_repo = WorkflowRepository::new(pool.clone());
+        let exec_repo = ExecutionRepository::new(pool);
+
+        let workflow = workflow_repo
+            .create("Wait Flow", json!([]), json!({}), json!({}))
+            .await
+            .unwrap();
+        let execution = exec_repo
+            .create(workflow.id, "running", json!({}))
+            .await
+            .unwrap();
+
+        let token = Uuid::new_v4().to_string();
+        let expires_at = Utc::now() + chrono::Duration::hours(1);
+
+        let created = exec_repo
+            .create_wait_resume(execution.id, "Wait Node", &token, expires_at)
+            .await
+            .unwrap();
+        assert_eq!(created.execution_id, execution.id);
+
+        let found = exec_repo
+            .find_wait_resume(execution.id, &token)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(found.id, created.id);
+        assert!(found.resumed_at.is_none());
+
+        let resumed = exec_repo
+            .mark_wait_resume_resumed(created.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(resumed.resumed_at.is_some());
+
+        let deleted = exec_repo.delete_wait_resume(created.id).await.unwrap();
+        assert!(deleted);
     }
 }
