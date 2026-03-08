@@ -1,12 +1,64 @@
 /// <reference types="../../node_modules/.vue-global-types/vue_3.5_0_0_0.d.ts" />
-import { ref } from 'vue';
-import { Clock, CheckCircle2, XCircle, Search, Filter } from 'lucide-vue-next';
-const executions = ref([
-    { id: 'exec_1234abc', workflow: 'Daily Sync', status: 'success', duration: '142ms', time: '2 mins ago' },
-    { id: 'exec_5678def', workflow: 'User Onboarding', status: 'error', duration: '3.1s', time: '1 hour ago' },
-    { id: 'exec_9012ghi', workflow: 'Payment Webhook', status: 'success', duration: '98ms', time: '3 hours ago' },
-    { id: 'exec_3456jkl', workflow: 'Daily Sync', status: 'success', duration: '135ms', time: 'Yesterday' },
-]);
+import { computed, onMounted, ref } from 'vue';
+import { Clock, CheckCircle2, XCircle, Loader2, Search } from 'lucide-vue-next';
+import api from '../api';
+const executions = ref([]);
+const loading = ref(false);
+const error = ref(null);
+const query = ref('');
+const statusFilter = ref('all');
+const filteredExecutions = computed(() => {
+    const q = query.value.trim().toLowerCase();
+    return executions.value.filter((exec) => {
+        const matchesStatus = statusFilter.value === 'all' ||
+            exec.status.toLowerCase() === statusFilter.value.toLowerCase();
+        const matchesQuery = q.length === 0 ||
+            exec.id.toLowerCase().includes(q) ||
+            exec.workflow_id.toLowerCase().includes(q);
+        return matchesStatus && matchesQuery;
+    });
+});
+function formatDuration(exec) {
+    if (!exec.stopped_at)
+        return 'Running';
+    const start = new Date(exec.started_at).getTime();
+    const end = new Date(exec.stopped_at).getTime();
+    const ms = Math.max(0, end - start);
+    if (ms < 1000)
+        return `${ms}ms`;
+    return `${(ms / 1000).toFixed(2)}s`;
+}
+function formatRelativeTime(iso) {
+    const date = new Date(iso).getTime();
+    const diffSeconds = Math.floor((date - Date.now()) / 1000);
+    const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
+    const abs = Math.abs(diffSeconds);
+    if (abs < 60)
+        return rtf.format(diffSeconds, 'second');
+    const diffMinutes = Math.floor(diffSeconds / 60);
+    if (Math.abs(diffMinutes) < 60)
+        return rtf.format(diffMinutes, 'minute');
+    const diffHours = Math.floor(diffMinutes / 60);
+    if (Math.abs(diffHours) < 24)
+        return rtf.format(diffHours, 'hour');
+    const diffDays = Math.floor(diffHours / 24);
+    return rtf.format(diffDays, 'day');
+}
+async function fetchExecutions() {
+    loading.value = true;
+    error.value = null;
+    try {
+        const res = await api.get('/executions', { params: { limit: 100 } });
+        executions.value = res.data;
+    }
+    catch (err) {
+        error.value = err?.response?.data?.message || err?.message || 'Failed to fetch executions';
+    }
+    finally {
+        loading.value = false;
+    }
+}
+onMounted(fetchExecutions);
 debugger; /* PartiallyEnd: #3632/scriptSetup.vue */
 const __VLS_ctx = {};
 let __VLS_components;
@@ -43,106 +95,157 @@ const __VLS_2 = __VLS_1({
     ...{ class: "w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" },
 }, ...__VLS_functionalComponentArgsRest(__VLS_1));
 __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
+    value: (__VLS_ctx.query),
     type: "text",
-    placeholder: "Search executions...",
-    ...{ class: "pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent w-full md:w-64" },
+    placeholder: "Search by execution or workflow id...",
+    ...{ class: "pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent w-full md:w-72" },
 });
-__VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
-    ...{ class: "bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-lg hover:bg-slate-50 flex items-center gap-2 text-sm font-medium transition-colors" },
+__VLS_asFunctionalElement(__VLS_intrinsicElements.select, __VLS_intrinsicElements.select)({
+    value: (__VLS_ctx.statusFilter),
+    ...{ class: "bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-lg text-sm font-medium" },
 });
-const __VLS_4 = {}.Filter;
-/** @type {[typeof __VLS_components.Filter, ]} */ ;
-// @ts-ignore
-const __VLS_5 = __VLS_asFunctionalComponent(__VLS_4, new __VLS_4({
-    ...{ class: "w-4 h-4" },
-}));
-const __VLS_6 = __VLS_5({
-    ...{ class: "w-4 h-4" },
-}, ...__VLS_functionalComponentArgsRest(__VLS_5));
-__VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-    ...{ class: "bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden" },
+__VLS_asFunctionalElement(__VLS_intrinsicElements.option, __VLS_intrinsicElements.option)({
+    value: "all",
 });
-__VLS_asFunctionalElement(__VLS_intrinsicElements.ul, __VLS_intrinsicElements.ul)({
-    ...{ class: "divide-y divide-slate-100" },
+__VLS_asFunctionalElement(__VLS_intrinsicElements.option, __VLS_intrinsicElements.option)({
+    value: "success",
 });
-for (const [exec] of __VLS_getVForSourceType((__VLS_ctx.executions))) {
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.li, __VLS_intrinsicElements.li)({
-        key: (exec.id),
-        ...{ class: "p-5 hover:bg-slate-50 transition-colors cursor-pointer group" },
-    });
+__VLS_asFunctionalElement(__VLS_intrinsicElements.option, __VLS_intrinsicElements.option)({
+    value: "failed",
+});
+__VLS_asFunctionalElement(__VLS_intrinsicElements.option, __VLS_intrinsicElements.option)({
+    value: "running",
+});
+if (__VLS_ctx.loading) {
     __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-        ...{ class: "flex items-center justify-between" },
+        ...{ class: "bg-white rounded-xl shadow-sm border border-slate-200 p-8 flex items-center gap-3 text-slate-500" },
     });
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-        ...{ class: "flex items-center gap-4" },
-    });
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-        ...{ class: ([
-                'w-10 h-10 rounded-full flex items-center justify-center shrink-0',
-                exec.status === 'success' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'
-            ]) },
-    });
-    if (exec.status === 'success') {
-        const __VLS_8 = {}.CheckCircle2;
-        /** @type {[typeof __VLS_components.CheckCircle2, ]} */ ;
-        // @ts-ignore
-        const __VLS_9 = __VLS_asFunctionalComponent(__VLS_8, new __VLS_8({
-            ...{ class: "w-5 h-5" },
-        }));
-        const __VLS_10 = __VLS_9({
-            ...{ class: "w-5 h-5" },
-        }, ...__VLS_functionalComponentArgsRest(__VLS_9));
-    }
-    else {
-        const __VLS_12 = {}.XCircle;
-        /** @type {[typeof __VLS_components.XCircle, ]} */ ;
-        // @ts-ignore
-        const __VLS_13 = __VLS_asFunctionalComponent(__VLS_12, new __VLS_12({
-            ...{ class: "w-5 h-5" },
-        }));
-        const __VLS_14 = __VLS_13({
-            ...{ class: "w-5 h-5" },
-        }, ...__VLS_functionalComponentArgsRest(__VLS_13));
-    }
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({});
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.h3, __VLS_intrinsicElements.h3)({
-        ...{ class: "font-semibold text-slate-800 text-base group-hover:text-brand-600 transition-colors" },
-    });
-    (exec.workflow);
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-        ...{ class: "flex items-center text-xs text-slate-500 mt-1 gap-3" },
-    });
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
-        ...{ class: "font-mono text-slate-400" },
-    });
-    (exec.id.substring(0, 8));
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
-        ...{ class: "flex items-center gap-1" },
-    });
-    const __VLS_16 = {}.Clock;
-    /** @type {[typeof __VLS_components.Clock, ]} */ ;
+    const __VLS_4 = {}.Loader2;
+    /** @type {[typeof __VLS_components.Loader2, ]} */ ;
     // @ts-ignore
-    const __VLS_17 = __VLS_asFunctionalComponent(__VLS_16, new __VLS_16({
-        ...{ class: "w-3 h-3" },
+    const __VLS_5 = __VLS_asFunctionalComponent(__VLS_4, new __VLS_4({
+        ...{ class: "w-4 h-4 animate-spin" },
     }));
-    const __VLS_18 = __VLS_17({
-        ...{ class: "w-3 h-3" },
-    }, ...__VLS_functionalComponentArgsRest(__VLS_17));
-    (exec.duration);
+    const __VLS_6 = __VLS_5({
+        ...{ class: "w-4 h-4 animate-spin" },
+    }, ...__VLS_functionalComponentArgsRest(__VLS_5));
+}
+else if (__VLS_ctx.error) {
     __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-        ...{ class: "text-right" },
+        ...{ class: "bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 text-sm font-medium" },
     });
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
-        ...{ class: "text-sm text-slate-500 block" },
+    (__VLS_ctx.error);
+}
+else if (__VLS_ctx.filteredExecutions.length === 0) {
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+        ...{ class: "bg-white rounded-xl shadow-sm border border-slate-200 p-8 text-slate-500 text-sm" },
     });
-    (exec.time);
-    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
-        ...{ class: ([
-                'inline-block mt-1 text-xs font-semibold px-2 py-0.5 rounded-full',
-                exec.status === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
-            ]) },
+}
+else {
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+        ...{ class: "bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden" },
     });
-    (exec.status === 'success' ? 'Completed' : 'Failed');
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.ul, __VLS_intrinsicElements.ul)({
+        ...{ class: "divide-y divide-slate-100" },
+    });
+    for (const [exec] of __VLS_getVForSourceType((__VLS_ctx.filteredExecutions))) {
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.li, __VLS_intrinsicElements.li)({
+            key: (exec.id),
+            ...{ class: "p-5 hover:bg-slate-50 transition-colors" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "flex items-center justify-between" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "flex items-center gap-4" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: ([
+                    'w-10 h-10 rounded-full flex items-center justify-center shrink-0',
+                    exec.status === 'success'
+                        ? 'bg-green-100 text-green-600'
+                        : exec.status === 'running'
+                            ? 'bg-amber-100 text-amber-700'
+                            : 'bg-red-100 text-red-600',
+                ]) },
+        });
+        if (exec.status === 'running') {
+            const __VLS_8 = {}.Clock;
+            /** @type {[typeof __VLS_components.Clock, ]} */ ;
+            // @ts-ignore
+            const __VLS_9 = __VLS_asFunctionalComponent(__VLS_8, new __VLS_8({
+                ...{ class: "w-5 h-5" },
+            }));
+            const __VLS_10 = __VLS_9({
+                ...{ class: "w-5 h-5" },
+            }, ...__VLS_functionalComponentArgsRest(__VLS_9));
+        }
+        else if (exec.status === 'success') {
+            const __VLS_12 = {}.CheckCircle2;
+            /** @type {[typeof __VLS_components.CheckCircle2, ]} */ ;
+            // @ts-ignore
+            const __VLS_13 = __VLS_asFunctionalComponent(__VLS_12, new __VLS_12({
+                ...{ class: "w-5 h-5" },
+            }));
+            const __VLS_14 = __VLS_13({
+                ...{ class: "w-5 h-5" },
+            }, ...__VLS_functionalComponentArgsRest(__VLS_13));
+        }
+        else {
+            const __VLS_16 = {}.XCircle;
+            /** @type {[typeof __VLS_components.XCircle, ]} */ ;
+            // @ts-ignore
+            const __VLS_17 = __VLS_asFunctionalComponent(__VLS_16, new __VLS_16({
+                ...{ class: "w-5 h-5" },
+            }));
+            const __VLS_18 = __VLS_17({
+                ...{ class: "w-5 h-5" },
+            }, ...__VLS_functionalComponentArgsRest(__VLS_17));
+        }
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({});
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.h3, __VLS_intrinsicElements.h3)({
+            ...{ class: "font-semibold text-slate-800 text-base" },
+        });
+        (exec.workflow_id.slice(0, 8));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "flex items-center text-xs text-slate-500 mt-1 gap-3" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+            ...{ class: "font-mono text-slate-400" },
+        });
+        (exec.id.slice(0, 8));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+            ...{ class: "flex items-center gap-1" },
+        });
+        const __VLS_20 = {}.Clock;
+        /** @type {[typeof __VLS_components.Clock, ]} */ ;
+        // @ts-ignore
+        const __VLS_21 = __VLS_asFunctionalComponent(__VLS_20, new __VLS_20({
+            ...{ class: "w-3 h-3" },
+        }));
+        const __VLS_22 = __VLS_21({
+            ...{ class: "w-3 h-3" },
+        }, ...__VLS_functionalComponentArgsRest(__VLS_21));
+        (__VLS_ctx.formatDuration(exec));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "text-right" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+            ...{ class: "text-sm text-slate-500 block" },
+        });
+        (__VLS_ctx.formatRelativeTime(exec.started_at));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+            ...{ class: ([
+                    'inline-block mt-1 text-xs font-semibold px-2 py-0.5 rounded-full',
+                    exec.status === 'success'
+                        ? 'bg-green-50 text-green-700'
+                        : exec.status === 'running'
+                            ? 'bg-amber-50 text-amber-700'
+                            : 'bg-red-50 text-red-700',
+                ]) },
+        });
+        (exec.status);
+    }
 }
 /** @type {__VLS_StyleScopedClasses['h-full']} */ ;
 /** @type {__VLS_StyleScopedClasses['bg-slate-50']} */ ;
@@ -188,7 +291,7 @@ for (const [exec] of __VLS_getVForSourceType((__VLS_ctx.executions))) {
 /** @type {__VLS_StyleScopedClasses['focus:ring-brand-500']} */ ;
 /** @type {__VLS_StyleScopedClasses['focus:border-transparent']} */ ;
 /** @type {__VLS_StyleScopedClasses['w-full']} */ ;
-/** @type {__VLS_StyleScopedClasses['md:w-64']} */ ;
+/** @type {__VLS_StyleScopedClasses['md:w-72']} */ ;
 /** @type {__VLS_StyleScopedClasses['bg-white']} */ ;
 /** @type {__VLS_StyleScopedClasses['border']} */ ;
 /** @type {__VLS_StyleScopedClasses['border-slate-200']} */ ;
@@ -196,15 +299,37 @@ for (const [exec] of __VLS_getVForSourceType((__VLS_ctx.executions))) {
 /** @type {__VLS_StyleScopedClasses['px-3']} */ ;
 /** @type {__VLS_StyleScopedClasses['py-2']} */ ;
 /** @type {__VLS_StyleScopedClasses['rounded-lg']} */ ;
-/** @type {__VLS_StyleScopedClasses['hover:bg-slate-50']} */ ;
-/** @type {__VLS_StyleScopedClasses['flex']} */ ;
-/** @type {__VLS_StyleScopedClasses['items-center']} */ ;
-/** @type {__VLS_StyleScopedClasses['gap-2']} */ ;
 /** @type {__VLS_StyleScopedClasses['text-sm']} */ ;
 /** @type {__VLS_StyleScopedClasses['font-medium']} */ ;
-/** @type {__VLS_StyleScopedClasses['transition-colors']} */ ;
+/** @type {__VLS_StyleScopedClasses['bg-white']} */ ;
+/** @type {__VLS_StyleScopedClasses['rounded-xl']} */ ;
+/** @type {__VLS_StyleScopedClasses['shadow-sm']} */ ;
+/** @type {__VLS_StyleScopedClasses['border']} */ ;
+/** @type {__VLS_StyleScopedClasses['border-slate-200']} */ ;
+/** @type {__VLS_StyleScopedClasses['p-8']} */ ;
+/** @type {__VLS_StyleScopedClasses['flex']} */ ;
+/** @type {__VLS_StyleScopedClasses['items-center']} */ ;
+/** @type {__VLS_StyleScopedClasses['gap-3']} */ ;
+/** @type {__VLS_StyleScopedClasses['text-slate-500']} */ ;
 /** @type {__VLS_StyleScopedClasses['w-4']} */ ;
 /** @type {__VLS_StyleScopedClasses['h-4']} */ ;
+/** @type {__VLS_StyleScopedClasses['animate-spin']} */ ;
+/** @type {__VLS_StyleScopedClasses['bg-red-50']} */ ;
+/** @type {__VLS_StyleScopedClasses['border']} */ ;
+/** @type {__VLS_StyleScopedClasses['border-red-200']} */ ;
+/** @type {__VLS_StyleScopedClasses['text-red-700']} */ ;
+/** @type {__VLS_StyleScopedClasses['rounded-xl']} */ ;
+/** @type {__VLS_StyleScopedClasses['p-4']} */ ;
+/** @type {__VLS_StyleScopedClasses['text-sm']} */ ;
+/** @type {__VLS_StyleScopedClasses['font-medium']} */ ;
+/** @type {__VLS_StyleScopedClasses['bg-white']} */ ;
+/** @type {__VLS_StyleScopedClasses['rounded-xl']} */ ;
+/** @type {__VLS_StyleScopedClasses['shadow-sm']} */ ;
+/** @type {__VLS_StyleScopedClasses['border']} */ ;
+/** @type {__VLS_StyleScopedClasses['border-slate-200']} */ ;
+/** @type {__VLS_StyleScopedClasses['p-8']} */ ;
+/** @type {__VLS_StyleScopedClasses['text-slate-500']} */ ;
+/** @type {__VLS_StyleScopedClasses['text-sm']} */ ;
 /** @type {__VLS_StyleScopedClasses['bg-white']} */ ;
 /** @type {__VLS_StyleScopedClasses['rounded-xl']} */ ;
 /** @type {__VLS_StyleScopedClasses['shadow-sm']} */ ;
@@ -216,8 +341,6 @@ for (const [exec] of __VLS_getVForSourceType((__VLS_ctx.executions))) {
 /** @type {__VLS_StyleScopedClasses['p-5']} */ ;
 /** @type {__VLS_StyleScopedClasses['hover:bg-slate-50']} */ ;
 /** @type {__VLS_StyleScopedClasses['transition-colors']} */ ;
-/** @type {__VLS_StyleScopedClasses['cursor-pointer']} */ ;
-/** @type {__VLS_StyleScopedClasses['group']} */ ;
 /** @type {__VLS_StyleScopedClasses['flex']} */ ;
 /** @type {__VLS_StyleScopedClasses['items-center']} */ ;
 /** @type {__VLS_StyleScopedClasses['justify-between']} */ ;
@@ -228,11 +351,11 @@ for (const [exec] of __VLS_getVForSourceType((__VLS_ctx.executions))) {
 /** @type {__VLS_StyleScopedClasses['h-5']} */ ;
 /** @type {__VLS_StyleScopedClasses['w-5']} */ ;
 /** @type {__VLS_StyleScopedClasses['h-5']} */ ;
+/** @type {__VLS_StyleScopedClasses['w-5']} */ ;
+/** @type {__VLS_StyleScopedClasses['h-5']} */ ;
 /** @type {__VLS_StyleScopedClasses['font-semibold']} */ ;
 /** @type {__VLS_StyleScopedClasses['text-slate-800']} */ ;
 /** @type {__VLS_StyleScopedClasses['text-base']} */ ;
-/** @type {__VLS_StyleScopedClasses['group-hover:text-brand-600']} */ ;
-/** @type {__VLS_StyleScopedClasses['transition-colors']} */ ;
 /** @type {__VLS_StyleScopedClasses['flex']} */ ;
 /** @type {__VLS_StyleScopedClasses['items-center']} */ ;
 /** @type {__VLS_StyleScopedClasses['text-xs']} */ ;
@@ -257,9 +380,15 @@ const __VLS_self = (await import('vue')).defineComponent({
             Clock: Clock,
             CheckCircle2: CheckCircle2,
             XCircle: XCircle,
+            Loader2: Loader2,
             Search: Search,
-            Filter: Filter,
-            executions: executions,
+            loading: loading,
+            error: error,
+            query: query,
+            statusFilter: statusFilter,
+            filteredExecutions: filteredExecutions,
+            formatDuration: formatDuration,
+            formatRelativeTime: formatRelativeTime,
         };
     },
 });
