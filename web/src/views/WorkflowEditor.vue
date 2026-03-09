@@ -246,7 +246,9 @@ function isCredentialErrorMessage(message: string): boolean {
     text.includes('select a credential') ||
     text.includes('missing openai api key') ||
     text.includes('missing postgres credential fields') ||
-    text.includes('go to /credentials')
+    text.includes('go to /credentials') ||
+    text.includes('/credentials and bind') ||
+    (text.includes('credential') && text.includes('/credentials'))
   )
 }
 

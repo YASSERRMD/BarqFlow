@@ -1,9 +1,4 @@
-use axum::{
-    extract::State,
-    response::IntoResponse,
-    routing::get,
-    Json, Router,
-};
+use axum::{extract::State, response::IntoResponse, routing::get, Json, Router};
 use barqflow_core::properties::INodeProperty;
 use barqflow_core::schema::CredentialReference;
 use barqflow_nodes::is_node_ui_exposed;
@@ -73,6 +68,13 @@ fn node_credential_references(node_name: &str) -> Vec<CredentialReference> {
             required: true,
             display_name: "Postgres".to_string(),
         }],
+        "barqflow-nodes.barqDbInsert"
+        | "barqflow-nodes.barqDbSearch"
+        | "barqflow-nodes.barqDbDelete" => vec![CredentialReference {
+            credential_type: "barqDbApi".to_string(),
+            required: true,
+            display_name: "BarqDB API".to_string(),
+        }],
         _ => vec![],
     }
 }
@@ -130,5 +132,13 @@ mod tests {
     fn build_defaults_returns_none_when_no_defaults_exist() {
         let props = vec![build_prop("url", None), build_prop("body", None)];
         assert!(build_defaults(&props).is_none());
+    }
+
+    #[test]
+    fn node_credential_references_includes_barqdb_nodes() {
+        let refs = node_credential_references("barqflow-nodes.barqDbSearch");
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].credential_type, "barqDbApi");
+        assert!(refs[0].required);
     }
 }
