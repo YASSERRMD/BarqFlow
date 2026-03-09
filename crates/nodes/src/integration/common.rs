@@ -6,6 +6,7 @@ use reqwest::{Client, Method};
 use serde_json::{json, Value};
 use std::time::Duration;
 
+#[derive(Clone)]
 pub(crate) struct PreparedRequest {
     pub method: String,
     pub url: String,
@@ -20,6 +21,7 @@ pub(crate) struct IntegrationResponse {
     pub status: u16,
     pub headers: Value,
     pub body: Value,
+    pub pagination: Value,
     pub raw_text: String,
 }
 
@@ -173,7 +175,7 @@ pub(crate) fn require_auth_token(
         node_name,
         "Auth Token",
         token,
-        "Add a valid API token in the node configuration.",
+        "Add a valid API token in this node, or add credentials at /credentials and bind them.",
     )
 }
 
@@ -200,91 +202,174 @@ pub(crate) async fn execute_prepared_request(
     node_name: &str,
     request: PreparedRequest,
 ) -> Result<IntegrationResponse, BarqError> {
+    const MAX_ATTEMPTS: usize = 3;
+    const BASE_RETRY_DELAY_MS: u64 = 400;
+
     let method =
         Method::from_bytes(request.method.trim().to_uppercase().as_bytes()).unwrap_or(Method::GET);
 
-    let mut req = client
-        .request(method, &request.url)
-        .timeout(Duration::from_millis(request.timeout_ms));
+    for attempt in 1..=MAX_ATTEMPTS {
+        let mut req = client
+            .request(method.clone(), &request.url)
+            .timeout(Duration::from_millis(request.timeout_ms));
 
-    if let Some(token) = request.auth_token {
-        req = req.bearer_auth(token);
-    }
-
-    if !request.query.is_empty() {
-        req = req.query(&request.query);
-    }
-
-    for (name, value) in request.headers {
-        if !name.trim().is_empty() {
-            req = req.header(name, value);
+        if let Some(token) = &request.auth_token {
+            req = req.bearer_auth(token);
         }
-    }
 
-    if let Some(body_value) = request.body {
-        if body_value.is_object() || body_value.is_array() {
-            req = req.json(&body_value);
-        } else if let Some(raw) = body_value.as_str() {
-            req = req.body(raw.to_string());
-        } else {
-            req = req.body(body_value.to_string());
+        if !request.query.is_empty() {
+            req = req.query(&request.query);
         }
-    }
 
-    let response = req
-        .send()
-        .await
-        .map_err(|e| BarqError::NodeOperationError {
-            node_name: node_name.to_string(),
-            message: format!(
-                "Request failed for {} {}: {}",
-                request.method.to_uppercase(),
-                request.url,
-                e
-            ),
-        })?;
+        for (name, value) in &request.headers {
+            if !name.trim().is_empty() {
+                req = req.header(name, value);
+            }
+        }
 
-    let status = response.status();
-    let headers = response.headers().clone();
-    let content_type = headers
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("")
-        .to_string();
-    let raw_text = response.text().await.unwrap_or_default();
+        if let Some(body_value) = &request.body {
+            if body_value.is_object() || body_value.is_array() {
+                req = req.json(body_value);
+            } else if let Some(raw) = body_value.as_str() {
+                req = req.body(raw.to_string());
+            } else {
+                req = req.body(body_value.to_string());
+            }
+        }
 
-    if !status.is_success() {
-        let response_preview = if raw_text.trim().is_empty() {
-            "(empty response)".to_string()
-        } else {
-            truncate_text(&raw_text, 600)
+        let response = match req.send().await {
+            Ok(response) => response,
+            Err(e) => {
+                if attempt < MAX_ATTEMPTS {
+                    let delay = retry_delay_ms(BASE_RETRY_DELAY_MS, attempt as u32, None);
+                    tokio::time::sleep(Duration::from_millis(delay)).await;
+                    continue;
+                }
+                return Err(BarqError::NodeOperationError {
+                    node_name: node_name.to_string(),
+                    message: format!(
+                        "Request failed for {} {}: {}",
+                        request.method.to_uppercase(),
+                        request.url,
+                        e
+                    ),
+                });
+            }
         };
-        return Err(BarqError::NodeOperationError {
-            node_name: node_name.to_string(),
-            message: format!(
-                "API returned status {} for request. Response: {}",
-                status.as_u16(),
-                response_preview
-            ),
+
+        let status = response.status();
+        let headers = response.headers().clone();
+        let content_type = headers
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+        let raw_text = response.text().await.unwrap_or_default();
+
+        if !status.is_success() {
+            if is_retryable_status(status.as_u16()) && attempt < MAX_ATTEMPTS {
+                let delay = retry_delay_ms(
+                    BASE_RETRY_DELAY_MS,
+                    attempt as u32,
+                    headers.get("retry-after").and_then(|v| v.to_str().ok()),
+                );
+                tokio::time::sleep(Duration::from_millis(delay)).await;
+                continue;
+            }
+
+            let response_preview = if raw_text.trim().is_empty() {
+                "(empty response)".to_string()
+            } else {
+                truncate_text(&raw_text, 600)
+            };
+            return Err(BarqError::NodeOperationError {
+                node_name: node_name.to_string(),
+                message: format!(
+                    "API returned status {} for request. Response: {}",
+                    status.as_u16(),
+                    response_preview
+                ),
+            });
+        }
+
+        let mut header_obj = serde_json::Map::new();
+        for (name, value) in headers.iter() {
+            header_obj.insert(
+                name.as_str().to_string(),
+                Value::String(value.to_str().unwrap_or_default().to_string()),
+            );
+        }
+
+        let body = parse_response_body(&content_type, &raw_text);
+        let pagination = detect_pagination(&headers, &body);
+
+        return Ok(IntegrationResponse {
+            status: status.as_u16(),
+            headers: Value::Object(header_obj),
+            body,
+            pagination,
+            raw_text,
         });
     }
 
-    let mut header_obj = serde_json::Map::new();
-    for (name, value) in headers.iter() {
-        header_obj.insert(
-            name.as_str().to_string(),
-            Value::String(value.to_str().unwrap_or_default().to_string()),
-        );
+    Err(BarqError::NodeOperationError {
+        node_name: node_name.to_string(),
+        message: "Request failed after retries.".to_string(),
+    })
+}
+
+pub(crate) async fn execute_paginated_prepared_request(
+    client: &Client,
+    node_name: &str,
+    request: PreparedRequest,
+    max_pages: usize,
+) -> Result<IntegrationResponse, BarqError> {
+    let capped_pages = max_pages.max(1).min(20);
+    let mut current_request = request;
+    let mut collected_pages = Vec::new();
+    let mut last_response: Option<IntegrationResponse> = None;
+
+    for _ in 0..capped_pages {
+        let response = execute_prepared_request(client, node_name, current_request.clone()).await?;
+        let next_url = response
+            .pagination
+            .get("nextUrl")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .or_else(|| {
+                response
+                    .pagination
+                    .get("next")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+            });
+
+        collected_pages.push(response.body.clone());
+        last_response = Some(response);
+
+        if let Some(next_url) = next_url {
+            current_request.url = next_url;
+            current_request.method = "GET".to_string();
+            current_request.query.clear();
+            current_request.body = None;
+        } else {
+            break;
+        }
     }
 
-    let body = parse_response_body(&content_type, &raw_text);
+    let mut response = last_response.ok_or_else(|| BarqError::NodeOperationError {
+        node_name: node_name.to_string(),
+        message: "Pagination produced no response pages.".to_string(),
+    })?;
 
-    Ok(IntegrationResponse {
-        status: status.as_u16(),
-        headers: Value::Object(header_obj),
-        body,
-        raw_text,
-    })
+    if collected_pages.len() > 1 {
+        response.body = json!({
+            "pages": collected_pages,
+            "pageCount": collected_pages.len(),
+        });
+    }
+
+    Ok(response)
 }
 
 pub(crate) fn build_standard_output(
@@ -296,8 +381,88 @@ pub(crate) fn build_standard_output(
         "status": response.status,
         "headers": response.headers,
         "body": response.body,
+        "pagination": response.pagination,
         "rawText": response.raw_text,
     })))
+}
+
+fn is_retryable_status(status: u16) -> bool {
+    status == 429 || (500..=599).contains(&status)
+}
+
+fn retry_delay_ms(base_delay_ms: u64, attempt: u32, retry_after_header: Option<&str>) -> u64 {
+    if let Some(raw) = retry_after_header {
+        if let Ok(seconds) = raw.trim().parse::<u64>() {
+            return seconds.saturating_mul(1000);
+        }
+    }
+
+    let multiplier = 2u64.saturating_pow(attempt.saturating_sub(1));
+    base_delay_ms.saturating_mul(multiplier).min(5_000)
+}
+
+fn detect_pagination(headers: &reqwest::header::HeaderMap, body: &Value) -> Value {
+    let mut pagination = serde_json::Map::new();
+
+    if let Some(link_header) = headers.get("link").and_then(|v| v.to_str().ok()) {
+        if let Some(next_url) = extract_next_from_link_header(link_header) {
+            pagination.insert("nextUrl".to_string(), Value::String(next_url));
+        }
+    }
+
+    if let Some(next) = body
+        .get("next")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+    {
+        pagination.insert("next".to_string(), Value::String(next));
+    }
+
+    if let Some(next_cursor) = body
+        .get("next_cursor")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+    {
+        pagination.insert("nextCursor".to_string(), Value::String(next_cursor));
+    }
+
+    if let Some(cursor) = body
+        .get("paging")
+        .and_then(|v| v.get("next"))
+        .and_then(|v| v.get("after"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+    {
+        pagination.insert("after".to_string(), Value::String(cursor));
+    }
+
+    if let Some(offset) = body.get("offset").and_then(|v| v.as_u64()) {
+        pagination.insert("offset".to_string(), json!(offset));
+    }
+
+    if let Some(has_more) = body.get("has_more").and_then(|v| v.as_bool()) {
+        pagination.insert("hasMore".to_string(), Value::Bool(has_more));
+    }
+
+    if pagination.is_empty() {
+        Value::Null
+    } else {
+        Value::Object(pagination)
+    }
+}
+
+fn extract_next_from_link_header(link_header: &str) -> Option<String> {
+    for part in link_header.split(',') {
+        let section = part.trim();
+        if section.contains("rel=\"next\"") {
+            let start = section.find('<')?;
+            let end = section.find('>')?;
+            if start + 1 < end {
+                return Some(section[start + 1..end].to_string());
+            }
+        }
+    }
+    None
 }
 
 fn parse_response_body(content_type: &str, raw_text: &str) -> Value {
@@ -336,6 +501,70 @@ fn truncate_text(text: &str, max_chars: usize) -> String {
 
     let truncated: String = text.chars().take(max_chars).collect();
     format!("{}...", truncated)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mockito::Server;
+
+    #[tokio::test]
+    async fn execute_prepared_request_retries_on_rate_limit() {
+        let mut server = Server::new_async().await;
+        let first = server
+            .mock("GET", "/retry")
+            .with_status(429)
+            .with_header("retry-after", "0")
+            .with_body("limited")
+            .expect(1)
+            .create_async()
+            .await;
+        let second = server
+            .mock("GET", "/retry")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"ok":true}"#)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let response = execute_prepared_request(
+            &Client::new(),
+            "RetryNode",
+            PreparedRequest {
+                method: "GET".to_string(),
+                url: format!("{}/retry", server.url()),
+                headers: vec![],
+                query: vec![],
+                body: None,
+                auth_token: None,
+                timeout_ms: 30_000,
+            },
+        )
+        .await
+        .unwrap();
+
+        first.assert_async().await;
+        second.assert_async().await;
+        assert_eq!(response.status, 200);
+    }
+
+    #[test]
+    fn detect_pagination_reads_link_header() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            reqwest::header::LINK,
+            reqwest::header::HeaderValue::from_static(
+                r#"<https://api.example.com/items?page=2>; rel="next""#,
+            ),
+        );
+
+        let pagination = detect_pagination(&headers, &json!({}));
+        assert_eq!(
+            pagination.get("nextUrl").and_then(|v| v.as_str()),
+            Some("https://api.example.com/items?page=2")
+        );
+    }
 }
 
 #[cfg(test)]

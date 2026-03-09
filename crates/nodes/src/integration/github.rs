@@ -1,7 +1,7 @@
 use crate::integration::common::{
-    build_standard_output, build_url, ensure_required_string, execute_prepared_request,
-    get_optional_param, get_optional_string_param, get_string_param, get_u64_param, parse_body,
-    parse_kv_pairs, require_auth_token, run_count, PreparedRequest,
+    build_standard_output, build_url, ensure_required_string, execute_paginated_prepared_request,
+    execute_prepared_request, get_optional_param, get_optional_string_param, get_string_param,
+    get_u64_param, parse_body, parse_kv_pairs, require_auth_token, run_count, PreparedRequest,
 };
 use async_trait::async_trait;
 use barqflow_core::errors::BarqError;
@@ -110,6 +110,15 @@ impl INodeType for GithubNode {
                             .map(|v| parse_kv_pairs(&v))
                             .unwrap_or_default(),
                     );
+                    let per_page = context
+                        .get_node_parameter_at_item("perPage", item_index, None)
+                        .await
+                        .ok()
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(50);
+                    if !query.iter().any(|(key, _)| key == "per_page") {
+                        query.push(("per_page".to_string(), per_page.to_string()));
+                    }
                     (
                         "GET".to_string(),
                         build_url(&base_url, &format!("/repos/{owner}/{repo}/issues")),
@@ -171,20 +180,35 @@ impl INodeType for GithubNode {
                 get_optional_string_param(context, "authToken", item_index).await,
             )?;
 
-            let response = execute_prepared_request(
-                &self.client,
-                "GitHub",
-                PreparedRequest {
-                    method,
-                    url,
-                    headers,
-                    query,
-                    body,
-                    auth_token: Some(auth_token),
-                    timeout_ms,
-                },
-            )
-            .await?;
+            let request = PreparedRequest {
+                method,
+                url,
+                headers,
+                query,
+                body,
+                auth_token: Some(auth_token),
+                timeout_ms,
+            };
+            let auto_paginate = operation == "listIssues"
+                && context
+                    .get_node_parameter_at_item("autoPaginate", item_index, None)
+                    .await
+                    .ok()
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+            let max_pages = context
+                .get_node_parameter_at_item("maxPages", item_index, None)
+                .await
+                .ok()
+                .and_then(|v| v.as_u64())
+                .unwrap_or(3) as usize;
+
+            let response = if auto_paginate {
+                execute_paginated_prepared_request(&self.client, "GitHub", request, max_pages)
+                    .await?
+            } else {
+                execute_prepared_request(&self.client, "GitHub", request).await?
+            };
 
             output_items.push(build_standard_output(&operation, response));
         }
@@ -197,7 +221,7 @@ impl INodeType for GithubNode {
 mod tests {
     use super::*;
     use crate::integration::common::test_utils::MockContext;
-    use mockito::Server;
+    use mockito::{Matcher, Server};
 
     #[tokio::test]
     async fn github_get_repo_returns_payload() {
@@ -236,5 +260,53 @@ mod tests {
 
         let err = GithubNode::new().execute(&context).await.unwrap_err();
         assert!(err.to_string().contains("Auth Token"));
+    }
+
+    #[tokio::test]
+    async fn github_list_issues_auto_paginates_with_link_header() {
+        let mut server = Server::new_async().await;
+        let first = server
+            .mock("GET", "/repos/octo/repo/issues")
+            .match_query(Matcher::UrlEncoded("per_page".into(), "50".into()))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_header(
+                "link",
+                &format!(
+                    "<{}/repos/octo/repo/issues?page=2>; rel=\"next\"",
+                    server.url()
+                ),
+            )
+            .with_body(r#"[{"id":1}]"#)
+            .create_async()
+            .await;
+        let second = server
+            .mock("GET", "/repos/octo/repo/issues")
+            .match_query(Matcher::UrlEncoded("page".into(), "2".into()))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"[{"id":2}]"#)
+            .create_async()
+            .await;
+
+        let mut context = MockContext::new("GitHub", "barqflow-nodes.github");
+        context.add_param("operation", json!("listIssues"));
+        context.add_param("baseUrl", json!(server.url()));
+        context.add_param("authToken", json!("ghp_xxx"));
+        context.add_param("owner", json!("octo"));
+        context.add_param("repo", json!("repo"));
+        context.add_param("autoPaginate", json!(true));
+        context.add_param("maxPages", json!(3));
+
+        let result = GithubNode::new().execute(&context).await.unwrap();
+        first.assert_async().await;
+        second.assert_async().await;
+        let page_count = result[0][0]
+            .json
+            .0
+            .get("body")
+            .and_then(|v| v.get("pageCount"))
+            .and_then(|v| v.as_u64());
+        assert_eq!(page_count, Some(2));
     }
 }
