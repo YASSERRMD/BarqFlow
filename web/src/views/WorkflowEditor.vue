@@ -38,6 +38,36 @@ const NODE_CREDENTIAL_REQUIREMENTS: Record<
   'barqflow-nodes.postgres': [
     { credentialType: 'postgresApi', displayName: 'Postgres', required: true },
   ],
+  'barqflow-nodes.slack': [
+    { credentialType: 'slackApi', displayName: 'Slack API', required: true },
+  ],
+  'barqflow-nodes.github': [
+    { credentialType: 'githubApi', displayName: 'GitHub API', required: true },
+  ],
+  'barqflow-nodes.discord': [
+    { credentialType: 'discordApi', displayName: 'Discord API', required: true },
+  ],
+  'barqflow-nodes.notion': [
+    { credentialType: 'notionApi', displayName: 'Notion API', required: true },
+  ],
+  'barqflow-nodes.jira': [
+    { credentialType: 'jiraApi', displayName: 'Jira API', required: true },
+  ],
+  'barqflow-nodes.stripe': [
+    { credentialType: 'stripeApi', displayName: 'Stripe API', required: true },
+  ],
+  'barqflow-nodes.sendGrid': [
+    { credentialType: 'sendGridApi', displayName: 'SendGrid API', required: true },
+  ],
+  'barqflow-nodes.hubspot': [
+    { credentialType: 'hubspotApi', displayName: 'HubSpot API', required: true },
+  ],
+  'barqflow-nodes.asana': [
+    { credentialType: 'asanaApi', displayName: 'Asana API', required: true },
+  ],
+  'barqflow-nodes.telegram': [
+    { credentialType: 'telegramApi', displayName: 'Telegram Bot API', required: true },
+  ],
 }
 
 function normalizeNodeCredentials(rawCredentials: any, nodeId: string): Record<string, string> {
@@ -292,6 +322,22 @@ function isMissingRequiredValue(prop: any, value: any): boolean {
   return false
 }
 
+function nodeHasBoundRequiredCredential(node: any): boolean {
+  const bound = node?.data?.credentials || {}
+  return nodeCredentialReferences(node)
+    .filter((ref) => ref.required)
+    .some((ref) => String(bound?.[ref.credentialType] || '').trim().length > 0)
+}
+
+function shouldBypassTokenRequirement(node: any, prop: any): boolean {
+  const propName = String(prop?.name || '')
+  if (propName !== 'authToken' && propName !== 'botToken') {
+    return false
+  }
+
+  return nodeHasBoundRequiredCredential(node)
+}
+
 function collectMissingRequiredProperties(node: any): string[] {
   const schemaProperties = Array.isArray(node?.data?.schema?.properties)
     ? node.data.schema.properties
@@ -301,6 +347,7 @@ function collectMissingRequiredProperties(node: any): string[] {
   return schemaProperties
     .filter((prop: any) => prop?.required === true)
     .filter((prop: any) => isPropertyVisibleForNode(prop, properties))
+    .filter((prop: any) => !shouldBypassTokenRequirement(node, prop))
     .filter((prop: any) => isMissingRequiredValue(prop, properties[prop.name]))
     .map((prop: any) => String(prop?.displayName || prop?.name || 'unknown'))
 }
