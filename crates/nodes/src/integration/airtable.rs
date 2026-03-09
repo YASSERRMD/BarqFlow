@@ -1,7 +1,7 @@
 use crate::integration::common::{
     build_standard_output, build_url, ensure_required_string, execute_prepared_request,
     get_optional_param, get_optional_string_param, get_string_param, get_u64_param, parse_body,
-    parse_kv_pairs, require_auth_token, run_count, PreparedRequest,
+    parse_kv_pairs, resolve_auth_token, run_count, PreparedRequest,
 };
 use async_trait::async_trait;
 use barqflow_core::errors::BarqError;
@@ -50,10 +50,14 @@ impl INodeType for AirtableNode {
             let base_url =
                 get_string_param(context, "baseUrl", item_index, "https://api.airtable.com").await;
             let timeout_ms = get_u64_param(context, "timeout", item_index, 60_000).await;
-            let auth_token = require_auth_token(
+            let auth_token = resolve_auth_token(
+                context,
                 "Airtable",
-                get_optional_string_param(context, "authToken", item_index).await,
-            )?;
+                item_index,
+                "airtableApi",
+                &["accessToken", "apiKey"],
+            )
+            .await?;
 
             let mut headers = get_optional_param(context, "headers", item_index)
                 .await
@@ -217,6 +221,33 @@ mod tests {
         context.add_param("authToken", json!("airtable-token"));
         context.add_param("baseId", json!("app123"));
         context.add_param("table", json!("Table1"));
+
+        let result = AirtableNode::new().execute(&context).await.unwrap();
+        mock.assert_async().await;
+        assert_eq!(
+            result[0][0].json.0.get("status").and_then(|v| v.as_u64()),
+            Some(200)
+        );
+    }
+
+    #[tokio::test]
+    async fn airtable_uses_bound_credential_when_auth_token_is_empty() {
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock("GET", "/v0/app123/Table1")
+            .match_header("authorization", "Bearer airtable-token")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"records":[]}"#)
+            .create_async()
+            .await;
+
+        let mut context = MockContext::new("Airtable", "barqflow-nodes.airtable");
+        context.add_param("operation", json!("listRecords"));
+        context.add_param("baseUrl", json!(server.url()));
+        context.add_param("baseId", json!("app123"));
+        context.add_param("table", json!("Table1"));
+        context.add_credential("airtableApi", "accessToken", json!("airtable-token"));
 
         let result = AirtableNode::new().execute(&context).await.unwrap();
         mock.assert_async().await;

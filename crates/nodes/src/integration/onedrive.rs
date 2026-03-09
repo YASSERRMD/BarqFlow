@@ -1,7 +1,7 @@
 use crate::integration::common::{
     build_standard_output, build_url, ensure_required_string, execute_prepared_request,
     get_optional_param, get_optional_string_param, get_string_param, get_u64_param, parse_body,
-    parse_kv_pairs, require_auth_token, run_count, PreparedRequest,
+    parse_kv_pairs, resolve_auth_token, run_count, PreparedRequest,
 };
 use async_trait::async_trait;
 use barqflow_core::errors::BarqError;
@@ -54,10 +54,14 @@ impl INodeType for OnedriveNode {
             )
             .await;
             let timeout_ms = get_u64_param(context, "timeout", item_index, 60_000).await;
-            let auth_token = require_auth_token(
+            let auth_token = resolve_auth_token(
+                context,
                 "OneDrive",
-                get_optional_string_param(context, "authToken", item_index).await,
-            )?;
+                item_index,
+                "oneDriveApi",
+                &["accessToken"],
+            )
+            .await?;
 
             let headers = get_optional_param(context, "headers", item_index)
                 .await
@@ -153,6 +157,31 @@ mod tests {
         context.add_param("operation", json!("listRoot"));
         context.add_param("baseUrl", json!(server.url()));
         context.add_param("authToken", json!("od-token"));
+
+        let result = OnedriveNode::new().execute(&context).await.unwrap();
+        mock.assert_async().await;
+        assert_eq!(
+            result[0][0].json.0.get("status").and_then(|v| v.as_u64()),
+            Some(200)
+        );
+    }
+
+    #[tokio::test]
+    async fn onedrive_uses_bound_credential_when_auth_token_is_empty() {
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock("GET", "/v1.0/me/drive/root/children")
+            .match_header("authorization", "Bearer od-token")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"value":[]}"#)
+            .create_async()
+            .await;
+
+        let mut context = MockContext::new("OneDrive", "barqflow-nodes.onedrive");
+        context.add_param("operation", json!("listRoot"));
+        context.add_param("baseUrl", json!(server.url()));
+        context.add_credential("oneDriveApi", "accessToken", json!("od-token"));
 
         let result = OnedriveNode::new().execute(&context).await.unwrap();
         mock.assert_async().await;
