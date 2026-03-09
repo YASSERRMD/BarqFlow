@@ -220,8 +220,8 @@ impl ExecutionRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
     use crate::repositories::workflow::WorkflowRepository;
+    use serde_json::json;
 
     #[sqlx::test(migrations = "./migrations")]
     async fn test_execution_lifecycle(pool: PgPool) {
@@ -229,7 +229,10 @@ mod tests {
         let exec_repo = ExecutionRepository::new(pool);
 
         // Need a workflow first to satisfy foreign key constraint
-        let workflow = workflow_repo.create("Test Flow", json!([]), json!({}), json!({})).await.unwrap();
+        let workflow = workflow_repo
+            .create("Test Flow", json!([]), json!({}), json!({}))
+            .await
+            .unwrap();
 
         let initial = exec_repo.find_all().await.unwrap();
         assert_eq!(initial.len(), 0);
@@ -241,12 +244,18 @@ mod tests {
         }
         let heavy_payload = json!({ "items": large_array });
 
-        let created = exec_repo.create(workflow.id, "running", heavy_payload.clone()).await.unwrap();
+        let created = exec_repo
+            .create(workflow.id, "running", heavy_payload.clone())
+            .await
+            .unwrap();
         assert_eq!(created.status, "running");
         assert_eq!(created.workflow_id, workflow.id);
 
-        exec_repo.update_status_and_data(created.id, "success", heavy_payload).await.unwrap();
-        
+        exec_repo
+            .update_status_and_data(created.id, "success", heavy_payload)
+            .await
+            .unwrap();
+
         let found = exec_repo.find_by_id(created.id).await.unwrap().unwrap();
         assert_eq!(found.status, "success");
         assert!(found.stopped_at.is_some());

@@ -13,9 +13,7 @@ pub async fn init_pool(database_url: &str) -> Result<PgPool, sqlx::Error> {
 
 /// Run pending migrations automatically on boot
 pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::migrate::MigrateError> {
-    sqlx::migrate!("./migrations")
-        .run(pool)
-        .await
+    sqlx::migrate!("./migrations").run(pool).await
 }
 
 /// Generate a new UUID v4

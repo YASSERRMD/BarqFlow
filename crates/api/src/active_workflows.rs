@@ -1,8 +1,8 @@
 use crate::controllers::webhooks::{WebhookEndpoint, WebhookRegistry};
 use crate::credentials_provider::RepositoryCredentialProvider;
-use crate::subworkflow_executor::RepositorySubWorkflowExecutor;
 use crate::repositories::credential::CredentialRepository;
 use crate::repositories::workflow::WorkflowRepository;
+use crate::subworkflow_executor::RepositorySubWorkflowExecutor;
 use barqflow_core::schema::{INode, INodeConnections, IWorkflowSettings, WorkflowDef};
 use barqflow_core::types::{RunId, WorkflowId};
 use barqflow_db::models::WorkflowEntity;
@@ -208,8 +208,7 @@ impl ActiveWorkflowManager {
                         serde_json::from_value(workflow_clone.connections.clone())
                             .unwrap_or_default();
                     let settings: IWorkflowSettings =
-                        serde_json::from_value(workflow_clone.settings.clone())
-                            .unwrap_or_default();
+                        serde_json::from_value(workflow_clone.settings.clone()).unwrap_or_default();
 
                     let workflow_def = WorkflowDef {
                         id: WorkflowId(workflow_clone.id),
@@ -229,10 +228,9 @@ impl ActiveWorkflowManager {
                         Arc::clone(&credential_repo),
                         Arc::clone(&node_registry),
                     ));
-                    let runner =
-                        WorkflowRunner::new(node_registry, ExecutionConfig::default())
-                            .with_credential_provider(credential_provider)
-                            .with_subworkflow_executor(subworkflow_executor);
+                    let runner = WorkflowRunner::new(node_registry, ExecutionConfig::default())
+                        .with_credential_provider(credential_provider)
+                        .with_subworkflow_executor(subworkflow_executor);
                     let ctx = WorkflowRunContext {
                         run_id: RunId::new(),
                         workflow: workflow_def,

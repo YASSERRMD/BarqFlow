@@ -1,12 +1,12 @@
-use axum::Router;
-use barqflow_db::users::UserRepo;
 use crate::repositories::{
     credential::CredentialRepository, execution::ExecutionRepository, workflow::WorkflowRepository,
 };
-use std::sync::Arc;
-use tokio_cron_scheduler::JobScheduler;
+use axum::Router;
+use barqflow_db::users::UserRepo;
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::RwLock;
+use tokio_cron_scheduler::JobScheduler;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -19,18 +19,18 @@ pub struct ActiveExecutionControl {
 pub type ActiveExecutionManager = Arc<RwLock<HashMap<Uuid, ActiveExecutionControl>>>;
 use tower_http::services::{ServeDir, ServeFile};
 
+use crate::active_workflows::ActiveCronJobs;
 use crate::controllers::{
     credentials::{credential_routes, AppState as CredState},
     executions::{execution_routes, AppState as ExecState},
     health::{health_routes, AppState as HealthState},
-    settings::{settings_routes, AppState as SettingsState},
+    nodes::{node_routes, AppState as NodeState},
     oauth2::{oauth2_routes, OAuth2State},
+    settings::{settings_routes, AppState as SettingsState},
     users::{user_routes, AppState as UserState},
     webhooks::{webhook_routes, WebhookRegistry, WebhookState},
     workflows::{workflow_routes, AppState as WfState},
-    nodes::{node_routes, AppState as NodeState},
 };
-use crate::active_workflows::ActiveCronJobs;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -82,9 +82,12 @@ pub fn create_router(state: AppState) -> Router {
             active_cron_jobs: Arc::clone(&state.active_cron_jobs),
             active_executions: Arc::clone(&state.active_executions),
         }))
-        .nest("/nodes", node_routes(NodeState {
-            node_registry: Arc::clone(&state.node_registry),
-        }));
+        .nest(
+            "/nodes",
+            node_routes(NodeState {
+                node_registry: Arc::clone(&state.node_registry),
+            }),
+        );
 
     let webh_routes = webhook_routes(WebhookState {
         workflow_repo: Arc::clone(&state.workflow_repo),

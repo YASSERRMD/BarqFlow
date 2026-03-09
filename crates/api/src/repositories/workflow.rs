@@ -80,7 +80,14 @@ impl WorkflowRepository {
         .await
     }
 
-    pub async fn update(&self, id: Uuid, name: &str, nodes: serde_json::Value, connections: serde_json::Value, settings: serde_json::Value) -> Result<Option<WorkflowEntity>> {
+    pub async fn update(
+        &self,
+        id: Uuid,
+        name: &str,
+        nodes: serde_json::Value,
+        connections: serde_json::Value,
+        settings: serde_json::Value,
+    ) -> Result<Option<WorkflowEntity>> {
         let now = Utc::now();
         sqlx::query_as::<_, WorkflowEntity>(
             r#"
@@ -99,7 +106,6 @@ impl WorkflowRepository {
         .fetch_optional(&self.pool)
         .await
     }
-
 
     pub async fn toggle_active(&self, id: Uuid, active: bool) -> Result<Option<WorkflowEntity>> {
         let now = Utc::now();
@@ -142,16 +148,14 @@ mod tests {
     #[sqlx::test(migrations = "./migrations")]
     async fn test_workflow_lifecycle(pool: PgPool) {
         let repo = WorkflowRepository::new(pool);
-        
+
         let initial = repo.find_all().await.unwrap();
         assert_eq!(initial.len(), 0);
 
-        let created = repo.create(
-            "Test Flow",
-            json!([]),
-            json!({}),
-            json!({})
-        ).await.unwrap();
+        let created = repo
+            .create("Test Flow", json!([]), json!({}), json!({}))
+            .await
+            .unwrap();
 
         assert_eq!(created.name, "Test Flow");
         assert_eq!(created.active, false);
@@ -162,7 +166,9 @@ mod tests {
         let active_flows = repo.find_all_by_active(false).await.unwrap();
         assert_eq!(active_flows.len(), 1);
 
-        repo.update(created.id, "Updated Flow", json!([]), json!({}), json!({})).await.unwrap();
+        repo.update(created.id, "Updated Flow", json!([]), json!({}), json!({}))
+            .await
+            .unwrap();
         let updated = repo.find_by_id(created.id).await.unwrap().unwrap();
         assert_eq!(updated.name, "Updated Flow");
 

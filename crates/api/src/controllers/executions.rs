@@ -1,16 +1,15 @@
 use crate::auth::Claims;
+use crate::repositories::credential::CredentialRepository;
+use crate::repositories::execution::ExecutionRepository;
+use crate::repositories::workflow::WorkflowRepository;
 use crate::routes::{ActiveExecutionControl, ActiveExecutionManager};
+use crate::subworkflow_executor::RepositorySubWorkflowExecutor;
 use axum::http::StatusCode;
 use axum::{
     extract::{Path, Query, State},
     routing::{get, post},
-    Json,
-    Router,
+    Json, Router,
 };
-use crate::repositories::execution::ExecutionRepository;
-use crate::repositories::workflow::WorkflowRepository;
-use crate::repositories::credential::CredentialRepository;
-use crate::subworkflow_executor::RepositorySubWorkflowExecutor;
 use barqflow_db::models::ExecutionEntity;
 use chrono::{Duration as ChronoDuration, Utc};
 use serde::Deserialize;
@@ -31,10 +30,16 @@ pub struct AppState {
 pub fn execution_routes(state: AppState) -> Router {
     Router::new()
         .route("/executions", get(list_executions))
-        .route("/executions/{id}", get(get_execution).delete(delete_execution))
+        .route(
+            "/executions/{id}",
+            get(get_execution).delete(delete_execution),
+        )
         .route("/executions/{id}/retry", post(retry_execution))
         .route("/executions/{id}/stop", post(stop_execution))
-        .route("/executions/{id}/resume/{resume_token}", post(resume_execution))
+        .route(
+            "/executions/{id}/resume/{resume_token}",
+            post(resume_execution),
+        )
         .route("/executions/workflow/{workflow_id}", post(execute_workflow))
         .route(
             "/executions/workflow/{workflow_id}/test-node/{node_id}",
@@ -369,7 +374,10 @@ async fn resume_execution(
     }
 
     if Utc::now() > wait_resume.expires_at {
-        let _ = state.execution_repo.delete_wait_resume(wait_resume.id).await;
+        let _ = state
+            .execution_repo
+            .delete_wait_resume(wait_resume.id)
+            .await;
         return Err((StatusCode::GONE, "Resume token expired".into()));
     }
 
@@ -430,9 +438,16 @@ async fn resume_execution(
     let mut checkpoint = checkpoint_manager
         .load_checkpoint(&run_id)
         .await
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "Checkpoint not found for execution".into()))?;
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                "Checkpoint not found for execution".into(),
+            )
+        })?;
 
-    let resume_payload = payload.map(|Json(value)| value).unwrap_or_else(|| serde_json::json!({}));
+    let resume_payload = payload
+        .map(|Json(value)| value)
+        .unwrap_or_else(|| serde_json::json!({}));
     let normalized_payload = match resume_payload {
         serde_json::Value::Object(_) => resume_payload,
         other => serde_json::json!({ "value": other }),
@@ -440,7 +455,9 @@ async fn resume_execution(
     let mut resume_input = ITaskDataConnections::new();
     resume_input.push(
         0,
-        vec![INodeExecutionData::new(IDataObject::from(normalized_payload))],
+        vec![INodeExecutionData::new(IDataObject::from(
+            normalized_payload,
+        ))],
     );
     checkpoint.node_data = serde_json::to_value(&resume_input).unwrap_or(serde_json::Value::Null);
 
@@ -472,29 +489,39 @@ async fn resume_execution(
         stop_after_node_id: None,
     };
 
-    let result = runner
-        .resume_workflow(context, checkpoint)
-        .await;
+    let result = runner.resume_workflow(context, checkpoint).await;
 
     let (status, data) = match result {
         Ok(node_results) => {
             let _ = checkpoint_manager.delete_checkpoint(&run_id).await;
-            let _ = state.execution_repo.delete_wait_resume(wait_resume.id).await;
+            let _ = state
+                .execution_repo
+                .delete_wait_resume(wait_resume.id)
+                .await;
             summarize_node_results(node_results)
         }
         Err(barqflow_core::errors::BarqError::SuspendExecution {
             node_name,
             wait_config,
         }) => {
-            let _ = state.execution_repo.delete_wait_resume(wait_resume.id).await;
+            let _ = state
+                .execution_repo
+                .delete_wait_resume(wait_resume.id)
+                .await;
             let waiting_data =
                 build_waiting_execution_data(&state, execution_id, node_name.as_str(), wait_config)
                     .await?;
             ("waiting".to_string(), waiting_data)
         }
         Err(err) => {
-            let _ = state.execution_repo.delete_wait_resume(wait_resume.id).await;
-            ("failed".to_string(), serde_json::json!({"error": err.to_string()}))
+            let _ = state
+                .execution_repo
+                .delete_wait_resume(wait_resume.id)
+                .await;
+            (
+                "failed".to_string(),
+                serde_json::json!({"error": err.to_string()}),
+            )
         }
     };
 
@@ -514,8 +541,8 @@ async fn run_workflow_execution(
     manual: bool,
     stop_after_node_id: Option<String>,
 ) -> Result<ExecutionEntity, (StatusCode, String)> {
-    use barqflow_exec::runner::{WorkflowRunner, ExecutionConfig, WorkflowRunContext};
     use barqflow_core::types::RunId;
+    use barqflow_exec::runner::{ExecutionConfig, WorkflowRunContext, WorkflowRunner};
 
     // 1. Fetch workflow
     let wf_entity = state
@@ -527,7 +554,12 @@ async fn run_workflow_execution(
 
     // 2. Parse nodes and connections into CoreWorkflowDef
     let nodes: Vec<barqflow_core::schema::INode> = serde_json::from_value(wf_entity.nodes.clone())
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to parse nodes: {}", e)))?;
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to parse nodes: {}", e),
+            )
+        })?;
 
     if let Some(target) = stop_after_node_id.as_ref() {
         let target_exists = nodes
@@ -540,17 +572,19 @@ async fn run_workflow_execution(
             ));
         }
     }
-    
-    let connections: std::collections::HashMap<String, barqflow_core::schema::INodeConnections> = serde_json::from_value(wf_entity.connections.clone())
-        .unwrap_or_default();
-    
-    let settings: barqflow_core::schema::IWorkflowSettings = serde_json::from_value(wf_entity.settings.clone())
-        .unwrap_or_default();
 
-    let credential_provider = Arc::new(crate::credentials_provider::RepositoryCredentialProvider::new(
-        Arc::clone(&state.credential_repo),
-        &nodes,
-    ));
+    let connections: std::collections::HashMap<String, barqflow_core::schema::INodeConnections> =
+        serde_json::from_value(wf_entity.connections.clone()).unwrap_or_default();
+
+    let settings: barqflow_core::schema::IWorkflowSettings =
+        serde_json::from_value(wf_entity.settings.clone()).unwrap_or_default();
+
+    let credential_provider = Arc::new(
+        crate::credentials_provider::RepositoryCredentialProvider::new(
+            Arc::clone(&state.credential_repo),
+            &nodes,
+        ),
+    );
     let subworkflow_executor = Arc::new(
         RepositorySubWorkflowExecutor::new(
             Arc::clone(&state.workflow_repo),
@@ -656,7 +690,10 @@ async fn run_workflow_execution(
                     "reason": "Execution cancelled",
                 }),
             ),
-            Err(e) => ("failed".to_string(), serde_json::json!({"error": e.to_string()})),
+            Err(e) => (
+                "failed".to_string(),
+                serde_json::json!({"error": e.to_string()}),
+            ),
         };
 
         let _ = state_for_completion

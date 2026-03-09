@@ -1,3 +1,6 @@
+use crate::repositories::credential::CredentialRepository;
+use crate::repositories::workflow::WorkflowRepository;
+use crate::subworkflow_executor::RepositorySubWorkflowExecutor;
 use axum::{
     body::Bytes,
     extract::{Path, State},
@@ -10,11 +13,10 @@ use barqflow_core::{
     schema::{INode, INodeConnections, IWorkflowSettings, WorkflowDef},
     types::{IDataObject, RunId, WorkflowId},
 };
-use barqflow_exec::runner::{ExecutionConfig, NodeExecutionResult, WorkflowRunContext, WorkflowRunner};
+use barqflow_exec::runner::{
+    ExecutionConfig, NodeExecutionResult, WorkflowRunContext, WorkflowRunner,
+};
 use barqflow_registry::registry::NodeRegistry;
-use crate::repositories::credential::CredentialRepository;
-use crate::repositories::workflow::WorkflowRepository;
-use crate::subworkflow_executor::RepositorySubWorkflowExecutor;
 use serde_json::json;
 use std::{
     collections::HashMap,
@@ -85,7 +87,8 @@ fn configured_response_payload(node: Option<&INode>) -> Option<serde_json::Value
         }
 
         return Some(
-            serde_json::from_str(trimmed).unwrap_or_else(|_| serde_json::json!({ "data": trimmed })),
+            serde_json::from_str(trimmed)
+                .unwrap_or_else(|_| serde_json::json!({ "data": trimmed })),
         );
     }
 
@@ -141,10 +144,12 @@ async fn handle_webhook(
 ) -> Result<Response, (StatusCode, String)> {
     // 1. Look up the webhook path in the registry
     let endpoint = {
-        let registry = state
-            .webhook_registry
-            .read()
-            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Registry lock poisoned".into()))?;
+        let registry = state.webhook_registry.read().map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Registry lock poisoned".into(),
+            )
+        })?;
         registry.get(&path).cloned()
     };
 
@@ -196,10 +201,19 @@ async fn handle_webhook(
         .find_by_id(endpoint.workflow_id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "Workflow not found in database".into()))?;
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                "Workflow not found in database".into(),
+            )
+        })?;
 
-    let nodes: Vec<INode> = serde_json::from_value(wf_entity.nodes.clone())
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Malformed workflow nodes: {}", e)))?;
+    let nodes: Vec<INode> = serde_json::from_value(wf_entity.nodes.clone()).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Malformed workflow nodes: {}", e),
+        )
+    })?;
     let webhook_node = find_webhook_node(&nodes, &endpoint);
     let response_mode = webhook_response_mode(webhook_node);
     let response_status = webhook_response_status(webhook_node);
@@ -211,10 +225,12 @@ async fn handle_webhook(
     let settings: IWorkflowSettings =
         serde_json::from_value(wf_entity.settings.clone()).unwrap_or_default();
 
-    let credential_provider = Arc::new(crate::credentials_provider::RepositoryCredentialProvider::new(
-        Arc::clone(&state.credential_repo),
-        &nodes,
-    ));
+    let credential_provider = Arc::new(
+        crate::credentials_provider::RepositoryCredentialProvider::new(
+            Arc::clone(&state.credential_repo),
+            &nodes,
+        ),
+    );
     let subworkflow_executor = Arc::new(RepositorySubWorkflowExecutor::new(
         Arc::clone(&state.workflow_repo),
         Arc::clone(&state.credential_repo),
@@ -267,24 +283,26 @@ async fn handle_webhook(
         let _ = runner.run_workflow(ctx).await;
     });
 
-    let payload = configured_payload.unwrap_or_else(|| json!({
-        "success": true,
-        "message": "Webhook accepted",
-        "workflow_id": endpoint.workflow_id.to_string(),
-    }));
+    let payload = configured_payload.unwrap_or_else(|| {
+        json!({
+            "success": true,
+            "message": "Webhook accepted",
+            "workflow_id": endpoint.workflow_id.to_string(),
+        })
+    });
     Ok((response_status, Json(payload)).into_response())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::repositories::credential::CredentialRepository;
     use axum::{body::Body, http::Request};
     use barqflow_core::schema::INodeParameters;
     use barqflow_core::types::NodeId;
     use serde_json::json;
     use sqlx::PgPool;
     use tower::ServiceExt;
-    use crate::repositories::credential::CredentialRepository;
 
     fn webhook_node_with_parameters(params: serde_json::Value) -> INode {
         INode {
@@ -326,24 +344,25 @@ mod tests {
     #[sqlx::test(migrations = "./migrations")]
     async fn test_dynamic_webhook_routing(pool: PgPool) {
         let repo = Arc::new(WorkflowRepository::new(pool.clone()));
-        
+
         // Create mock workflow
-        let workflow = repo.create(
-            "Webhook Test",
-            json!([]),
-            json!({}),
-            json!({})
-        ).await.unwrap();
-        
+        let workflow = repo
+            .create("Webhook Test", json!([]), json!({}), json!({}))
+            .await
+            .unwrap();
+
         // Register it in the webhook registry
         let registry = new_webhook_registry();
         {
             let mut write = registry.write().unwrap();
-            write.insert("test-hook".to_string(), WebhookEndpoint {
-                workflow_id: workflow.id,
-                node_id: "webhook1".to_string(),
-                http_method: "POST".to_string()
-            });
+            write.insert(
+                "test-hook".to_string(),
+                WebhookEndpoint {
+                    workflow_id: workflow.id,
+                    node_id: "webhook1".to_string(),
+                    http_method: "POST".to_string(),
+                },
+            );
         }
 
         let state = WebhookState {
@@ -372,7 +391,7 @@ mod tests {
             .method("GET")
             .body(Body::empty())
             .unwrap();
-            
+
         let res2 = app.clone().oneshot(req2).await.unwrap();
         assert_eq!(res2.status(), StatusCode::METHOD_NOT_ALLOWED);
 

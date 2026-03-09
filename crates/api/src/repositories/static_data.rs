@@ -1,11 +1,11 @@
+use async_trait::async_trait;
+use barqflow_core::errors::BarqError;
+use barqflow_core::traits::IStaticDataStorage;
+use barqflow_core::types::IDataObject;
 use barqflow_db::models::StaticDataEntity;
 use chrono::Utc;
 use sqlx::{PgPool, Result as SqlxResult};
 use uuid::Uuid;
-use barqflow_core::traits::IStaticDataStorage;
-use barqflow_core::types::IDataObject;
-use barqflow_core::errors::BarqError;
-use async_trait::async_trait;
 
 pub struct StaticDataRepository {
     pool: PgPool,
@@ -104,43 +104,62 @@ impl IStaticDataStorage for StaticDataRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
     use crate::repositories::workflow::WorkflowRepository;
+    use serde_json::json;
 
     #[sqlx::test(migrations = "./migrations")]
     async fn test_static_data_lifecycle(pool: PgPool) {
         let workflow_repo = WorkflowRepository::new(pool.clone());
         let static_repo = StaticDataRepository::new(pool);
 
-        let workflow = workflow_repo.create("Test Flow", json!([]), json!({}), json!({})).await.unwrap();
+        let workflow = workflow_repo
+            .create("Test Flow", json!([]), json!({}), json!({}))
+            .await
+            .unwrap();
         let node_id = "PollingNode_123";
 
         // Initial fetch should be None
-        let initial = static_repo.find_by_node_and_workflow(node_id, workflow.id).await.unwrap();
+        let initial = static_repo
+            .find_by_node_and_workflow(node_id, workflow.id)
+            .await
+            .unwrap();
         assert!(initial.is_none());
 
         // Upsert 1
         let payload_1 = json!({ "last_poll_timestamp": "2024-01-01T00:00:00Z" });
-        let inserted = static_repo.upsert(node_id, workflow.id, payload_1.clone()).await.unwrap();
+        let inserted = static_repo
+            .upsert(node_id, workflow.id, payload_1.clone())
+            .await
+            .unwrap();
         assert_eq!(inserted.node_id, node_id);
         assert_eq!(inserted.workflow_id, workflow.id);
         assert_eq!(inserted.data, payload_1);
 
         // Fetch
-        let found = static_repo.find_by_node_and_workflow(node_id, workflow.id).await.unwrap().unwrap();
+        let found = static_repo
+            .find_by_node_and_workflow(node_id, workflow.id)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(found.data, payload_1);
 
         // Upsert 2 (Update)
         let payload_2 = json!({ "last_poll_timestamp": "2024-01-02T00:00:00Z" });
-        let updated = static_repo.upsert(node_id, workflow.id, payload_2.clone()).await.unwrap();
-        
+        let updated = static_repo
+            .upsert(node_id, workflow.id, payload_2.clone())
+            .await
+            .unwrap();
+
         // Assert it updated the existing row (IDs should match)
         assert_eq!(updated.id, inserted.id);
         assert_eq!(updated.data, payload_2);
 
         // Try a different node on the same workflow
         let payload_3 = json!({ "last_poll_timestamp": "2024-01-03T00:00:00Z" });
-        let new_node = static_repo.upsert("DifferentNode_456", workflow.id, payload_3).await.unwrap();
+        let new_node = static_repo
+            .upsert("DifferentNode_456", workflow.id, payload_3)
+            .await
+            .unwrap();
         assert_ne!(new_node.id, inserted.id);
     }
 }

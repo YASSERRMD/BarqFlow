@@ -1,12 +1,7 @@
 use crate::active_workflows::ActiveCronJobs;
 use crate::controllers::webhooks::{WebhookEndpoint, WebhookRegistry};
 use crate::routes::ActiveExecutionManager;
-use axum::{
-    extract::State,
-    http::StatusCode,
-    routing::get,
-    Json, Router,
-};
+use axum::{extract::State, http::StatusCode, routing::get, Json, Router};
 use chrono::Utc;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -60,10 +55,12 @@ async fn get_trigger_health(
     State(state): State<AppState>,
 ) -> Result<Json<TriggerHealthResponse>, (StatusCode, String)> {
     let (webhook_endpoint_count, webhook_workflow_count) = {
-        let registry = state
-            .webhook_registry
-            .read()
-            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Registry lock poisoned".into()))?;
+        let registry = state.webhook_registry.read().map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Registry lock poisoned".into(),
+            )
+        })?;
         summarize_webhooks(&registry)
     };
 

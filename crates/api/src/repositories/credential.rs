@@ -212,13 +212,19 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn test_credential_lifecycle(pool: PgPool) {
-        env::set_var("BARQFLOW_ENCRYPTION_KEY", "test_key_must_be_exactly_32_byte");
+        env::set_var(
+            "BARQFLOW_ENCRYPTION_KEY",
+            "test_key_must_be_exactly_32_byte",
+        );
         let repo = CredentialRepository::new(pool.clone());
 
         let secret_payload = json!({ "api_token" : "super-secret-123", "domain" : "api.acme.com" });
 
         // CREATE
-        let created = repo.create("My ACME Creds", "acmeApi", secret_payload.clone()).await.unwrap();
+        let created = repo
+            .create("My ACME Creds", "acmeApi", secret_payload.clone())
+            .await
+            .unwrap();
         assert_eq!(created.name, "My ACME Creds");
         assert_eq!(created.cred_type, "acmeApi");
 
@@ -234,7 +240,9 @@ mod tests {
 
         // UPDATE
         let updated_payload = json!({ "api_token" : "new-token-456" });
-        repo.update(created.id, "Renamed ACME Creds", updated_payload.clone()).await.unwrap();
+        repo.update(created.id, "Renamed ACME Creds", updated_payload.clone())
+            .await
+            .unwrap();
 
         let refound = repo.find_by_id(created.id).await.unwrap().unwrap();
         assert_eq!(refound.name, "Renamed ACME Creds");
