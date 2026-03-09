@@ -158,6 +158,67 @@ impl ICredentialType for PostgresApiCredential {
     }
 }
 
+pub struct BarqDbApiCredential;
+
+#[async_trait]
+impl ICredentialType for BarqDbApiCredential {
+    fn get_description(&self) -> ICredentialProperties {
+        ICredentialProperties {
+            name: "barqDbApi".to_string(),
+            display_name: "BarqDB API".to_string(),
+            notice: Some("Used by BarqDB vector integration nodes".to_string()),
+            properties: vec![
+                INodeProperty {
+                    display_name: "Base URL".to_string(),
+                    name: "baseUrl".to_string(),
+                    r#type: NodePropertyType::String,
+                    default: Some(serde_json::json!("http://localhost:7000")),
+                    description: Some("BarqDB HTTP endpoint".to_string()),
+                    hint: None,
+                    required: true,
+                    options: None,
+                    display_options: None,
+                },
+                INodeProperty {
+                    display_name: "API Key".to_string(),
+                    name: "apiKey".to_string(),
+                    r#type: NodePropertyType::String,
+                    default: None,
+                    description: Some("Secret key for BarqDB API".to_string()),
+                    hint: None,
+                    required: true,
+                    options: None,
+                    display_options: None,
+                },
+            ],
+            documentation_url: None,
+            authenticate: Some(AuthenticateRequestProperties {
+                r#in: "header".to_string(),
+                name: "x-api-key".to_string(),
+                value: "={{$credentials.apiKey}}".to_string(),
+            }),
+        }
+    }
+
+    async fn test_credential(
+        &self,
+        credential_data: &HashMap<String, GenericValue>,
+    ) -> Result<bool, BarqError> {
+        let base_url_ok = credential_data
+            .get("baseUrl")
+            .and_then(|v| v.as_str())
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false);
+        let key_ok = credential_data
+            .get("apiKey")
+            .and_then(|v| v.as_str())
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false);
+
+        Ok(base_url_ok && key_ok)
+    }
+}
+
 pub fn register_all_credentials(registry: &CredentialRegistry) {
     let _ = registry.register_credential(CredentialInfo {
         name: "openAiApi".to_string(),
@@ -167,6 +228,11 @@ pub fn register_all_credentials(registry: &CredentialRegistry) {
     let _ = registry.register_credential(CredentialInfo {
         name: "postgresApi".to_string(),
         cred_impl: Arc::new(PostgresApiCredential),
+    });
+
+    let _ = registry.register_credential(CredentialInfo {
+        name: "barqDbApi".to_string(),
+        cred_impl: Arc::new(BarqDbApiCredential),
     });
 }
 
@@ -181,5 +247,6 @@ mod tests {
 
         assert!(registry.get_credential("openAiApi").is_some());
         assert!(registry.get_credential("postgresApi").is_some());
+        assert!(registry.get_credential("barqDbApi").is_some());
     }
 }
