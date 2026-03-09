@@ -1,7 +1,7 @@
 use crate::integration::common::{
     build_standard_output, ensure_required_string, execute_prepared_request, get_optional_param,
     get_optional_string_param, get_string_param, get_u64_param, parse_body, parse_kv_pairs,
-    run_count, PreparedRequest,
+    resolve_bot_token, run_count, PreparedRequest,
 };
 use async_trait::async_trait;
 use barqflow_core::errors::BarqError;
@@ -55,12 +55,14 @@ impl INodeType for TelegramNode {
             let operation = get_string_param(context, "operation", item_index, "sendMessage").await;
             let base_url =
                 get_string_param(context, "baseUrl", item_index, "https://api.telegram.org").await;
-            let bot_token = ensure_required_string(
+            let bot_token = resolve_bot_token(
+                context,
                 "Telegram",
-                "Bot Token",
-                get_optional_string_param(context, "botToken", item_index).await,
-                "Set the Telegram bot token in the node.",
-            )?;
+                item_index,
+                "telegramApi",
+                &["botToken", "accessToken"],
+            )
+            .await?;
             let timeout_ms = get_u64_param(context, "timeout", item_index, 60_000).await;
 
             let headers = get_optional_param(context, "headers", item_index)
@@ -168,6 +170,32 @@ mod tests {
         let result = TelegramNode::new().execute(&context).await.unwrap();
         mock.assert_async().await;
 
+        assert_eq!(
+            result[0][0].json.0.get("status").and_then(|v| v.as_u64()),
+            Some(200)
+        );
+    }
+
+    #[tokio::test]
+    async fn telegram_uses_bound_credential_when_bot_token_is_empty() {
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock("POST", "/botbot123/sendMessage")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"ok":true}"#)
+            .create_async()
+            .await;
+
+        let mut context = MockContext::new("Telegram", "barqflow-nodes.telegram");
+        context.add_param("operation", json!("sendMessage"));
+        context.add_param("baseUrl", json!(server.url()));
+        context.add_param("chatId", json!("12345"));
+        context.add_param("text", json!("hi"));
+        context.add_credential("telegramApi", "botToken", json!("bot123"));
+
+        let result = TelegramNode::new().execute(&context).await.unwrap();
+        mock.assert_async().await;
         assert_eq!(
             result[0][0].json.0.get("status").and_then(|v| v.as_u64()),
             Some(200)

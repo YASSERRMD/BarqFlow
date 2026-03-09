@@ -4,6 +4,7 @@ use barqflow_core::traits::IExecuteFunctions;
 use barqflow_core::types::IDataObject;
 use reqwest::{Client, Method};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::time::Duration;
 
 #[derive(Clone)]
@@ -177,6 +178,97 @@ pub(crate) fn require_auth_token(
         token,
         "Add a valid API token in this node, or add credentials at /credentials and bind them.",
     )
+}
+
+async fn resolve_secret_from_parameter_or_credentials(
+    context: &dyn IExecuteFunctions,
+    node_name: &str,
+    parameter_name: &str,
+    field_label: &str,
+    item_index: usize,
+    credential_type: &str,
+    credential_fields: &[&str],
+) -> Result<String, BarqError> {
+    let parameter_value = get_optional_string_param(context, parameter_name, item_index).await;
+    if let Some(value) = parameter_value {
+        if !value.trim().is_empty() {
+            return Ok(value.trim().to_string());
+        }
+    }
+
+    let credentials = context
+        .get_credentials(credential_type)
+        .await
+        .map_err(|e| BarqError::NodeOperationError {
+            node_name: node_name.to_string(),
+            message: format!(
+                "Missing {}. Set '{}' in the node or bind credential '{}'. {}",
+                field_label, parameter_name, credential_type, e
+            ),
+        })?;
+
+    if let Some(value) = first_non_empty_credential_value(&credentials, credential_fields) {
+        return Ok(value);
+    }
+
+    Err(BarqError::NodeOperationError {
+        node_name: node_name.to_string(),
+        message: format!(
+            "Missing {}. Set '{}' in the node or add '{}' at /credentials and bind it.",
+            field_label, parameter_name, credential_type
+        ),
+    })
+}
+
+fn first_non_empty_credential_value(
+    credentials: &HashMap<String, Value>,
+    fields: &[&str],
+) -> Option<String> {
+    fields.iter().find_map(|field| {
+        credentials
+            .get(*field)
+            .cloned()
+            .and_then(value_to_string)
+            .filter(|v| !v.trim().is_empty())
+    })
+}
+
+pub(crate) async fn resolve_auth_token(
+    context: &dyn IExecuteFunctions,
+    node_name: &str,
+    item_index: usize,
+    credential_type: &str,
+    credential_fields: &[&str],
+) -> Result<String, BarqError> {
+    resolve_secret_from_parameter_or_credentials(
+        context,
+        node_name,
+        "authToken",
+        "Auth Token",
+        item_index,
+        credential_type,
+        credential_fields,
+    )
+    .await
+}
+
+pub(crate) async fn resolve_bot_token(
+    context: &dyn IExecuteFunctions,
+    node_name: &str,
+    item_index: usize,
+    credential_type: &str,
+    credential_fields: &[&str],
+) -> Result<String, BarqError> {
+    resolve_secret_from_parameter_or_credentials(
+        context,
+        node_name,
+        "botToken",
+        "Bot Token",
+        item_index,
+        credential_type,
+        credential_fields,
+    )
+    .await
 }
 
 pub(crate) fn build_url(base_url: &str, resource_path: &str) -> String {
@@ -578,6 +670,7 @@ pub(crate) mod test_utils {
     pub(crate) struct MockContext {
         pub(crate) input_data: Vec<INodeExecutionData>,
         pub(crate) params: HashMap<String, GenericValue>,
+        pub(crate) credentials: HashMap<String, HashMap<String, GenericValue>>,
         pub(crate) node: INode,
     }
 
@@ -586,6 +679,7 @@ pub(crate) mod test_utils {
             Self {
                 input_data: vec![INodeExecutionData::new(IDataObject::from(json!({})))],
                 params: HashMap::new(),
+                credentials: HashMap::new(),
                 node: INode {
                     id: NodeId(format!("{}-node", node_name.to_lowercase())),
                     name: node_name.to_string(),
@@ -601,6 +695,14 @@ pub(crate) mod test_utils {
 
         pub(crate) fn add_param(&mut self, key: &str, value: Value) {
             self.params.insert(key.to_string(), value);
+        }
+
+        pub(crate) fn add_credential(&mut self, credential_type: &str, key: &str, value: Value) {
+            let bucket = self
+                .credentials
+                .entry(credential_type.to_string())
+                .or_default();
+            bucket.insert(key.to_string(), value);
         }
     }
 
@@ -646,9 +748,9 @@ pub(crate) mod test_utils {
 
         async fn get_credentials(
             &self,
-            _name: &str,
+            name: &str,
         ) -> Result<HashMap<String, GenericValue>, BarqError> {
-            Ok(HashMap::new())
+            Ok(self.credentials.get(name).cloned().unwrap_or_default())
         }
 
         fn log(&self, _message: &str) {}
