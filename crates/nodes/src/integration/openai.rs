@@ -49,6 +49,80 @@ impl OpenAINode {
             _ => "",
         }
     }
+
+    fn retry_delay_ms(attempt: u32, retry_after_header: Option<&str>) -> u64 {
+        if let Some(raw) = retry_after_header {
+            if let Ok(seconds) = raw.trim().parse::<u64>() {
+                return seconds.saturating_mul(1000);
+            }
+        }
+
+        400u64
+            .saturating_mul(2u64.saturating_pow(attempt.saturating_sub(1)))
+            .min(5_000)
+    }
+
+    fn should_retry(status: StatusCode) -> bool {
+        status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
+    }
+
+    async fn send_chat_with_retry(
+        &self,
+        endpoint: &str,
+        api_key: &str,
+        request_body: &serde_json::Map<String, Value>,
+        timeout_ms: u64,
+    ) -> Result<reqwest::Response, BarqError> {
+        const MAX_ATTEMPTS: usize = 3;
+
+        for attempt in 1..=MAX_ATTEMPTS {
+            let response_result = self
+                .client
+                .post(endpoint)
+                .timeout(Duration::from_millis(timeout_ms))
+                .header("Authorization", format!("Bearer {}", api_key))
+                .header("Content-Type", "application/json")
+                .json(request_body)
+                .send()
+                .await;
+
+            match response_result {
+                Ok(response) => {
+                    if Self::should_retry(response.status()) && attempt < MAX_ATTEMPTS {
+                        let delay = Self::retry_delay_ms(
+                            attempt as u32,
+                            response
+                                .headers()
+                                .get("retry-after")
+                                .and_then(|v| v.to_str().ok()),
+                        );
+                        tokio::time::sleep(Duration::from_millis(delay)).await;
+                        continue;
+                    }
+                    return Ok(response);
+                }
+                Err(err) => {
+                    if attempt < MAX_ATTEMPTS {
+                        let delay = Self::retry_delay_ms(attempt as u32, None);
+                        tokio::time::sleep(Duration::from_millis(delay)).await;
+                        continue;
+                    }
+                    return Err(BarqError::NodeOperationError {
+                        node_name: "OpenAI".to_string(),
+                        message: format!(
+                            "OpenAI request failed after retries: {}. Check network, base URL, and API key.",
+                            err
+                        ),
+                    });
+                }
+            }
+        }
+
+        Err(BarqError::NodeOperationError {
+            node_name: "OpenAI".to_string(),
+            message: "OpenAI request exhausted retry attempts.".to_string(),
+        })
+    }
 }
 
 impl Default for OpenAINode {
@@ -206,21 +280,8 @@ impl INodeType for OpenAINode {
             }
 
             let response = self
-                .client
-                .post(&endpoint)
-                .timeout(Duration::from_millis(timeout_ms))
-                .header("Authorization", format!("Bearer {}", api_key))
-                .header("Content-Type", "application/json")
-                .json(&request_body)
-                .send()
-                .await
-                .map_err(|e| BarqError::NodeOperationError {
-                    node_name: "OpenAI".to_string(),
-                    message: format!(
-                        "OpenAI request failed: {}. Check network, base URL, and API key.",
-                        e
-                    ),
-                })?;
+                .send_chat_with_retry(&endpoint, &api_key, &request_body, timeout_ms)
+                .await?;
 
             let status = response.status();
             if !status.is_success() {
@@ -457,6 +518,45 @@ mod tests {
         mock.assert_async().await;
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].len(), 1);
+        assert_eq!(
+            result[0][0]
+                .json
+                .0
+                .get("responseText")
+                .and_then(|v| v.as_str()),
+            Some("ok")
+        );
+    }
+
+    #[tokio::test]
+    async fn openai_retries_on_transient_server_error() {
+        let mut server = Server::new_async().await;
+        let first = server
+            .mock("POST", "/chat/completions")
+            .with_status(500)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"error":"temporary"}"#)
+            .expect(1)
+            .create_async()
+            .await;
+        let second = server
+            .mock("POST", "/chat/completions")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"choices":[{"message":{"content":"ok"}}],"usage":{"total_tokens":3}}"#)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let mut context = MockContext::new(vec![]);
+        context.add_param("prompt", json!("Say OK"));
+        context.add_param("model", json!("gpt-4o-mini"));
+        context.add_param("baseUrl", json!(server.url()));
+        context.add_credential("apiKey", json!("test-key"));
+
+        let result = OpenAINode::new().execute(&context).await.unwrap();
+        first.assert_async().await;
+        second.assert_async().await;
         assert_eq!(
             result[0][0]
                 .json

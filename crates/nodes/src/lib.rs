@@ -1899,6 +1899,54 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
             options: None,
         },
         barqflow_core::properties::INodeProperty {
+            name: "perPage".into(),
+            display_name: "Per Page".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Number,
+            default: Some(serde_json::json!(50)),
+            description: Some("Page size for list issues.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("listIssues")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "autoPaginate".into(),
+            display_name: "Auto Paginate".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Boolean,
+            default: Some(serde_json::json!(false)),
+            description: Some("Follow response next links automatically.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("listIssues")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "maxPages".into(),
+            display_name: "Max Pages".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Number,
+            default: Some(serde_json::json!(3)),
+            description: Some("Maximum pages to fetch when auto paginate is enabled.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("listIssues")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
             name: "method".into(),
             display_name: "Method".into(),
             r#type: barqflow_core::properties::NodePropertyType::Options,

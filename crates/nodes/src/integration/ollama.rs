@@ -4,7 +4,7 @@ use barqflow_core::schema::INodeExecutionData;
 use barqflow_core::traits::{IExecuteFunctions, INodeType};
 use barqflow_core::types::IDataObject;
 use futures_util::FutureExt;
-use reqwest::{Client, StatusCode};
+use reqwest::{Client, Method, StatusCode};
 use serde_json::{json, Value};
 use std::panic::AssertUnwindSafe;
 use std::time::Duration;
@@ -31,6 +31,81 @@ impl OllamaNode {
             }
             _ => "",
         }
+    }
+
+    fn retry_delay_ms(attempt: u32, retry_after_header: Option<&str>) -> u64 {
+        if let Some(raw) = retry_after_header {
+            if let Ok(seconds) = raw.trim().parse::<u64>() {
+                return seconds.saturating_mul(1000);
+            }
+        }
+
+        400u64
+            .saturating_mul(2u64.saturating_pow(attempt.saturating_sub(1)))
+            .min(5_000)
+    }
+
+    fn should_retry(status: StatusCode) -> bool {
+        status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
+    }
+
+    async fn send_with_retry(
+        &self,
+        method: Method,
+        endpoint: &str,
+        timeout_ms: u64,
+        body: Option<Value>,
+    ) -> Result<reqwest::Response, BarqError> {
+        const MAX_ATTEMPTS: usize = 3;
+
+        for attempt in 1..=MAX_ATTEMPTS {
+            let mut request = self
+                .client
+                .request(method.clone(), endpoint)
+                .timeout(Duration::from_millis(timeout_ms));
+
+            if let Some(ref payload) = body {
+                request = request
+                    .header("Content-Type", "application/json")
+                    .json(payload);
+            }
+
+            match request.send().await {
+                Ok(response) => {
+                    if Self::should_retry(response.status()) && attempt < MAX_ATTEMPTS {
+                        let delay = Self::retry_delay_ms(
+                            attempt as u32,
+                            response
+                                .headers()
+                                .get("retry-after")
+                                .and_then(|v| v.to_str().ok()),
+                        );
+                        tokio::time::sleep(Duration::from_millis(delay)).await;
+                        continue;
+                    }
+                    return Ok(response);
+                }
+                Err(err) => {
+                    if attempt < MAX_ATTEMPTS {
+                        let delay = Self::retry_delay_ms(attempt as u32, None);
+                        tokio::time::sleep(Duration::from_millis(delay)).await;
+                        continue;
+                    }
+                    return Err(BarqError::NodeOperationError {
+                        node_name: "Ollama".to_string(),
+                        message: format!(
+                            "Ollama request failed after retries: {}. Ensure Ollama is running.",
+                            err
+                        ),
+                    });
+                }
+            }
+        }
+
+        Err(BarqError::NodeOperationError {
+            node_name: "Ollama".to_string(),
+            message: "Ollama request exhausted retry attempts.".to_string(),
+        })
     }
 }
 
@@ -153,20 +228,13 @@ impl INodeType for OllamaNode {
 
                 let endpoint = format!("{}/api/generate", base_url);
                 let response = self
-                    .client
-                    .post(&endpoint)
-                    .timeout(Duration::from_millis(timeout_ms))
-                    .header("Content-Type", "application/json")
-                    .json(&request_body)
-                    .send()
-                    .await
-                    .map_err(|e| BarqError::NodeOperationError {
-                        node_name: "Ollama".to_string(),
-                        message: format!(
-                            "Ollama request failed: {}. Ensure Ollama is running and reachable at {}.",
-                            e, base_url
-                        ),
-                    })?;
+                    .send_with_retry(
+                        Method::POST,
+                        &endpoint,
+                        timeout_ms,
+                        Some(Value::Object(request_body)),
+                    )
+                    .await?;
 
                 let status = response.status();
                 if !status.is_success() {
@@ -210,18 +278,8 @@ impl INodeType for OllamaNode {
             } else if operation == "listModels" {
                 let endpoint = format!("{}/api/tags", base_url);
                 let response = self
-                    .client
-                    .get(&endpoint)
-                    .timeout(Duration::from_millis(timeout_ms))
-                    .send()
-                    .await
-                    .map_err(|e| BarqError::NodeOperationError {
-                        node_name: "Ollama".to_string(),
-                        message: format!(
-                            "Ollama request failed: {}. Ensure Ollama is running and reachable at {}.",
-                            e, base_url
-                        ),
-                    })?;
+                    .send_with_retry(Method::GET, &endpoint, timeout_ms, None)
+                    .await?;
 
                 let status = response.status();
                 if !status.is_success() {
@@ -489,5 +547,42 @@ mod tests {
             .as_array()
             .unwrap();
         assert_eq!(models.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn ollama_retries_on_transient_server_error() {
+        let mut server = Server::new_async().await;
+        let first = server
+            .mock("GET", "/api/tags")
+            .with_status(503)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"error":"temporary"}"#)
+            .expect(1)
+            .create_async()
+            .await;
+        let second = server
+            .mock("GET", "/api/tags")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"models":[{"name":"llama3.2"}]}"#)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let mut context = MockContext::new(vec![]);
+        context.add_param("baseUrl", json!(server.url()));
+        context.add_param("operation", json!("listModels"));
+
+        let result = OllamaNode::new().execute(&context).await.unwrap();
+        first.assert_async().await;
+        second.assert_async().await;
+        assert_eq!(
+            result[0][0]
+                .json
+                .0
+                .get("operation")
+                .and_then(|v| v.as_str()),
+            Some("listModels")
+        );
     }
 }
