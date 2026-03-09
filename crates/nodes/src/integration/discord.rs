@@ -1,7 +1,7 @@
 use crate::integration::common::{
     build_standard_output, build_url, ensure_required_string, execute_prepared_request,
     get_optional_param, get_optional_string_param, get_string_param, get_u64_param, parse_body,
-    parse_kv_pairs, require_auth_token, run_count, PreparedRequest,
+    parse_kv_pairs, resolve_auth_token, run_count, PreparedRequest,
 };
 use async_trait::async_trait;
 use barqflow_core::errors::BarqError;
@@ -102,10 +102,14 @@ impl INodeType for DiscordNode {
                         .map(|v| parse_kv_pairs(&v))
                         .unwrap_or_default();
                     let body = parse_body(get_optional_param(context, "body", item_index).await);
-                    let token = require_auth_token(
+                    let token = resolve_auth_token(
+                        context,
                         "Discord",
-                        get_optional_string_param(context, "authToken", item_index).await,
-                    )?;
+                        item_index,
+                        "discordApi",
+                        &["botToken", "accessToken"],
+                    )
+                    .await?;
 
                     (
                         method,
@@ -173,6 +177,32 @@ mod tests {
         assert_eq!(
             result[0][0].json.0.get("status").and_then(|v| v.as_u64()),
             Some(204)
+        );
+    }
+
+    #[tokio::test]
+    async fn discord_api_call_uses_bound_credential_when_auth_token_is_empty() {
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock("GET", "/users/@me")
+            .match_header("authorization", "Bearer discord-token")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"id":"u1"}"#)
+            .create_async()
+            .await;
+
+        let mut context = MockContext::new("Discord", "barqflow-nodes.discord");
+        context.add_param("operation", json!("apiCall"));
+        context.add_param("baseUrl", json!(server.url()));
+        context.add_param("resourcePath", json!("/users/@me"));
+        context.add_credential("discordApi", "botToken", json!("discord-token"));
+
+        let result = DiscordNode::new().execute(&context).await.unwrap();
+        mock.assert_async().await;
+        assert_eq!(
+            result[0][0].json.0.get("status").and_then(|v| v.as_u64()),
+            Some(200)
         );
     }
 

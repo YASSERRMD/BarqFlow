@@ -68,6 +68,56 @@ fn node_credential_references(node_name: &str) -> Vec<CredentialReference> {
             required: true,
             display_name: "Postgres".to_string(),
         }],
+        "barqflow-nodes.slack" => vec![CredentialReference {
+            credential_type: "slackApi".to_string(),
+            required: true,
+            display_name: "Slack API".to_string(),
+        }],
+        "barqflow-nodes.github" => vec![CredentialReference {
+            credential_type: "githubApi".to_string(),
+            required: true,
+            display_name: "GitHub API".to_string(),
+        }],
+        "barqflow-nodes.discord" => vec![CredentialReference {
+            credential_type: "discordApi".to_string(),
+            required: true,
+            display_name: "Discord API".to_string(),
+        }],
+        "barqflow-nodes.notion" => vec![CredentialReference {
+            credential_type: "notionApi".to_string(),
+            required: true,
+            display_name: "Notion API".to_string(),
+        }],
+        "barqflow-nodes.jira" => vec![CredentialReference {
+            credential_type: "jiraApi".to_string(),
+            required: true,
+            display_name: "Jira API".to_string(),
+        }],
+        "barqflow-nodes.stripe" => vec![CredentialReference {
+            credential_type: "stripeApi".to_string(),
+            required: true,
+            display_name: "Stripe API".to_string(),
+        }],
+        "barqflow-nodes.sendGrid" => vec![CredentialReference {
+            credential_type: "sendGridApi".to_string(),
+            required: true,
+            display_name: "SendGrid API".to_string(),
+        }],
+        "barqflow-nodes.hubspot" => vec![CredentialReference {
+            credential_type: "hubspotApi".to_string(),
+            required: true,
+            display_name: "HubSpot API".to_string(),
+        }],
+        "barqflow-nodes.asana" => vec![CredentialReference {
+            credential_type: "asanaApi".to_string(),
+            required: true,
+            display_name: "Asana API".to_string(),
+        }],
+        "barqflow-nodes.telegram" => vec![CredentialReference {
+            credential_type: "telegramApi".to_string(),
+            required: true,
+            display_name: "Telegram Bot API".to_string(),
+        }],
         "barqflow-nodes.barqDbInsert"
         | "barqflow-nodes.barqDbSearch"
         | "barqflow-nodes.barqDbDelete" => vec![CredentialReference {
@@ -140,5 +190,28 @@ mod tests {
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].credential_type, "barqDbApi");
         assert!(refs[0].required);
+    }
+
+    #[test]
+    fn node_credential_references_include_core_integration_bindings() {
+        let cases = vec![
+            ("barqflow-nodes.slack", "slackApi"),
+            ("barqflow-nodes.github", "githubApi"),
+            ("barqflow-nodes.discord", "discordApi"),
+            ("barqflow-nodes.notion", "notionApi"),
+            ("barqflow-nodes.jira", "jiraApi"),
+            ("barqflow-nodes.stripe", "stripeApi"),
+            ("barqflow-nodes.sendGrid", "sendGridApi"),
+            ("barqflow-nodes.hubspot", "hubspotApi"),
+            ("barqflow-nodes.asana", "asanaApi"),
+            ("barqflow-nodes.telegram", "telegramApi"),
+        ];
+
+        for (node_name, credential_type) in cases {
+            let refs = node_credential_references(node_name);
+            assert_eq!(refs.len(), 1);
+            assert_eq!(refs[0].credential_type, credential_type);
+            assert!(refs[0].required);
+        }
     }
 }

@@ -1,7 +1,7 @@
 use crate::integration::common::{
     build_standard_output, build_url, ensure_required_string, execute_prepared_request,
     get_optional_param, get_optional_string_param, get_string_param, get_u64_param, parse_body,
-    parse_kv_pairs, require_auth_token, run_count, PreparedRequest,
+    parse_kv_pairs, resolve_auth_token, run_count, PreparedRequest,
 };
 use async_trait::async_trait;
 use barqflow_core::errors::BarqError;
@@ -59,10 +59,14 @@ impl INodeType for HubspotNode {
             let base_url =
                 get_string_param(context, "baseUrl", item_index, "https://api.hubapi.com").await;
             let timeout_ms = get_u64_param(context, "timeout", item_index, 60_000).await;
-            let auth_token = require_auth_token(
+            let auth_token = resolve_auth_token(
+                context,
                 "HubSpot",
-                get_optional_string_param(context, "authToken", item_index).await,
-            )?;
+                item_index,
+                "hubspotApi",
+                &["accessToken"],
+            )
+            .await?;
 
             let mut headers = get_optional_param(context, "headers", item_index)
                 .await
@@ -162,6 +166,32 @@ mod tests {
         let result = HubspotNode::new().execute(&context).await.unwrap();
         mock.assert_async().await;
 
+        assert_eq!(
+            result[0][0].json.0.get("status").and_then(|v| v.as_u64()),
+            Some(200)
+        );
+    }
+
+    #[tokio::test]
+    async fn hubspot_uses_bound_credential_when_auth_token_is_empty() {
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock("GET", "/crm/v3/objects/contacts")
+            .match_header("authorization", "Bearer hs_test")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"results":[]}"#)
+            .create_async()
+            .await;
+
+        let mut context = MockContext::new("HubSpot", "barqflow-nodes.hubspot");
+        context.add_param("baseUrl", json!(server.url()));
+        context.add_param("resource", json!("contact"));
+        context.add_param("operation", json!("list"));
+        context.add_credential("hubspotApi", "accessToken", json!("hs_test"));
+
+        let result = HubspotNode::new().execute(&context).await.unwrap();
+        mock.assert_async().await;
         assert_eq!(
             result[0][0].json.0.get("status").and_then(|v| v.as_u64()),
             Some(200)

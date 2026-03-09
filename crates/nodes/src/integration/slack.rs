@@ -1,7 +1,7 @@
 use crate::integration::common::{
     build_standard_output, build_url, ensure_required_string, execute_prepared_request,
     get_optional_param, get_optional_string_param, get_string_param, get_u64_param, parse_body,
-    parse_kv_pairs, require_auth_token, run_count, PreparedRequest,
+    parse_kv_pairs, resolve_auth_token, run_count, PreparedRequest,
 };
 use async_trait::async_trait;
 use barqflow_core::errors::BarqError;
@@ -112,10 +112,10 @@ impl INodeType for SlackNode {
             };
 
             let auth_token = if needs_auth {
-                Some(require_auth_token(
-                    "Slack",
-                    get_optional_string_param(context, "authToken", item_index).await,
-                )?)
+                Some(
+                    resolve_auth_token(context, "Slack", item_index, "slackApi", &["accessToken"])
+                        .await?,
+                )
             } else {
                 None
             };
@@ -181,6 +181,33 @@ mod tests {
                 .get("operation")
                 .and_then(|v| v.as_str()),
             Some("postMessage")
+        );
+    }
+
+    #[tokio::test]
+    async fn slack_uses_bound_credential_when_auth_token_is_empty() {
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock("POST", "/api/chat.postMessage")
+            .match_header("authorization", "Bearer slack-token")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"ok":true}"#)
+            .create_async()
+            .await;
+
+        let mut context = MockContext::new("Slack", "barqflow-nodes.slack");
+        context.add_param("operation", json!("postMessage"));
+        context.add_param("baseUrl", json!(server.url()));
+        context.add_param("channel", json!("C001"));
+        context.add_param("text", json!("hello"));
+        context.add_credential("slackApi", "accessToken", json!("slack-token"));
+
+        let result = SlackNode::new().execute(&context).await.unwrap();
+        mock.assert_async().await;
+        assert_eq!(
+            result[0][0].json.0.get("status").and_then(|v| v.as_u64()),
+            Some(200)
         );
     }
 

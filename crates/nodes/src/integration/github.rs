@@ -1,7 +1,7 @@
 use crate::integration::common::{
     build_standard_output, build_url, ensure_required_string, execute_paginated_prepared_request,
     execute_prepared_request, get_optional_param, get_optional_string_param, get_string_param,
-    get_u64_param, parse_body, parse_kv_pairs, require_auth_token, run_count, PreparedRequest,
+    get_u64_param, parse_body, parse_kv_pairs, resolve_auth_token, run_count, PreparedRequest,
 };
 use async_trait::async_trait;
 use barqflow_core::errors::BarqError;
@@ -175,10 +175,9 @@ impl INodeType for GithubNode {
                 }
             };
 
-            let auth_token = require_auth_token(
-                "GitHub",
-                get_optional_string_param(context, "authToken", item_index).await,
-            )?;
+            let auth_token =
+                resolve_auth_token(context, "GitHub", item_index, "githubApi", &["accessToken"])
+                    .await?;
 
             let request = PreparedRequest {
                 method,
@@ -245,6 +244,33 @@ mod tests {
         let result = GithubNode::new().execute(&context).await.unwrap();
         mock.assert_async().await;
 
+        assert_eq!(
+            result[0][0].json.0.get("status").and_then(|v| v.as_u64()),
+            Some(200)
+        );
+    }
+
+    #[tokio::test]
+    async fn github_uses_bound_credential_when_auth_token_is_empty() {
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock("GET", "/repos/octo/repo")
+            .match_header("authorization", "Bearer ghp_xxx")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"id":1}"#)
+            .create_async()
+            .await;
+
+        let mut context = MockContext::new("GitHub", "barqflow-nodes.github");
+        context.add_param("operation", json!("getRepo"));
+        context.add_param("baseUrl", json!(server.url()));
+        context.add_param("owner", json!("octo"));
+        context.add_param("repo", json!("repo"));
+        context.add_credential("githubApi", "accessToken", json!("ghp_xxx"));
+
+        let result = GithubNode::new().execute(&context).await.unwrap();
+        mock.assert_async().await;
         assert_eq!(
             result[0][0].json.0.get("status").and_then(|v| v.as_u64()),
             Some(200)

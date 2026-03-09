@@ -41,6 +41,36 @@ const FALLBACK_NODE_CREDENTIALS: Record<
   'barqflow-nodes.postgres': [
     { credentialType: 'postgresApi', displayName: 'Postgres', required: true },
   ],
+  'barqflow-nodes.slack': [
+    { credentialType: 'slackApi', displayName: 'Slack API', required: true },
+  ],
+  'barqflow-nodes.github': [
+    { credentialType: 'githubApi', displayName: 'GitHub API', required: true },
+  ],
+  'barqflow-nodes.discord': [
+    { credentialType: 'discordApi', displayName: 'Discord API', required: true },
+  ],
+  'barqflow-nodes.notion': [
+    { credentialType: 'notionApi', displayName: 'Notion API', required: true },
+  ],
+  'barqflow-nodes.jira': [
+    { credentialType: 'jiraApi', displayName: 'Jira API', required: true },
+  ],
+  'barqflow-nodes.stripe': [
+    { credentialType: 'stripeApi', displayName: 'Stripe API', required: true },
+  ],
+  'barqflow-nodes.sendGrid': [
+    { credentialType: 'sendGridApi', displayName: 'SendGrid API', required: true },
+  ],
+  'barqflow-nodes.hubspot': [
+    { credentialType: 'hubspotApi', displayName: 'HubSpot API', required: true },
+  ],
+  'barqflow-nodes.asana': [
+    { credentialType: 'asanaApi', displayName: 'Asana API', required: true },
+  ],
+  'barqflow-nodes.telegram': [
+    { credentialType: 'telegramApi', displayName: 'Telegram Bot API', required: true },
+  ],
 }
 
 const nodeSchema = computed(() => {
@@ -306,6 +336,23 @@ function isMissingRequiredPropertyValue(prop: any, value: any): boolean {
   return false
 }
 
+function hasSelectedRequiredCredentialForNode(): boolean {
+  if (!props.node) return false
+  const selected = props.node?.data?.credentials || {}
+  return nodeCredentialRefs.value
+    .filter((ref: any) => ref?.required)
+    .some((ref: any) => String(selected?.[ref.credentialType] || '').trim().length > 0)
+}
+
+function shouldBypassTokenPropertyRequirement(prop: any): boolean {
+  const propName = String(prop?.name || '')
+  if (propName !== 'authToken' && propName !== 'botToken') {
+    return false
+  }
+
+  return hasSelectedRequiredCredentialForNode()
+}
+
 const missingRequiredParameters = computed(() => {
   if (!props.node || !nodeSchema.value) return []
 
@@ -317,6 +364,7 @@ const missingRequiredParameters = computed(() => {
   return schemaProperties
     .filter((prop: any) => prop?.required === true)
     .filter((prop: any) => isPropertyVisible(prop))
+    .filter((prop: any) => !shouldBypassTokenPropertyRequirement(prop))
     .filter((prop: any) => isMissingRequiredPropertyValue(prop, properties[prop.name]))
     .map((prop: any) => String(prop?.displayName || prop?.name || 'unknown'))
 })
