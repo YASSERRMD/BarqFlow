@@ -219,6 +219,63 @@ impl ICredentialType for BarqDbApiCredential {
     }
 }
 
+pub struct TokenCredential {
+    pub name: &'static str,
+    pub display_name: &'static str,
+    pub notice: &'static str,
+    pub token_field: &'static str,
+    pub token_label: &'static str,
+    pub documentation_url: Option<&'static str>,
+    pub authenticate_header: Option<&'static str>,
+}
+
+impl TokenCredential {
+    fn authenticate_value(&self) -> String {
+        format!("Bearer ={{$credentials.{}}}", self.token_field)
+    }
+}
+
+#[async_trait]
+impl ICredentialType for TokenCredential {
+    fn get_description(&self) -> ICredentialProperties {
+        ICredentialProperties {
+            name: self.name.to_string(),
+            display_name: self.display_name.to_string(),
+            notice: Some(self.notice.to_string()),
+            properties: vec![INodeProperty {
+                display_name: self.token_label.to_string(),
+                name: self.token_field.to_string(),
+                r#type: NodePropertyType::String,
+                default: None,
+                description: Some(format!("Secret token used by {}", self.display_name)),
+                hint: None,
+                required: true,
+                options: None,
+                display_options: None,
+            }],
+            documentation_url: self.documentation_url.map(str::to_string),
+            authenticate: self
+                .authenticate_header
+                .map(|header| AuthenticateRequestProperties {
+                    r#in: "header".to_string(),
+                    name: header.to_string(),
+                    value: self.authenticate_value(),
+                }),
+        }
+    }
+
+    async fn test_credential(
+        &self,
+        credential_data: &HashMap<String, GenericValue>,
+    ) -> Result<bool, BarqError> {
+        Ok(credential_data
+            .get(self.token_field)
+            .and_then(|v| v.as_str())
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false))
+    }
+}
+
 pub fn register_all_credentials(registry: &CredentialRegistry) {
     let _ = registry.register_credential(CredentialInfo {
         name: "openAiApi".to_string(),
@@ -234,6 +291,108 @@ pub fn register_all_credentials(registry: &CredentialRegistry) {
         name: "barqDbApi".to_string(),
         cred_impl: Arc::new(BarqDbApiCredential),
     });
+
+    let token_credentials = vec![
+        TokenCredential {
+            name: "slackApi",
+            display_name: "Slack API",
+            notice: "Used by Slack integration nodes",
+            token_field: "accessToken",
+            token_label: "Access Token",
+            documentation_url: Some("https://api.slack.com/authentication/token-types"),
+            authenticate_header: Some("Authorization"),
+        },
+        TokenCredential {
+            name: "githubApi",
+            display_name: "GitHub API",
+            notice: "Used by GitHub integration nodes",
+            token_field: "accessToken",
+            token_label: "Access Token",
+            documentation_url: Some("https://docs.github.com/en/rest/authentication"),
+            authenticate_header: Some("Authorization"),
+        },
+        TokenCredential {
+            name: "discordApi",
+            display_name: "Discord API",
+            notice: "Used by Discord integration nodes",
+            token_field: "botToken",
+            token_label: "Bot Token",
+            documentation_url: Some("https://discord.com/developers/docs/topics/oauth2"),
+            authenticate_header: Some("Authorization"),
+        },
+        TokenCredential {
+            name: "notionApi",
+            display_name: "Notion API",
+            notice: "Used by Notion integration nodes",
+            token_field: "accessToken",
+            token_label: "Access Token",
+            documentation_url: Some("https://developers.notion.com/docs/authorization"),
+            authenticate_header: Some("Authorization"),
+        },
+        TokenCredential {
+            name: "jiraApi",
+            display_name: "Jira API",
+            notice: "Used by Jira integration nodes",
+            token_field: "accessToken",
+            token_label: "Access Token",
+            documentation_url: Some(
+                "https://developer.atlassian.com/cloud/jira/platform/basic-auth-for-rest-apis/",
+            ),
+            authenticate_header: Some("Authorization"),
+        },
+        TokenCredential {
+            name: "stripeApi",
+            display_name: "Stripe API",
+            notice: "Used by Stripe integration nodes",
+            token_field: "apiKey",
+            token_label: "API Key",
+            documentation_url: Some("https://docs.stripe.com/keys"),
+            authenticate_header: Some("Authorization"),
+        },
+        TokenCredential {
+            name: "sendGridApi",
+            display_name: "SendGrid API",
+            notice: "Used by SendGrid integration nodes",
+            token_field: "apiKey",
+            token_label: "API Key",
+            documentation_url: Some("https://docs.sendgrid.com/ui/account-and-settings/api-keys"),
+            authenticate_header: Some("Authorization"),
+        },
+        TokenCredential {
+            name: "hubspotApi",
+            display_name: "HubSpot API",
+            notice: "Used by HubSpot integration nodes",
+            token_field: "accessToken",
+            token_label: "Access Token",
+            documentation_url: Some("https://developers.hubspot.com/docs/api/private-apps"),
+            authenticate_header: Some("Authorization"),
+        },
+        TokenCredential {
+            name: "asanaApi",
+            display_name: "Asana API",
+            notice: "Used by Asana integration nodes",
+            token_field: "accessToken",
+            token_label: "Access Token",
+            documentation_url: Some("https://developers.asana.com/docs/personal-access-token"),
+            authenticate_header: Some("Authorization"),
+        },
+        TokenCredential {
+            name: "telegramApi",
+            display_name: "Telegram Bot API",
+            notice: "Used by Telegram integration nodes",
+            token_field: "botToken",
+            token_label: "Bot Token",
+            documentation_url: Some("https://core.telegram.org/bots#how-do-i-create-a-bot"),
+            authenticate_header: None,
+        },
+    ];
+
+    for credential in token_credentials {
+        let _ = registry.register_credential(CredentialInfo {
+            name: credential.name.to_string(),
+            cred_impl: Arc::new(credential),
+        });
+    }
 }
 
 #[cfg(test)]
@@ -248,5 +407,15 @@ mod tests {
         assert!(registry.get_credential("openAiApi").is_some());
         assert!(registry.get_credential("postgresApi").is_some());
         assert!(registry.get_credential("barqDbApi").is_some());
+        assert!(registry.get_credential("slackApi").is_some());
+        assert!(registry.get_credential("githubApi").is_some());
+        assert!(registry.get_credential("discordApi").is_some());
+        assert!(registry.get_credential("notionApi").is_some());
+        assert!(registry.get_credential("jiraApi").is_some());
+        assert!(registry.get_credential("stripeApi").is_some());
+        assert!(registry.get_credential("sendGridApi").is_some());
+        assert!(registry.get_credential("hubspotApi").is_some());
+        assert!(registry.get_credential("asanaApi").is_some());
+        assert!(registry.get_credential("telegramApi").is_some());
     }
 }
