@@ -27,9 +27,18 @@ impl INodeType for WaitNode {
             .unwrap_or_else(|_| "time".to_string());
 
         let wait_config = if resume_string == "time" {
-            let amount = context.get_node_parameter("amount", None).await.unwrap_or(serde_json::json!(1)).as_u64().unwrap_or(1);
-            let unit = context.get_node_parameter("unit", None).await.map(|v| v.as_str().unwrap_or("seconds").to_string()).unwrap_or_else(|_| "seconds".to_string());
-            
+            let amount = context
+                .get_node_parameter("amount", None)
+                .await
+                .unwrap_or(serde_json::json!(1))
+                .as_u64()
+                .unwrap_or(1);
+            let unit = context
+                .get_node_parameter("unit", None)
+                .await
+                .map(|v| v.as_str().unwrap_or("seconds").to_string())
+                .unwrap_or_else(|_| "seconds".to_string());
+
             let multiplier = match unit.as_str() {
                 "milliseconds" => 1,
                 "seconds" => 1000,
@@ -38,7 +47,7 @@ impl INodeType for WaitNode {
                 "days" => 86400000,
                 _ => 1000,
             };
-            
+
             serde_json::json!({
                 "waitType": "time",
                 "durationMs": amount * multiplier,
@@ -61,7 +70,7 @@ impl INodeType for WaitNode {
         };
 
         let node_name = context.get_node().name.clone();
-        
+
         // Throw the suspend error to trap the execution stack gracefully inside run_node
         Err(BarqError::SuspendExecution {
             node_name,

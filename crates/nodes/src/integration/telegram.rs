@@ -53,7 +53,8 @@ impl INodeType for TelegramNode {
 
         for item_index in 0..run_count {
             let operation = get_string_param(context, "operation", item_index, "sendMessage").await;
-            let base_url = get_string_param(context, "baseUrl", item_index, "https://api.telegram.org").await;
+            let base_url =
+                get_string_param(context, "baseUrl", item_index, "https://api.telegram.org").await;
             let bot_token = ensure_required_string(
                 "Telegram",
                 "Bot Token",
@@ -167,7 +168,10 @@ mod tests {
         let result = TelegramNode::new().execute(&context).await.unwrap();
         mock.assert_async().await;
 
-        assert_eq!(result[0][0].json.0.get("status").and_then(|v| v.as_u64()), Some(200));
+        assert_eq!(
+            result[0][0].json.0.get("status").and_then(|v| v.as_u64()),
+            Some(200)
+        );
     }
 
     #[tokio::test]

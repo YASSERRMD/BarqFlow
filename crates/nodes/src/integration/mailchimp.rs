@@ -68,7 +68,10 @@ impl INodeType for MailchimpNode {
                 .await
                 .map(|v| parse_kv_pairs(&v))
                 .unwrap_or_default();
-            headers.push(("Authorization".to_string(), format!("Basic {}", basic_token)));
+            headers.push((
+                "Authorization".to_string(),
+                format!("Basic {}", basic_token),
+            ));
             headers.push(("Content-Type".to_string(), "application/json".to_string()));
 
             let query = get_optional_param(context, "queryParameters", item_index)
@@ -189,7 +192,10 @@ mod tests {
 
         let result = MailchimpNode::new().execute(&context).await.unwrap();
         mock.assert_async().await;
-        assert_eq!(result[0][0].json.0.get("status").and_then(|v| v.as_u64()), Some(200));
+        assert_eq!(
+            result[0][0].json.0.get("status").and_then(|v| v.as_u64()),
+            Some(200)
+        );
     }
 
     #[tokio::test]

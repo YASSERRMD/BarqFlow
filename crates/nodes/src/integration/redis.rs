@@ -182,7 +182,10 @@ mod tests {
 
         let result = RedisNode::new().execute(&context).await.unwrap();
         mock.assert_async().await;
-        assert_eq!(result[0][0].json.0.get("status").and_then(|v| v.as_u64()), Some(200));
+        assert_eq!(
+            result[0][0].json.0.get("status").and_then(|v| v.as_u64()),
+            Some(200)
+        );
     }
 
     #[tokio::test]

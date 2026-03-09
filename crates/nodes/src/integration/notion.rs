@@ -92,15 +92,16 @@ impl INodeType for NotionNode {
                         get_optional_string_param(context, "databaseId", item_index).await,
                         "Provide the Notion database ID.",
                     )?;
-                    let properties = parse_body(
-                        get_optional_param(context, "properties", item_index).await,
-                    )
-                    .ok_or_else(|| BarqError::NodeOperationError {
+                    let properties =
+                        parse_body(get_optional_param(context, "properties", item_index).await)
+                            .ok_or_else(|| {
+                                BarqError::NodeOperationError {
                         node_name: "Notion".to_string(),
                         message:
                             "Missing Properties. Provide a JSON object for the new page properties."
                                 .to_string(),
-                    })?;
+                    }
+                            })?;
 
                     (
                         "POST".to_string(),

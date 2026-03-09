@@ -47,8 +47,13 @@ impl INodeType for SheetsNode {
 
         for item_index in 0..run_count {
             let operation = get_string_param(context, "operation", item_index, "readRange").await;
-            let base_url =
-                get_string_param(context, "baseUrl", item_index, "https://sheets.googleapis.com").await;
+            let base_url = get_string_param(
+                context,
+                "baseUrl",
+                item_index,
+                "https://sheets.googleapis.com",
+            )
+            .await;
             let timeout_ms = get_u64_param(context, "timeout", item_index, 60_000).await;
             let auth_token = require_auth_token(
                 "Google Sheets",
@@ -64,7 +69,8 @@ impl INodeType for SheetsNode {
                 .map(|v| parse_kv_pairs(&v))
                 .unwrap_or_default();
 
-            let spreadsheet_id = get_optional_string_param(context, "spreadsheetId", item_index).await;
+            let spreadsheet_id =
+                get_optional_string_param(context, "spreadsheetId", item_index).await;
             let range = get_optional_string_param(context, "range", item_index).await;
 
             let (method, url, body) = match operation.as_str() {
@@ -104,12 +110,14 @@ impl INodeType for SheetsNode {
                         "Set sheet range in A1 notation.",
                     )?;
                     query.push(("valueInputOption".to_string(), "RAW".to_string()));
-                    let values = parse_body(get_optional_param(context, "values", item_index).await)
-                        .ok_or_else(|| BarqError::NodeOperationError {
-                            node_name: "Google Sheets".to_string(),
-                            message: "Missing Values. Provide a JSON array like [[\"a\",\"b\"]]."
-                                .to_string(),
-                        })?;
+                    let values =
+                        parse_body(get_optional_param(context, "values", item_index).await)
+                            .ok_or_else(|| BarqError::NodeOperationError {
+                                node_name: "Google Sheets".to_string(),
+                                message:
+                                    "Missing Values. Provide a JSON array like [[\"a\",\"b\"]]."
+                                        .to_string(),
+                            })?;
                     (
                         "POST".to_string(),
                         build_url(
@@ -187,7 +195,10 @@ mod tests {
 
         let result = SheetsNode::new().execute(&context).await.unwrap();
         mock.assert_async().await;
-        assert_eq!(result[0][0].json.0.get("status").and_then(|v| v.as_u64()), Some(200));
+        assert_eq!(
+            result[0][0].json.0.get("status").and_then(|v| v.as_u64()),
+            Some(200)
+        );
     }
 
     #[tokio::test]

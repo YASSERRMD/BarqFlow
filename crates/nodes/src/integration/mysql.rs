@@ -46,9 +46,15 @@ impl INodeType for MysqlNode {
         let mut output_items = Vec::new();
 
         for item_index in 0..run_count {
-            let operation = get_string_param(context, "operation", item_index, "executeQuery").await;
-            let base_url =
-                get_string_param(context, "baseUrl", item_index, "https://sql-gateway.example.com").await;
+            let operation =
+                get_string_param(context, "operation", item_index, "executeQuery").await;
+            let base_url = get_string_param(
+                context,
+                "baseUrl",
+                item_index,
+                "https://sql-gateway.example.com",
+            )
+            .await;
             let timeout_ms = get_u64_param(context, "timeout", item_index, 60_000).await;
             let auth_token = require_auth_token(
                 "MySQL",
@@ -145,7 +151,10 @@ mod tests {
 
         let result = MysqlNode::new().execute(&context).await.unwrap();
         mock.assert_async().await;
-        assert_eq!(result[0][0].json.0.get("status").and_then(|v| v.as_u64()), Some(200));
+        assert_eq!(
+            result[0][0].json.0.get("status").and_then(|v| v.as_u64()),
+            Some(200)
+        );
     }
 
     #[tokio::test]

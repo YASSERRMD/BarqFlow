@@ -55,8 +55,13 @@ impl INodeType for SalesforceNode {
         for item_index in 0..run_count {
             let resource = get_string_param(context, "resource", item_index, "contact").await;
             let operation = get_string_param(context, "operation", item_index, "get").await;
-            let base_url =
-                get_string_param(context, "baseUrl", item_index, "https://your-instance.salesforce.com").await;
+            let base_url = get_string_param(
+                context,
+                "baseUrl",
+                item_index,
+                "https://your-instance.salesforce.com",
+            )
+            .await;
             let api_version = get_string_param(context, "apiVersion", item_index, "v59.0").await;
             let timeout_ms = get_u64_param(context, "timeout", item_index, 60_000).await;
             let auth_token = require_auth_token(
@@ -93,12 +98,13 @@ impl INodeType for SalesforceNode {
                     )
                 }
                 "create" => {
-                    let fields = parse_body(get_optional_param(context, "fields", item_index).await)
-                        .ok_or_else(|| BarqError::NodeOperationError {
-                            node_name: "Salesforce".to_string(),
-                            message: "Missing Fields. Provide a JSON object for record fields."
-                                .to_string(),
-                        })?;
+                    let fields =
+                        parse_body(get_optional_param(context, "fields", item_index).await)
+                            .ok_or_else(|| BarqError::NodeOperationError {
+                                node_name: "Salesforce".to_string(),
+                                message: "Missing Fields. Provide a JSON object for record fields."
+                                    .to_string(),
+                            })?;
                     (
                         "POST".to_string(),
                         build_url(
@@ -176,7 +182,10 @@ mod tests {
 
         let result = SalesforceNode::new().execute(&context).await.unwrap();
         mock.assert_async().await;
-        assert_eq!(result[0][0].json.0.get("status").and_then(|v| v.as_u64()), Some(200));
+        assert_eq!(
+            result[0][0].json.0.get("status").and_then(|v| v.as_u64()),
+            Some(200)
+        );
     }
 
     #[tokio::test]
