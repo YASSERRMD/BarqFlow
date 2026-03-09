@@ -86,7 +86,12 @@ impl PostgresNode {
                 }
             }
             Value::Number(v) => v.to_string(),
-            Value::String(v) => format!("'{}'", v.replace('\\', "\\\\").replace('"', "\\\"").replace('\'', "''")),
+            Value::String(v) => format!(
+                "'{}'",
+                v.replace('\\', "\\\\")
+                    .replace('"', "\\\"")
+                    .replace('\'', "''")
+            ),
             other => {
                 let serialized = other.to_string().replace('\\', "\\\\").replace('\'', "''");
                 format!("'{}'::jsonb", serialized)
@@ -150,7 +155,10 @@ impl PostgresNode {
         Ok(query)
     }
 
-    fn build_insert_query(table: &str, data: &serde_json::Map<String, Value>) -> Result<String, BarqError> {
+    fn build_insert_query(
+        table: &str,
+        data: &serde_json::Map<String, Value>,
+    ) -> Result<String, BarqError> {
         if !Self::is_safe_identifier(table) {
             return Err(BarqError::NodeOperationError {
                 node_name: "Postgres".to_string(),
@@ -270,77 +278,82 @@ impl INodeType for PostgresNode {
                 .map(|v| v.as_str().unwrap_or("executeQuery").to_string())
                 .unwrap_or_else(|_| "executeQuery".to_string());
 
-            let query = match operation.as_str() {
-                "executeQuery" => {
-                    let query = context
-                        .get_node_parameter_at_item("query", item_index, None)
-                        .await
-                        .map(|v| v.as_str().unwrap_or("").to_string())
-                        .unwrap_or_default();
+            let query =
+                match operation.as_str() {
+                    "executeQuery" => {
+                        let query = context
+                            .get_node_parameter_at_item("query", item_index, None)
+                            .await
+                            .map(|v| v.as_str().unwrap_or("").to_string())
+                            .unwrap_or_default();
 
-                    if query.trim().is_empty() {
-                        return Err(BarqError::NodeOperationError {
-                            node_name: "Postgres".to_string(),
-                            message: "Query cannot be empty".to_string(),
-                        });
+                        if query.trim().is_empty() {
+                            return Err(BarqError::NodeOperationError {
+                                node_name: "Postgres".to_string(),
+                                message: "Query cannot be empty".to_string(),
+                            });
+                        }
+                        query
                     }
-                    query
-                }
-                "selectRows" => {
-                    let table = ensure_required_string(
-                        "Postgres",
-                        "Table",
-                        get_optional_string_param(context, "table", item_index).await,
-                        "Set the table name for select operation.",
-                    )?;
-                    let columns = get_optional_string_param(context, "columns", item_index).await;
-                    let where_clause =
-                        get_optional_string_param(context, "whereClause", item_index).await;
-                    let limit = get_optional_param(context, "limit", item_index)
-                        .await
-                        .and_then(|v| v.as_u64());
-                    Self::build_select_query(
-                        &table,
-                        columns.as_deref(),
-                        where_clause.as_deref(),
-                        limit,
-                    )?
-                }
-                "insertRow" => {
-                    let table = ensure_required_string(
-                        "Postgres",
-                        "Table",
-                        get_optional_string_param(context, "table", item_index).await,
-                        "Set the table name for insert operation.",
-                    )?;
-                    let data_value = parse_body(get_optional_param(context, "data", item_index).await)
-                        .ok_or_else(|| BarqError::NodeOperationError {
-                            node_name: "Postgres".to_string(),
-                            message: "Missing Data. Provide a JSON object for insert operation."
-                                .to_string(),
-                        })?;
-                    let data_obj = data_value.as_object().ok_or_else(|| BarqError::NodeOperationError {
+                    "selectRows" => {
+                        let table = ensure_required_string(
+                            "Postgres",
+                            "Table",
+                            get_optional_string_param(context, "table", item_index).await,
+                            "Set the table name for select operation.",
+                        )?;
+                        let columns =
+                            get_optional_string_param(context, "columns", item_index).await;
+                        let where_clause =
+                            get_optional_string_param(context, "whereClause", item_index).await;
+                        let limit = get_optional_param(context, "limit", item_index)
+                            .await
+                            .and_then(|v| v.as_u64());
+                        Self::build_select_query(
+                            &table,
+                            columns.as_deref(),
+                            where_clause.as_deref(),
+                            limit,
+                        )?
+                    }
+                    "insertRow" => {
+                        let table = ensure_required_string(
+                            "Postgres",
+                            "Table",
+                            get_optional_string_param(context, "table", item_index).await,
+                            "Set the table name for insert operation.",
+                        )?;
+                        let data_value =
+                            parse_body(get_optional_param(context, "data", item_index).await)
+                                .ok_or_else(|| BarqError::NodeOperationError {
+                                    node_name: "Postgres".to_string(),
+                                    message:
+                                        "Missing Data. Provide a JSON object for insert operation."
+                                            .to_string(),
+                                })?;
+                        let data_obj = data_value.as_object().ok_or_else(|| {
+                            BarqError::NodeOperationError {
                         node_name: "Postgres".to_string(),
                         message: "Invalid Data format. Expected a JSON object for insert operation."
                             .to_string(),
-                    })?;
-                    Self::build_insert_query(&table, data_obj)?
-                }
-                _ => {
-                    return Err(BarqError::NodeOperationError {
-                        node_name: "Postgres".to_string(),
-                        message: format!("Operation '{}' not supported", operation),
-                    });
-                }
-            };
+                    }
+                        })?;
+                        Self::build_insert_query(&table, data_obj)?
+                    }
+                    _ => {
+                        return Err(BarqError::NodeOperationError {
+                            node_name: "Postgres".to_string(),
+                            message: format!("Operation '{}' not supported", operation),
+                        });
+                    }
+                };
 
-            let rows = sqlx::query(&query)
-                .fetch_all(&pool)
-                .await
-                .map_err(|e| BarqError::NodeOperationError {
+            let rows = sqlx::query(&query).fetch_all(&pool).await.map_err(|e| {
+                BarqError::NodeOperationError {
                     node_name: "Postgres".to_string(),
                     message: format!("Query execution failed: {}", e),
-                })?;
+                }
+            })?;
 
             output_items.push(INodeExecutionData::new(IDataObject::from(json!({
                 "success": true,
@@ -368,7 +381,10 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(query, "SELECT id,name FROM users WHERE active = true LIMIT 10");
+        assert_eq!(
+            query,
+            "SELECT id,name FROM users WHERE active = true LIMIT 10"
+        );
     }
 
     #[test]

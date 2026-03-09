@@ -11,11 +11,11 @@ use barqflow_core::types::IDataObject;
 use reqwest::Client;
 use serde_json::json;
 
-pub struct RedisNode {
+pub struct TrelloNode {
     client: Client,
 }
 
-impl RedisNode {
+impl TrelloNode {
     pub fn new() -> Self {
         Self {
             client: Client::new(),
@@ -23,19 +23,16 @@ impl RedisNode {
     }
 }
 
-impl Default for RedisNode {
+impl Default for TrelloNode {
     fn default() -> Self {
         Self::new()
     }
 }
 
 #[async_trait]
-impl INodeType for RedisNode {
+impl INodeType for TrelloNode {
     fn get_description(&self) -> IDataObject {
-        IDataObject::from(json!({
-            "name": "Redis",
-            "description": "Execute Redis REST commands (Upstash-style)"
-        }))
+        IDataObject::from(json!({"name":"Trello","description":"Use Trello boards and cards"}))
     }
 
     async fn execute(
@@ -46,17 +43,12 @@ impl INodeType for RedisNode {
         let mut output_items = Vec::new();
 
         for item_index in 0..run_count {
-            let operation = get_string_param(context, "operation", item_index, "get").await;
-            let base_url = get_string_param(
-                context,
-                "baseUrl",
-                item_index,
-                "https://your-upstash-endpoint.upstash.io",
-            )
-            .await;
+            let operation = get_string_param(context, "operation", item_index, "listBoards").await;
+            let base_url =
+                get_string_param(context, "baseUrl", item_index, "https://api.trello.com").await;
             let timeout_ms = get_u64_param(context, "timeout", item_index, 60_000).await;
             let auth_token = require_auth_token(
-                "Redis",
+                "Trello",
                 get_optional_string_param(context, "authToken", item_index).await,
             )?;
 
@@ -64,79 +56,60 @@ impl INodeType for RedisNode {
                 .await
                 .map(|v| parse_kv_pairs(&v))
                 .unwrap_or_default();
-            let query = get_optional_param(context, "queryParameters", item_index)
+            let mut query = get_optional_param(context, "queryParameters", item_index)
                 .await
                 .map(|v| parse_kv_pairs(&v))
                 .unwrap_or_default();
 
             let (method, url, body) = match operation.as_str() {
-                "get" => {
-                    let key = ensure_required_string(
-                        "Redis",
-                        "Key",
-                        get_optional_string_param(context, "key", item_index).await,
-                        "Set the Redis key.",
+                "listBoards" => (
+                    "GET".to_string(),
+                    build_url(&base_url, "/1/members/me/boards"),
+                    None,
+                ),
+                "createCard" => {
+                    let list_id = ensure_required_string(
+                        "Trello",
+                        "List ID",
+                        get_optional_string_param(context, "listId", item_index).await,
+                        "Set Trello list ID.",
                     )?;
-                    (
-                        "GET".to_string(),
-                        build_url(&base_url, &format!("/get/{key}")),
-                        None,
-                    )
-                }
-                "set" => {
-                    let key = ensure_required_string(
-                        "Redis",
-                        "Key",
-                        get_optional_string_param(context, "key", item_index).await,
-                        "Set the Redis key.",
+                    let name = ensure_required_string(
+                        "Trello",
+                        "Name",
+                        get_optional_string_param(context, "name", item_index).await,
+                        "Set card name.",
                     )?;
-                    let value = ensure_required_string(
-                        "Redis",
-                        "Value",
-                        get_optional_string_param(context, "value", item_index).await,
-                        "Set the Redis value.",
-                    )?;
-                    (
-                        "POST".to_string(),
-                        build_url(&base_url, &format!("/set/{key}/{value}")),
-                        None,
-                    )
-                }
-                "delete" => {
-                    let key = ensure_required_string(
-                        "Redis",
-                        "Key",
-                        get_optional_string_param(context, "key", item_index).await,
-                        "Set the Redis key.",
-                    )?;
-                    (
-                        "POST".to_string(),
-                        build_url(&base_url, &format!("/del/{key}")),
-                        None,
-                    )
+                    let desc = get_optional_string_param(context, "description", item_index).await;
+                    query.push(("idList".to_string(), list_id));
+                    query.push(("name".to_string(), name));
+                    if let Some(desc) = desc {
+                        query.push(("desc".to_string(), desc));
+                    }
+                    ("POST".to_string(), build_url(&base_url, "/1/cards"), None)
                 }
                 "apiCall" => {
                     let method = get_string_param(context, "method", item_index, "GET").await;
                     let resource_path = ensure_required_string(
-                        "Redis",
+                        "Trello",
                         "Resource Path",
                         get_optional_string_param(context, "resourcePath", item_index).await,
-                        "Provide command path like /ping.",
+                        "Provide Trello resource path.",
                     )?;
                     let body = parse_body(get_optional_param(context, "body", item_index).await);
                     (method, build_url(&base_url, &resource_path), body)
                 }
                 _ => {
                     return Err(BarqError::NodeOperationError {
-                        node_name: "Redis".to_string(),
+                        node_name: "Trello".to_string(),
                         message: format!("Operation '{}' is not supported", operation),
-                    });
+                    })
                 }
             };
 
             let response = execute_prepared_request(
                 &self.client,
-                "Redis",
+                "Trello",
                 PreparedRequest {
                     method,
                     url,
@@ -148,7 +121,6 @@ impl INodeType for RedisNode {
                 },
             )
             .await?;
-
             output_items.push(build_standard_output(&operation, response));
         }
 
@@ -163,38 +135,27 @@ mod tests {
     use mockito::Server;
 
     #[tokio::test]
-    async fn redis_get_works() {
+    async fn trello_list_boards_works() {
         let mut server = Server::new_async().await;
         let mock = server
-            .mock("GET", "/get/myKey")
-            .match_header("authorization", "Bearer redis-token")
+            .mock("GET", "/1/members/me/boards")
+            .match_header("authorization", "Bearer tr-token")
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(r#"{"result":"value"}"#)
+            .with_body("[]")
             .create_async()
             .await;
 
-        let mut context = MockContext::new("Redis", "barqflow-nodes.redis");
-        context.add_param("operation", json!("get"));
+        let mut context = MockContext::new("Trello", "barqflow-nodes.trello");
+        context.add_param("operation", json!("listBoards"));
         context.add_param("baseUrl", json!(server.url()));
-        context.add_param("authToken", json!("redis-token"));
-        context.add_param("key", json!("myKey"));
+        context.add_param("authToken", json!("tr-token"));
 
-        let result = RedisNode::new().execute(&context).await.unwrap();
+        let result = TrelloNode::new().execute(&context).await.unwrap();
         mock.assert_async().await;
         assert_eq!(
             result[0][0].json.0.get("status").and_then(|v| v.as_u64()),
             Some(200)
         );
-    }
-
-    #[tokio::test]
-    async fn redis_requires_auth_token() {
-        let mut context = MockContext::new("Redis", "barqflow-nodes.redis");
-        context.add_param("operation", json!("get"));
-        context.add_param("key", json!("myKey"));
-
-        let err = RedisNode::new().execute(&context).await.unwrap_err();
-        assert!(err.to_string().contains("Auth Token"));
     }
 }

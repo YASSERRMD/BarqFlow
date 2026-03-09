@@ -47,9 +47,11 @@ impl INodeType for AwsS3Node {
 
         for item_index in 0..run_count {
             let operation = get_string_param(context, "operation", item_index, "getObject").await;
-            let base_url = get_string_param(context, "baseUrl", item_index, "https://s3.amazonaws.com").await;
+            let base_url =
+                get_string_param(context, "baseUrl", item_index, "https://s3.amazonaws.com").await;
             let timeout_ms = get_u64_param(context, "timeout", item_index, 60_000).await;
-            let presigned_url = get_optional_string_param(context, "preSignedUrl", item_index).await;
+            let presigned_url =
+                get_optional_string_param(context, "preSignedUrl", item_index).await;
 
             let headers = get_optional_param(context, "headers", item_index)
                 .await
@@ -99,12 +101,15 @@ impl INodeType for AwsS3Node {
                         Some(auth_token),
                     ),
                     "putObject" => {
-                        let body = parse_body(get_optional_param(context, "body", item_index).await)
-                            .ok_or_else(|| BarqError::NodeOperationError {
-                                node_name: "AWS S3".to_string(),
-                                message: "Missing Body. Provide object content for putObject operation."
+                        let body = parse_body(
+                            get_optional_param(context, "body", item_index).await,
+                        )
+                        .ok_or_else(|| BarqError::NodeOperationError {
+                            node_name: "AWS S3".to_string(),
+                            message:
+                                "Missing Body. Provide object content for putObject operation."
                                     .to_string(),
-                            })?;
+                        })?;
                         (
                             "PUT".to_string(),
                             build_url(&base_url, &object_path),
@@ -120,7 +125,8 @@ impl INodeType for AwsS3Node {
                             get_optional_string_param(context, "resourcePath", item_index).await,
                             "Provide resource path like /bucket/key.",
                         )?;
-                        let body = parse_body(get_optional_param(context, "body", item_index).await);
+                        let body =
+                            parse_body(get_optional_param(context, "body", item_index).await);
                         (
                             method,
                             build_url(&base_url, &resource_path),
@@ -187,7 +193,10 @@ mod tests {
         let result = AwsS3Node::new().execute(&context).await.unwrap();
         mock.assert_async().await;
 
-        assert_eq!(result[0][0].json.0.get("status").and_then(|v| v.as_u64()), Some(200));
+        assert_eq!(
+            result[0][0].json.0.get("status").and_then(|v| v.as_u64()),
+            Some(200)
+        );
     }
 
     #[tokio::test]

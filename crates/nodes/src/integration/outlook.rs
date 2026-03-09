@@ -47,8 +47,13 @@ impl INodeType for OutlookNode {
 
         for item_index in 0..run_count {
             let operation = get_string_param(context, "operation", item_index, "sendMail").await;
-            let base_url =
-                get_string_param(context, "baseUrl", item_index, "https://graph.microsoft.com/v1.0").await;
+            let base_url = get_string_param(
+                context,
+                "baseUrl",
+                item_index,
+                "https://graph.microsoft.com/v1.0",
+            )
+            .await;
             let timeout_ms = get_u64_param(context, "timeout", item_index, 60_000).await;
             let auth_token = require_auth_token(
                 "Outlook",
@@ -102,7 +107,11 @@ impl INodeType for OutlookNode {
                         })),
                     )
                 }
-                "listMessages" => ("GET".to_string(), build_url(&base_url, "/me/messages"), None),
+                "listMessages" => (
+                    "GET".to_string(),
+                    build_url(&base_url, "/me/messages"),
+                    None,
+                ),
                 "apiCall" => {
                     let method = get_string_param(context, "method", item_index, "GET").await;
                     let resource_path = ensure_required_string(
@@ -171,7 +180,10 @@ mod tests {
         let result = OutlookNode::new().execute(&context).await.unwrap();
         mock.assert_async().await;
 
-        assert_eq!(result[0][0].json.0.get("status").and_then(|v| v.as_u64()), Some(202));
+        assert_eq!(
+            result[0][0].json.0.get("status").and_then(|v| v.as_u64()),
+            Some(202)
+        );
     }
 
     #[tokio::test]

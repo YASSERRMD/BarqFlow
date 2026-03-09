@@ -60,7 +60,8 @@ impl Default for WebhookNode {
     }
 }
 
-pub struct ErrorTriggerNode;#[async_trait]
+pub struct ErrorTriggerNode;
+#[async_trait]
 impl INodeType for ErrorTriggerNode {
     fn get_description(&self) -> IDataObject {
         IDataObject::from(serde_json::json!({
