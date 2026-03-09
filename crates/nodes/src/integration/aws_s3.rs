@@ -101,15 +101,16 @@ impl INodeType for AwsS3Node {
                         Some(auth_token),
                     ),
                     "putObject" => {
-                        let body = parse_body(
-                            get_optional_param(context, "body", item_index).await,
-                        )
-                        .ok_or_else(|| BarqError::NodeOperationError {
+                        let body =
+                            parse_body(get_optional_param(context, "body", item_index).await)
+                                .ok_or_else(|| {
+                                    BarqError::NodeOperationError {
                             node_name: "AWS S3".to_string(),
                             message:
                                 "Missing Body. Provide object content for putObject operation."
                                     .to_string(),
-                        })?;
+                        }
+                                })?;
                         (
                             "PUT".to_string(),
                             build_url(&base_url, &object_path),
