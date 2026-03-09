@@ -1,6 +1,9 @@
 pub mod airtable;
 pub mod asana;
 pub mod aws_s3;
+pub mod barqdb_delete;
+pub mod barqdb_insert;
+pub mod barqdb_search;
 pub mod bitbucket;
 pub mod calendly;
 pub mod clickup;

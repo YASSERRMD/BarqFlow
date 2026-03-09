@@ -1,10 +1,10 @@
+use crate::repositories::credential::CredentialRepository;
 use axum::{
     extract::{Query, State},
     http::StatusCode,
     routing::get,
     Json, Router,
 };
-use crate::repositories::credential::CredentialRepository;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -65,8 +65,12 @@ fn parse_callback_state(state: &str) -> Result<(Uuid, Option<String>), (StatusCo
         .filter(|s| !s.is_empty())
         .map(ToOwned::to_owned);
 
-    let credential_id = Uuid::parse_str(credential_part)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid credential ID in state".into()))?;
+    let credential_id = Uuid::parse_str(credential_part).map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            "Invalid credential ID in state".into(),
+        )
+    })?;
     Ok((credential_id, csrf_part))
 }
 
@@ -168,7 +172,12 @@ async fn oauth2_callback(
         ])
         .send()
         .await
-        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Token exchange failed: {}", e)))?;
+        .map_err(|e| {
+            (
+                StatusCode::BAD_GATEWAY,
+                format!("Token exchange failed: {}", e),
+            )
+        })?;
 
     if !token_res.status().is_success() {
         let status = token_res.status().as_u16();
@@ -179,21 +188,26 @@ async fn oauth2_callback(
         ));
     }
 
-    let token_body: OAuth2TokenResponse = token_res
-        .json()
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to parse token response: {}", e)))?;
+    let token_body: OAuth2TokenResponse = token_res.json().await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to parse token response: {}", e),
+        )
+    })?;
 
     // Merge the new tokens into the existing credential data
     let mut updated_data = existing.data.clone();
     if let Some(obj) = updated_data.as_object_mut() {
-        obj.insert("oauthTokenData".to_string(), serde_json::json!({
-            "accessToken": token_body.access_token,
-            "tokenType": token_body.token_type,
-            "refreshToken": token_body.refresh_token,
-            "expiresIn": token_body.expires_in,
-            "scope": token_body.scope,
-        }));
+        obj.insert(
+            "oauthTokenData".to_string(),
+            serde_json::json!({
+                "accessToken": token_body.access_token,
+                "tokenType": token_body.token_type,
+                "refreshToken": token_body.refresh_token,
+                "expiresIn": token_body.expires_in,
+                "scope": token_body.scope,
+            }),
+        );
         // One-time nonce should not persist after successful callback.
         obj.remove("oauthState");
         obj.remove("oauthCsrfState");
@@ -247,7 +261,10 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn test_oauth2_token_exchange(pool: PgPool) {
-        std::env::set_var("BARQFLOW_ENCRYPTION_KEY", "12345678901234567890123456789012");
+        std::env::set_var(
+            "BARQFLOW_ENCRYPTION_KEY",
+            "12345678901234567890123456789012",
+        );
 
         // Setup a mock OAuth2 token endpoint
         let mock_server = MockServer::start().await;

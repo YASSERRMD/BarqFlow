@@ -1,5 +1,8 @@
-use crate::auth::Claims;
 use crate::active_workflows::{ActiveCronJobs, ActiveWorkflowManager};
+use crate::auth::Claims;
+use crate::controllers::webhooks::WebhookRegistry;
+use crate::repositories::credential::CredentialRepository;
+use crate::repositories::workflow::WorkflowRepository;
 use axum::http::StatusCode;
 use axum::{
     extract::{Json, Path, Query, State},
@@ -7,9 +10,6 @@ use axum::{
     Router,
 };
 use barqflow_db::models::WorkflowEntity;
-use crate::controllers::webhooks::WebhookRegistry;
-use crate::repositories::credential::CredentialRepository;
-use crate::repositories::workflow::WorkflowRepository;
 use barqflow_registry::registry::NodeRegistry;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -30,7 +30,9 @@ pub fn workflow_routes(state: AppState) -> Router {
         .route("/workflows", get(get_workflows).post(create_workflow))
         .route(
             "/workflows/{id}",
-            get(get_workflow).put(update_workflow).delete(delete_workflow),
+            get(get_workflow)
+                .put(update_workflow)
+                .delete(delete_workflow),
         )
         .route("/workflows/{id}/activate", put(toggle_workflow_active))
         .route("/workflows/{id}/duplicate", post(duplicate_workflow))

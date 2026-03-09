@@ -25,7 +25,10 @@ impl RepositoryCredentialProvider {
             node_bindings.insert(node.id.0.clone(), bindings);
         }
 
-        Self { repo, node_bindings }
+        Self {
+            repo,
+            node_bindings,
+        }
     }
 
     pub async fn resolve_for_node(
@@ -82,10 +85,7 @@ impl RepositoryCredentialProvider {
                 ),
             })?;
 
-        Ok(object
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect())
+        Ok(object.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
     }
 }
 
@@ -107,11 +107,7 @@ mod tests {
     use barqflow_core::types::NodeId;
     use sqlx::PgPool;
 
-    fn node_with_binding(
-        node_id: &str,
-        credential_type: &str,
-        credential_id: Uuid,
-    ) -> INode {
+    fn node_with_binding(node_id: &str, credential_type: &str, credential_id: Uuid) -> INode {
         INode {
             id: NodeId::new(node_id),
             name: "Test Node".to_string(),
@@ -130,29 +126,43 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn test_repository_provider_resolves_credentials_for_bound_node(pool: PgPool) {
-        std::env::set_var("BARQFLOW_ENCRYPTION_KEY", "12345678901234567890123456789012");
+        std::env::set_var(
+            "BARQFLOW_ENCRYPTION_KEY",
+            "12345678901234567890123456789012",
+        );
 
         let repo = Arc::new(CredentialRepository::new(pool));
         let credential = repo
             .create(
-            "OpenAI Prod",
-            "openAiApi",
-            serde_json::json!({
-                "apiKey": "sk-test-123",
-                "baseUrl": "https://api.openai.com/v1"
-            }),
-        ).await.unwrap();
+                "OpenAI Prod",
+                "openAiApi",
+                serde_json::json!({
+                    "apiKey": "sk-test-123",
+                    "baseUrl": "https://api.openai.com/v1"
+                }),
+            )
+            .await
+            .unwrap();
 
         let nodes = vec![node_with_binding("node-1", "openAiApi", credential.id)];
         let provider = RepositoryCredentialProvider::new(Arc::clone(&repo), &nodes);
-        let creds = provider.get_credentials("node-1", "openAiApi").await.unwrap();
+        let creds = provider
+            .get_credentials("node-1", "openAiApi")
+            .await
+            .unwrap();
 
-        assert_eq!(creds.get("apiKey").and_then(|v| v.as_str()), Some("sk-test-123"));
+        assert_eq!(
+            creds.get("apiKey").and_then(|v| v.as_str()),
+            Some("sk-test-123")
+        );
     }
 
     #[sqlx::test(migrations = "./migrations")]
     async fn test_repository_provider_returns_not_bound_when_missing(pool: PgPool) {
-        std::env::set_var("BARQFLOW_ENCRYPTION_KEY", "12345678901234567890123456789012");
+        std::env::set_var(
+            "BARQFLOW_ENCRYPTION_KEY",
+            "12345678901234567890123456789012",
+        );
 
         let repo = Arc::new(CredentialRepository::new(pool));
         let nodes = vec![INode {

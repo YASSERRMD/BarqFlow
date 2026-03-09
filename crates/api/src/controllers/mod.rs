@@ -1,9 +1,9 @@
 pub mod credentials;
 pub mod executions;
 pub mod health;
+pub mod nodes;
 pub mod oauth2;
+pub mod settings;
 pub mod users;
 pub mod webhooks;
 pub mod workflows;
-pub mod nodes;
-pub mod settings;
