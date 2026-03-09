@@ -118,6 +118,56 @@ fn node_credential_references(node_name: &str) -> Vec<CredentialReference> {
             required: true,
             display_name: "Telegram Bot API".to_string(),
         }],
+        "barqflow-nodes.airtable" => vec![CredentialReference {
+            credential_type: "airtableApi".to_string(),
+            required: true,
+            display_name: "Airtable API".to_string(),
+        }],
+        "barqflow-nodes.awsS3" => vec![CredentialReference {
+            credential_type: "awsS3Api".to_string(),
+            required: true,
+            display_name: "AWS S3 API".to_string(),
+        }],
+        "barqflow-nodes.bitbucket" => vec![CredentialReference {
+            credential_type: "bitbucketApi".to_string(),
+            required: true,
+            display_name: "Bitbucket API".to_string(),
+        }],
+        "barqflow-nodes.calendly" => vec![CredentialReference {
+            credential_type: "calendlyApi".to_string(),
+            required: true,
+            display_name: "Calendly API".to_string(),
+        }],
+        "barqflow-nodes.dropbox" => vec![CredentialReference {
+            credential_type: "dropboxApi".to_string(),
+            required: true,
+            display_name: "Dropbox API".to_string(),
+        }],
+        "barqflow-nodes.gitlab" => vec![CredentialReference {
+            credential_type: "gitlabApi".to_string(),
+            required: true,
+            display_name: "GitLab API".to_string(),
+        }],
+        "barqflow-nodes.gmail" => vec![CredentialReference {
+            credential_type: "gmailApi".to_string(),
+            required: true,
+            display_name: "Gmail API".to_string(),
+        }],
+        "barqflow-nodes.googleDrive" => vec![CredentialReference {
+            credential_type: "googleDriveApi".to_string(),
+            required: true,
+            display_name: "Google Drive API".to_string(),
+        }],
+        "barqflow-nodes.googleSheets" => vec![CredentialReference {
+            credential_type: "googleSheetsApi".to_string(),
+            required: true,
+            display_name: "Google Sheets API".to_string(),
+        }],
+        "barqflow-nodes.oneDrive" => vec![CredentialReference {
+            credential_type: "oneDriveApi".to_string(),
+            required: true,
+            display_name: "OneDrive API".to_string(),
+        }],
         "barqflow-nodes.barqDbInsert"
         | "barqflow-nodes.barqDbSearch"
         | "barqflow-nodes.barqDbDelete" => vec![CredentialReference {
@@ -205,6 +255,16 @@ mod tests {
             ("barqflow-nodes.hubspot", "hubspotApi"),
             ("barqflow-nodes.asana", "asanaApi"),
             ("barqflow-nodes.telegram", "telegramApi"),
+            ("barqflow-nodes.airtable", "airtableApi"),
+            ("barqflow-nodes.awsS3", "awsS3Api"),
+            ("barqflow-nodes.bitbucket", "bitbucketApi"),
+            ("barqflow-nodes.calendly", "calendlyApi"),
+            ("barqflow-nodes.dropbox", "dropboxApi"),
+            ("barqflow-nodes.gitlab", "gitlabApi"),
+            ("barqflow-nodes.gmail", "gmailApi"),
+            ("barqflow-nodes.googleDrive", "googleDriveApi"),
+            ("barqflow-nodes.googleSheets", "googleSheetsApi"),
+            ("barqflow-nodes.oneDrive", "oneDriveApi"),
         ];
 
         for (node_name, credential_type) in cases {

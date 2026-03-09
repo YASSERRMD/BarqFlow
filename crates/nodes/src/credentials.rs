@@ -385,6 +385,110 @@ pub fn register_all_credentials(registry: &CredentialRegistry) {
             documentation_url: Some("https://core.telegram.org/bots#how-do-i-create-a-bot"),
             authenticate_header: None,
         },
+        TokenCredential {
+            name: "airtableApi",
+            display_name: "Airtable API",
+            notice: "Used by Airtable integration nodes",
+            token_field: "accessToken",
+            token_label: "Access Token",
+            documentation_url: Some(
+                "https://airtable.com/developers/web/api/authentication#personal-access-tokens",
+            ),
+            authenticate_header: Some("Authorization"),
+        },
+        TokenCredential {
+            name: "awsS3Api",
+            display_name: "AWS S3 API",
+            notice: "Used by AWS S3 integration nodes",
+            token_field: "accessToken",
+            token_label: "Access Token",
+            documentation_url: Some("https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"),
+            authenticate_header: Some("Authorization"),
+        },
+        TokenCredential {
+            name: "bitbucketApi",
+            display_name: "Bitbucket API",
+            notice: "Used by Bitbucket integration nodes",
+            token_field: "accessToken",
+            token_label: "Access Token",
+            documentation_url: Some(
+                "https://developer.atlassian.com/cloud/bitbucket/rest/intro/#authentication",
+            ),
+            authenticate_header: Some("Authorization"),
+        },
+        TokenCredential {
+            name: "calendlyApi",
+            display_name: "Calendly API",
+            notice: "Used by Calendly integration nodes",
+            token_field: "accessToken",
+            token_label: "Access Token",
+            documentation_url: Some(
+                "https://developer.calendly.com/how-to-authenticate-with-personal-access-tokens",
+            ),
+            authenticate_header: Some("Authorization"),
+        },
+        TokenCredential {
+            name: "dropboxApi",
+            display_name: "Dropbox API",
+            notice: "Used by Dropbox integration nodes",
+            token_field: "accessToken",
+            token_label: "Access Token",
+            documentation_url: Some(
+                "https://developers.dropbox.com/oauth-guide#creating-an-access-token",
+            ),
+            authenticate_header: Some("Authorization"),
+        },
+        TokenCredential {
+            name: "gitlabApi",
+            display_name: "GitLab API",
+            notice: "Used by GitLab integration nodes",
+            token_field: "privateToken",
+            token_label: "Private Token",
+            documentation_url: Some(
+                "https://docs.gitlab.com/ee/user/profile/personal_access_tokens.html",
+            ),
+            authenticate_header: None,
+        },
+        TokenCredential {
+            name: "gmailApi",
+            display_name: "Gmail API",
+            notice: "Used by Gmail integration nodes",
+            token_field: "accessToken",
+            token_label: "Access Token",
+            documentation_url: Some(
+                "https://developers.google.com/workspace/gmail/api/auth/web-server",
+            ),
+            authenticate_header: Some("Authorization"),
+        },
+        TokenCredential {
+            name: "googleDriveApi",
+            display_name: "Google Drive API",
+            notice: "Used by Google Drive integration nodes",
+            token_field: "accessToken",
+            token_label: "Access Token",
+            documentation_url: Some(
+                "https://developers.google.com/drive/api/guides/api-specific-auth",
+            ),
+            authenticate_header: Some("Authorization"),
+        },
+        TokenCredential {
+            name: "googleSheetsApi",
+            display_name: "Google Sheets API",
+            notice: "Used by Google Sheets integration nodes",
+            token_field: "accessToken",
+            token_label: "Access Token",
+            documentation_url: Some("https://developers.google.com/sheets/api/guides/authorizing"),
+            authenticate_header: Some("Authorization"),
+        },
+        TokenCredential {
+            name: "oneDriveApi",
+            display_name: "OneDrive API",
+            notice: "Used by OneDrive integration nodes",
+            token_field: "accessToken",
+            token_label: "Access Token",
+            documentation_url: Some("https://learn.microsoft.com/en-us/graph/auth/"),
+            authenticate_header: Some("Authorization"),
+        },
     ];
 
     for credential in token_credentials {
@@ -417,5 +521,15 @@ mod tests {
         assert!(registry.get_credential("hubspotApi").is_some());
         assert!(registry.get_credential("asanaApi").is_some());
         assert!(registry.get_credential("telegramApi").is_some());
+        assert!(registry.get_credential("airtableApi").is_some());
+        assert!(registry.get_credential("awsS3Api").is_some());
+        assert!(registry.get_credential("bitbucketApi").is_some());
+        assert!(registry.get_credential("calendlyApi").is_some());
+        assert!(registry.get_credential("dropboxApi").is_some());
+        assert!(registry.get_credential("gitlabApi").is_some());
+        assert!(registry.get_credential("gmailApi").is_some());
+        assert!(registry.get_credential("googleDriveApi").is_some());
+        assert!(registry.get_credential("googleSheetsApi").is_some());
+        assert!(registry.get_credential("oneDriveApi").is_some());
     }
 }
