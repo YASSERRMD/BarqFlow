@@ -35,6 +35,16 @@ pub fn is_node_ui_exposed(name: &str) -> bool {
             | "barqflow-nodes.postgres"
             | "barqflow-nodes.openai"
             | "barqflow-nodes.ollama"
+            | "barqflow-nodes.slack"
+            | "barqflow-nodes.github"
+            | "barqflow-nodes.discord"
+            | "barqflow-nodes.notion"
+            | "barqflow-nodes.airtable"
+            | "barqflow-nodes.jira"
+            | "barqflow-nodes.stripe"
+            | "barqflow-nodes.sendGrid"
+            | "barqflow-nodes.hubspot"
+            | "barqflow-nodes.asana"
     )
 }
 
@@ -44,11 +54,11 @@ mod tests {
     use barqflow_registry::registry::NodeRegistry;
 
     #[test]
-    fn test_ui_exposure_hides_scaffold_integrations() {
+    fn test_ui_exposure_includes_implemented_integrations() {
         assert!(is_node_ui_exposed("barqflow-nodes.openai"));
         assert!(is_node_ui_exposed("barqflow-nodes.postgres"));
-        assert!(!is_node_ui_exposed("barqflow-nodes.slack"));
-        assert!(!is_node_ui_exposed("barqflow-nodes.github"));
+        assert!(is_node_ui_exposed("barqflow-nodes.slack"));
+        assert!(is_node_ui_exposed("barqflow-nodes.github"));
     }
 
     #[test]
@@ -1284,6 +1294,50 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
     let mut slack_props = empty_props.clone();
     slack_props.properties = vec![
         barqflow_core::properties::INodeProperty {
+            name: "operation".into(),
+            display_name: "Operation".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("postMessage")),
+            description: Some("Slack action to run.".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Post Message".into(),
+                    value: serde_json::json!("postMessage"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "API Call".into(),
+                    value: serde_json::json!("apiCall"),
+                    description: None,
+                },
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "authToken".into(),
+            display_name: "Auth Token".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("Slack Bot token.".into()),
+            hint: Some("Starts with xoxb-...".into()),
+            required: true,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "baseUrl".into(),
+            display_name: "Base URL".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: Some(serde_json::json!("https://slack.com")),
+            description: Some("Slack API base URL.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
             name: "channel".into(),
             display_name: "Channel".into(),
             r#type: barqflow_core::properties::NodePropertyType::String,
@@ -1291,7 +1345,12 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
             description: Some("Slack Channel Name or ID".into()),
             hint: None,
             required: true,
-            display_options: None,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("postMessage")],
+                }),
+            }),
             options: None,
         },
         barqflow_core::properties::INodeProperty {
@@ -1302,6 +1361,118 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
             description: Some("Message to send".into()),
             hint: None,
             required: true,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("postMessage")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "method".into(),
+            display_name: "Method".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("GET")),
+            description: Some("HTTP method for API Call operation.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("apiCall")],
+                }),
+            }),
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "GET".into(),
+                    value: serde_json::json!("GET"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "POST".into(),
+                    value: serde_json::json!("POST"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "PUT".into(),
+                    value: serde_json::json!("PUT"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "PATCH".into(),
+                    value: serde_json::json!("PATCH"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "DELETE".into(),
+                    value: serde_json::json!("DELETE"),
+                    description: None,
+                },
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "resourcePath".into(),
+            display_name: "Resource Path".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: Some(serde_json::json!("/api/users.list")),
+            description: Some("API path for custom Slack API Call.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("apiCall")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "queryParameters".into(),
+            display_name: "Query Parameters".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Collection,
+            default: Some(serde_json::json!([])),
+            description: Some("Optional query parameters.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "headers".into(),
+            display_name: "Headers".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Collection,
+            default: Some(serde_json::json!([])),
+            description: Some("Optional extra headers.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "body".into(),
+            display_name: "Body".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Text,
+            default: None,
+            description: Some("Body for API Call operation.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("apiCall")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "timeout".into(),
+            display_name: "Timeout (ms)".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Number,
+            default: Some(serde_json::json!(60000)),
+            description: Some("Request timeout in milliseconds.".into()),
+            hint: None,
+            required: false,
             display_options: None,
             options: None,
         },
@@ -1321,6 +1492,60 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
     let mut github_props = empty_props.clone();
     github_props.properties = vec![
         barqflow_core::properties::INodeProperty {
+            name: "operation".into(),
+            display_name: "Operation".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("getRepo")),
+            description: Some("GitHub action to execute.".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Get Repository".into(),
+                    value: serde_json::json!("getRepo"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "List Issues".into(),
+                    value: serde_json::json!("listIssues"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Create Issue".into(),
+                    value: serde_json::json!("createIssue"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "API Call".into(),
+                    value: serde_json::json!("apiCall"),
+                    description: None,
+                },
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "authToken".into(),
+            display_name: "Auth Token".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("GitHub personal access token.".into()),
+            hint: Some("Starts with ghp_...".into()),
+            required: true,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "baseUrl".into(),
+            display_name: "Base URL".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: Some(serde_json::json!("https://api.github.com")),
+            description: Some("GitHub API base URL.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
             name: "owner".into(),
             display_name: "Repository Owner".into(),
             r#type: barqflow_core::properties::NodePropertyType::String,
@@ -1328,7 +1553,16 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
             description: Some("Owner of the repository".into()),
             hint: None,
             required: true,
-            display_options: None,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![
+                        serde_json::json!("getRepo"),
+                        serde_json::json!("listIssues"),
+                        serde_json::json!("createIssue"),
+                    ],
+                }),
+            }),
             options: None,
         },
         barqflow_core::properties::INodeProperty {
@@ -1339,6 +1573,154 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
             description: Some("Name of the repository".into()),
             hint: None,
             required: true,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![
+                        serde_json::json!("getRepo"),
+                        serde_json::json!("listIssues"),
+                        serde_json::json!("createIssue"),
+                    ],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "issueTitle".into(),
+            display_name: "Issue Title".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("Issue title when creating an issue.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("createIssue")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "issueBody".into(),
+            display_name: "Issue Body".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Text,
+            default: None,
+            description: Some("Issue body when creating an issue.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("createIssue")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "method".into(),
+            display_name: "Method".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("GET")),
+            description: Some("HTTP method for API Call.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("apiCall")],
+                }),
+            }),
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "GET".into(),
+                    value: serde_json::json!("GET"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "POST".into(),
+                    value: serde_json::json!("POST"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "PUT".into(),
+                    value: serde_json::json!("PUT"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "PATCH".into(),
+                    value: serde_json::json!("PATCH"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "DELETE".into(),
+                    value: serde_json::json!("DELETE"),
+                    description: None,
+                },
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "resourcePath".into(),
+            display_name: "Resource Path".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: Some(serde_json::json!("/user/repos")),
+            description: Some("Resource path for API Call.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("apiCall")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "queryParameters".into(),
+            display_name: "Query Parameters".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Collection,
+            default: Some(serde_json::json!([])),
+            description: Some("Optional query parameters.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "headers".into(),
+            display_name: "Headers".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Collection,
+            default: Some(serde_json::json!([])),
+            description: Some("Optional custom headers.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "body".into(),
+            display_name: "Body".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Text,
+            default: None,
+            description: Some("Body for API Call operation.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("apiCall")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "timeout".into(),
+            display_name: "Timeout (ms)".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Number,
+            default: Some(serde_json::json!(60000)),
+            description: Some("Request timeout.".into()),
+            hint: None,
+            required: false,
             display_options: None,
             options: None,
         },
@@ -1397,6 +1779,28 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
     let mut discord_props = empty_props.clone();
     discord_props.properties = vec![
         barqflow_core::properties::INodeProperty {
+            name: "operation".into(),
+            display_name: "Operation".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("sendWebhook")),
+            description: Some("Discord action to execute.".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Send Webhook".into(),
+                    value: serde_json::json!("sendWebhook"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "API Call".into(),
+                    value: serde_json::json!("apiCall"),
+                    description: None,
+                },
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
             name: "webhookUrl".into(),
             display_name: "Webhook URL".into(),
             r#type: barqflow_core::properties::NodePropertyType::String,
@@ -1404,7 +1808,12 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
             description: Some("Discord Webhook URL".into()),
             hint: None,
             required: true,
-            display_options: None,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("sendWebhook")],
+                }),
+            }),
             options: None,
         },
         barqflow_core::properties::INodeProperty {
@@ -1415,6 +1824,150 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
             description: Some("Message to send".into()),
             hint: None,
             required: true,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("sendWebhook")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "authToken".into(),
+            display_name: "Auth Token".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("Bot token for API Call operation.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("apiCall")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "baseUrl".into(),
+            display_name: "Base URL".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: Some(serde_json::json!("https://discord.com/api/v10")),
+            description: Some("Discord API base URL.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("apiCall")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "method".into(),
+            display_name: "Method".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("GET")),
+            description: Some("HTTP method for API Call.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("apiCall")],
+                }),
+            }),
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "GET".into(),
+                    value: serde_json::json!("GET"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "POST".into(),
+                    value: serde_json::json!("POST"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "PUT".into(),
+                    value: serde_json::json!("PUT"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "PATCH".into(),
+                    value: serde_json::json!("PATCH"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "DELETE".into(),
+                    value: serde_json::json!("DELETE"),
+                    description: None,
+                },
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "resourcePath".into(),
+            display_name: "Resource Path".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: Some(serde_json::json!("/users/@me")),
+            description: Some("Resource path for API Call.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("apiCall")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "queryParameters".into(),
+            display_name: "Query Parameters".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Collection,
+            default: Some(serde_json::json!([])),
+            description: Some("Optional query parameters.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "headers".into(),
+            display_name: "Headers".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Collection,
+            default: Some(serde_json::json!([])),
+            description: Some("Optional extra headers.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "body".into(),
+            display_name: "Body".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Text,
+            default: None,
+            description: Some("Body for API Call operation.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("apiCall")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "timeout".into(),
+            display_name: "Timeout (ms)".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Number,
+            default: Some(serde_json::json!(60000)),
+            description: Some("Request timeout.".into()),
+            hint: None,
+            required: false,
             display_options: None,
             options: None,
         },
@@ -1432,17 +1985,215 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
     });
 
     let mut notion_props = empty_props.clone();
-    notion_props.properties = vec![barqflow_core::properties::INodeProperty {
-        name: "databaseId".into(),
-        display_name: "Database ID".into(),
-        r#type: barqflow_core::properties::NodePropertyType::String,
-        default: None,
-        description: Some("Notion Database ID".into()),
-        hint: None,
-        required: true,
-        display_options: None,
-        options: None,
-    }];
+    notion_props.properties = vec![
+        barqflow_core::properties::INodeProperty {
+            name: "operation".into(),
+            display_name: "Operation".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("queryDatabase")),
+            description: Some("Notion action to execute.".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Query Database".into(),
+                    value: serde_json::json!("queryDatabase"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Create Page".into(),
+                    value: serde_json::json!("createPage"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "API Call".into(),
+                    value: serde_json::json!("apiCall"),
+                    description: None,
+                },
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "authToken".into(),
+            display_name: "Auth Token".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("Notion integration token.".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "baseUrl".into(),
+            display_name: "Base URL".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: Some(serde_json::json!("https://api.notion.com")),
+            description: Some("Notion API base URL.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "databaseId".into(),
+            display_name: "Database ID".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("Notion Database ID".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![
+                        serde_json::json!("queryDatabase"),
+                        serde_json::json!("createPage"),
+                    ],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "filter".into(),
+            display_name: "Filter (JSON)".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Text,
+            default: Some(serde_json::json!("{}")),
+            description: Some("Optional query filter body for database query.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("queryDatabase")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "properties".into(),
+            display_name: "Properties (JSON)".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Text,
+            default: Some(serde_json::json!("{}")),
+            description: Some("Page properties for create page operation.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("createPage")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "method".into(),
+            display_name: "Method".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("GET")),
+            description: Some("HTTP method for API Call.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("apiCall")],
+                }),
+            }),
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "GET".into(),
+                    value: serde_json::json!("GET"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "POST".into(),
+                    value: serde_json::json!("POST"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "PUT".into(),
+                    value: serde_json::json!("PUT"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "PATCH".into(),
+                    value: serde_json::json!("PATCH"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "DELETE".into(),
+                    value: serde_json::json!("DELETE"),
+                    description: None,
+                },
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "resourcePath".into(),
+            display_name: "Resource Path".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: Some(serde_json::json!("/v1/users")),
+            description: Some("Resource path for API Call operation.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("apiCall")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "queryParameters".into(),
+            display_name: "Query Parameters".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Collection,
+            default: Some(serde_json::json!([])),
+            description: Some("Optional query parameters.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "headers".into(),
+            display_name: "Headers".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Collection,
+            default: Some(serde_json::json!([])),
+            description: Some("Optional custom headers.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "body".into(),
+            display_name: "Body".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Text,
+            default: None,
+            description: Some("Body for API Call operation.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("apiCall")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "timeout".into(),
+            display_name: "Timeout (ms)".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Number,
+            default: Some(serde_json::json!(60000)),
+            description: Some("Request timeout.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+    ];
 
     let _ = registry.register_node(NodeInfo {
         name: "barqflow-nodes.notion".into(),
@@ -1458,14 +2209,77 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
     let mut airtable_props = empty_props.clone();
     airtable_props.properties = vec![
         barqflow_core::properties::INodeProperty {
+            name: "operation".into(),
+            display_name: "Operation".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("listRecords")),
+            description: Some("Airtable action to execute.".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "List Records".into(),
+                    value: serde_json::json!("listRecords"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Create Record".into(),
+                    value: serde_json::json!("createRecord"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Update Record".into(),
+                    value: serde_json::json!("updateRecord"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "API Call".into(),
+                    value: serde_json::json!("apiCall"),
+                    description: None,
+                },
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "authToken".into(),
+            display_name: "Auth Token".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("Airtable API token.".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "baseUrl".into(),
+            display_name: "Base URL".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: Some(serde_json::json!("https://api.airtable.com")),
+            description: Some("Airtable API base URL.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
             name: "baseId".into(),
             display_name: "Base ID".into(),
             r#type: barqflow_core::properties::NodePropertyType::String,
             default: None,
             description: Some("Airtable Base ID".into()),
             hint: None,
-            required: true,
-            display_options: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![
+                        serde_json::json!("listRecords"),
+                        serde_json::json!("createRecord"),
+                        serde_json::json!("updateRecord"),
+                    ],
+                }),
+            }),
             options: None,
         },
         barqflow_core::properties::INodeProperty {
@@ -1475,7 +2289,158 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
             default: None,
             description: Some("Airtable Table Name".into()),
             hint: None,
-            required: true,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![
+                        serde_json::json!("listRecords"),
+                        serde_json::json!("createRecord"),
+                        serde_json::json!("updateRecord"),
+                    ],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "recordId".into(),
+            display_name: "Record ID".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("Record ID for update operation.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("updateRecord")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "fields".into(),
+            display_name: "Fields (JSON)".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Text,
+            default: Some(serde_json::json!("{}")),
+            description: Some("Record fields for create/update operations.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![
+                        serde_json::json!("createRecord"),
+                        serde_json::json!("updateRecord"),
+                    ],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "method".into(),
+            display_name: "Method".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("GET")),
+            description: Some("HTTP method for API Call.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("apiCall")],
+                }),
+            }),
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "GET".into(),
+                    value: serde_json::json!("GET"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "POST".into(),
+                    value: serde_json::json!("POST"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "PUT".into(),
+                    value: serde_json::json!("PUT"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "PATCH".into(),
+                    value: serde_json::json!("PATCH"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "DELETE".into(),
+                    value: serde_json::json!("DELETE"),
+                    description: None,
+                },
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "resourcePath".into(),
+            display_name: "Resource Path".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: Some(serde_json::json!("/v0/base/table")),
+            description: Some("Resource path for API Call.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("apiCall")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "queryParameters".into(),
+            display_name: "Query Parameters".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Collection,
+            default: Some(serde_json::json!([])),
+            description: Some("Optional query parameters.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "headers".into(),
+            display_name: "Headers".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Collection,
+            default: Some(serde_json::json!([])),
+            description: Some("Optional custom headers.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "body".into(),
+            display_name: "Body".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Text,
+            default: None,
+            description: Some("Body for API Call operation.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("apiCall")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "timeout".into(),
+            display_name: "Timeout (ms)".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Number,
+            default: Some(serde_json::json!(60000)),
+            description: Some("Request timeout.".into()),
+            hint: None,
+            required: false,
             display_options: None,
             options: None,
         },
@@ -1628,17 +2593,217 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
     });
 
     let mut jira_props = empty_props.clone();
-    jira_props.properties = vec![barqflow_core::properties::INodeProperty {
-        name: "issueKey".into(),
-        display_name: "Issue Key".into(),
-        r#type: barqflow_core::properties::NodePropertyType::String,
-        default: None,
-        description: Some("Jira Issue Key (e.g. PROJ-123)".into()),
-        hint: None,
-        required: true,
-        display_options: None,
-        options: None,
-    }];
+    jira_props.properties = vec![
+        barqflow_core::properties::INodeProperty {
+            name: "operation".into(),
+            display_name: "Operation".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("getIssue")),
+            description: Some("Jira action to execute.".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Get Issue".into(),
+                    value: serde_json::json!("getIssue"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Search Issues".into(),
+                    value: serde_json::json!("searchIssues"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Create Issue".into(),
+                    value: serde_json::json!("createIssue"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "API Call".into(),
+                    value: serde_json::json!("apiCall"),
+                    description: None,
+                },
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "authToken".into(),
+            display_name: "Auth Token".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("Jira API token.".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "baseUrl".into(),
+            display_name: "Base URL".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: Some(serde_json::json!("https://your-domain.atlassian.net")),
+            description: Some("Your Jira instance URL.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "issueKey".into(),
+            display_name: "Issue Key".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("Jira issue key, e.g. PROJ-123.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("getIssue")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "jql".into(),
+            display_name: "JQL".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Text,
+            default: Some(serde_json::json!("order by created DESC")),
+            description: Some("Query for issue search.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("searchIssues")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "issueFields".into(),
+            display_name: "Issue Fields (JSON)".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Text,
+            default: Some(serde_json::json!("{}")),
+            description: Some("Jira fields object for create operation.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("createIssue")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "method".into(),
+            display_name: "Method".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("GET")),
+            description: Some("HTTP method for API Call.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("apiCall")],
+                }),
+            }),
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "GET".into(),
+                    value: serde_json::json!("GET"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "POST".into(),
+                    value: serde_json::json!("POST"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "PUT".into(),
+                    value: serde_json::json!("PUT"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "PATCH".into(),
+                    value: serde_json::json!("PATCH"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "DELETE".into(),
+                    value: serde_json::json!("DELETE"),
+                    description: None,
+                },
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "resourcePath".into(),
+            display_name: "Resource Path".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: Some(serde_json::json!("/rest/api/3/project")),
+            description: Some("Resource path for API Call operation.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("apiCall")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "queryParameters".into(),
+            display_name: "Query Parameters".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Collection,
+            default: Some(serde_json::json!([])),
+            description: Some("Optional query parameters.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "headers".into(),
+            display_name: "Headers".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Collection,
+            default: Some(serde_json::json!([])),
+            description: Some("Optional custom headers.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "body".into(),
+            display_name: "Body".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Text,
+            default: None,
+            description: Some("Body for API Call operation.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("apiCall")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "timeout".into(),
+            display_name: "Timeout (ms)".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Number,
+            default: Some(serde_json::json!(60000)),
+            description: Some("Request timeout.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+    ];
 
     let _ = registry.register_node(NodeInfo {
         name: "barqflow-nodes.jira".into(),
@@ -1652,28 +2817,202 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
     });
 
     let mut stripe_props = empty_props.clone();
-    stripe_props.properties = vec![barqflow_core::properties::INodeProperty {
-        name: "resource".into(),
-        display_name: "Resource".into(),
-        r#type: barqflow_core::properties::NodePropertyType::Options,
-        default: Some(serde_json::json!("customer")),
-        description: Some("Stripe Resource".into()),
-        hint: None,
-        required: true,
-        display_options: None,
-        options: Some(vec![
-            barqflow_core::properties::NodePropertyOption {
-                name: "Customer".into(),
-                value: serde_json::json!("customer"),
-                description: None,
-            },
-            barqflow_core::properties::NodePropertyOption {
-                name: "Charge".into(),
-                value: serde_json::json!("charge"),
-                description: None,
-            },
-        ]),
-    }];
+    stripe_props.properties = vec![
+        barqflow_core::properties::INodeProperty {
+            name: "resource".into(),
+            display_name: "Resource".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("customer")),
+            description: Some("Stripe resource.".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Customer".into(),
+                    value: serde_json::json!("customer"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Charge".into(),
+                    value: serde_json::json!("charge"),
+                    description: None,
+                },
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "operation".into(),
+            display_name: "Operation".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("list")),
+            description: Some("Stripe operation.".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "List".into(),
+                    value: serde_json::json!("list"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Retrieve".into(),
+                    value: serde_json::json!("retrieve"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "API Call".into(),
+                    value: serde_json::json!("apiCall"),
+                    description: None,
+                },
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "authToken".into(),
+            display_name: "Auth Token".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("Stripe secret key.".into()),
+            hint: Some("Starts with sk_...".into()),
+            required: true,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "baseUrl".into(),
+            display_name: "Base URL".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: Some(serde_json::json!("https://api.stripe.com")),
+            description: Some("Stripe API base URL.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "resourceId".into(),
+            display_name: "Resource ID".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("Resource ID for retrieve operation.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("retrieve")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "method".into(),
+            display_name: "Method".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("GET")),
+            description: Some("HTTP method for API Call operation.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("apiCall")],
+                }),
+            }),
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "GET".into(),
+                    value: serde_json::json!("GET"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "POST".into(),
+                    value: serde_json::json!("POST"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "PUT".into(),
+                    value: serde_json::json!("PUT"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "PATCH".into(),
+                    value: serde_json::json!("PATCH"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "DELETE".into(),
+                    value: serde_json::json!("DELETE"),
+                    description: None,
+                },
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "resourcePath".into(),
+            display_name: "Resource Path".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: Some(serde_json::json!("/v1/customers")),
+            description: Some("Resource path for API Call.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("apiCall")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "queryParameters".into(),
+            display_name: "Query Parameters".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Collection,
+            default: Some(serde_json::json!([])),
+            description: Some("Optional query parameters.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "headers".into(),
+            display_name: "Headers".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Collection,
+            default: Some(serde_json::json!([])),
+            description: Some("Optional custom headers.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "body".into(),
+            display_name: "Body".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Text,
+            default: None,
+            description: Some("Body for API Call.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("apiCall")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "timeout".into(),
+            display_name: "Timeout (ms)".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Number,
+            default: Some(serde_json::json!(60000)),
+            description: Some("Request timeout.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+    ];
 
     let _ = registry.register_node(NodeInfo {
         name: "barqflow-nodes.stripe".into(),
@@ -1689,14 +3028,79 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
     let mut sendgrid_props = empty_props.clone();
     sendgrid_props.properties = vec![
         barqflow_core::properties::INodeProperty {
+            name: "operation".into(),
+            display_name: "Operation".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("sendEmail")),
+            description: Some("SendGrid action to execute.".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Send Email".into(),
+                    value: serde_json::json!("sendEmail"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "API Call".into(),
+                    value: serde_json::json!("apiCall"),
+                    description: None,
+                },
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "authToken".into(),
+            display_name: "Auth Token".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("SendGrid API key.".into()),
+            hint: Some("Starts with SG....".into()),
+            required: true,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "baseUrl".into(),
+            display_name: "Base URL".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: Some(serde_json::json!("https://api.sendgrid.com")),
+            description: Some("SendGrid API base URL.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "fromEmail".into(),
+            display_name: "From Email".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("Sender email address.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("sendEmail")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
             name: "toEmail".into(),
             display_name: "Recipient Email".into(),
             r#type: barqflow_core::properties::NodePropertyType::String,
             default: None,
             description: Some("Email address to send to".into()),
             hint: None,
-            required: true,
-            display_options: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("sendEmail")],
+                }),
+            }),
             options: None,
         },
         barqflow_core::properties::INodeProperty {
@@ -1706,8 +3110,13 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
             default: None,
             description: Some("Email Subject".into()),
             hint: None,
-            required: true,
-            display_options: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("sendEmail")],
+                }),
+            }),
             options: None,
         },
         barqflow_core::properties::INodeProperty {
@@ -1717,7 +3126,119 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
             default: None,
             description: Some("Email Body".into()),
             hint: None,
-            required: true,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("sendEmail")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "method".into(),
+            display_name: "Method".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("GET")),
+            description: Some("HTTP method for API Call.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("apiCall")],
+                }),
+            }),
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "GET".into(),
+                    value: serde_json::json!("GET"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "POST".into(),
+                    value: serde_json::json!("POST"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "PUT".into(),
+                    value: serde_json::json!("PUT"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "PATCH".into(),
+                    value: serde_json::json!("PATCH"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "DELETE".into(),
+                    value: serde_json::json!("DELETE"),
+                    description: None,
+                },
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "resourcePath".into(),
+            display_name: "Resource Path".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: Some(serde_json::json!("/v3/mail/send")),
+            description: Some("Resource path for API Call operation.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("apiCall")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "queryParameters".into(),
+            display_name: "Query Parameters".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Collection,
+            default: Some(serde_json::json!([])),
+            description: Some("Optional query parameters.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "headers".into(),
+            display_name: "Headers".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Collection,
+            default: Some(serde_json::json!([])),
+            description: Some("Optional custom headers.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "body".into(),
+            display_name: "Body".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Text,
+            default: None,
+            description: Some("Body for API Call operation.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("apiCall")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "timeout".into(),
+            display_name: "Timeout (ms)".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Number,
+            default: Some(serde_json::json!(60000)),
+            description: Some("Request timeout.".into()),
+            hint: None,
+            required: false,
             display_options: None,
             options: None,
         },
@@ -1796,33 +3317,207 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
     });
 
     let mut hubspot_props = empty_props.clone();
-    hubspot_props.properties = vec![barqflow_core::properties::INodeProperty {
-        name: "resource".into(),
-        display_name: "Resource".into(),
-        r#type: barqflow_core::properties::NodePropertyType::Options,
-        default: Some(serde_json::json!("contact")),
-        description: Some("HubSpot Resource".into()),
-        hint: None,
-        required: true,
-        display_options: None,
-        options: Some(vec![
-            barqflow_core::properties::NodePropertyOption {
-                name: "Contact".into(),
-                value: serde_json::json!("contact"),
-                description: None,
-            },
-            barqflow_core::properties::NodePropertyOption {
-                name: "Company".into(),
-                value: serde_json::json!("company"),
-                description: None,
-            },
-            barqflow_core::properties::NodePropertyOption {
-                name: "Deal".into(),
-                value: serde_json::json!("deal"),
-                description: None,
-            },
-        ]),
-    }];
+    hubspot_props.properties = vec![
+        barqflow_core::properties::INodeProperty {
+            name: "resource".into(),
+            display_name: "Resource".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("contact")),
+            description: Some("HubSpot resource type.".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Contact".into(),
+                    value: serde_json::json!("contact"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Company".into(),
+                    value: serde_json::json!("company"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Deal".into(),
+                    value: serde_json::json!("deal"),
+                    description: None,
+                },
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "operation".into(),
+            display_name: "Operation".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("list")),
+            description: Some("HubSpot operation.".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "List".into(),
+                    value: serde_json::json!("list"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Create".into(),
+                    value: serde_json::json!("create"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "API Call".into(),
+                    value: serde_json::json!("apiCall"),
+                    description: None,
+                },
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "authToken".into(),
+            display_name: "Auth Token".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("HubSpot private app token.".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "baseUrl".into(),
+            display_name: "Base URL".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: Some(serde_json::json!("https://api.hubapi.com")),
+            description: Some("HubSpot API base URL.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "properties".into(),
+            display_name: "Properties (JSON)".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Text,
+            default: Some(serde_json::json!("{}")),
+            description: Some("Properties object for create operation.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("create")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "method".into(),
+            display_name: "Method".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("GET")),
+            description: Some("HTTP method for API Call operation.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("apiCall")],
+                }),
+            }),
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "GET".into(),
+                    value: serde_json::json!("GET"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "POST".into(),
+                    value: serde_json::json!("POST"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "PUT".into(),
+                    value: serde_json::json!("PUT"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "PATCH".into(),
+                    value: serde_json::json!("PATCH"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "DELETE".into(),
+                    value: serde_json::json!("DELETE"),
+                    description: None,
+                },
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "resourcePath".into(),
+            display_name: "Resource Path".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: Some(serde_json::json!("/crm/v3/objects/contacts")),
+            description: Some("Resource path for API Call operation.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("apiCall")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "queryParameters".into(),
+            display_name: "Query Parameters".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Collection,
+            default: Some(serde_json::json!([])),
+            description: Some("Optional query parameters.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "headers".into(),
+            display_name: "Headers".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Collection,
+            default: Some(serde_json::json!([])),
+            description: Some("Optional custom headers.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "body".into(),
+            display_name: "Body".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Text,
+            default: None,
+            description: Some("Body for API Call operation.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("apiCall")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "timeout".into(),
+            display_name: "Timeout (ms)".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Number,
+            default: Some(serde_json::json!(60000)),
+            description: Some("Request timeout.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+    ];
 
     let _ = registry.register_node(NodeInfo {
         name: "barqflow-nodes.hubspot".into(),
@@ -1923,14 +3618,68 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
     let mut asana_props = empty_props.clone();
     asana_props.properties = vec![
         barqflow_core::properties::INodeProperty {
+            name: "operation".into(),
+            display_name: "Operation".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("createTask")),
+            description: Some("Asana operation.".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "Create Task".into(),
+                    value: serde_json::json!("createTask"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "List Project Tasks".into(),
+                    value: serde_json::json!("listProjectTasks"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "API Call".into(),
+                    value: serde_json::json!("apiCall"),
+                    description: None,
+                },
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "authToken".into(),
+            display_name: "Auth Token".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: None,
+            description: Some("Asana personal access token.".into()),
+            hint: None,
+            required: true,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "baseUrl".into(),
+            display_name: "Base URL".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: Some(serde_json::json!("https://app.asana.com/api/1.0")),
+            description: Some("Asana API base URL.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
             name: "workspace".into(),
             display_name: "Workspace ID".into(),
             r#type: barqflow_core::properties::NodePropertyType::String,
             default: None,
             description: Some("Asana Workspace ID".into()),
             hint: None,
-            required: true,
-            display_options: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("createTask")],
+                }),
+            }),
             options: None,
         },
         barqflow_core::properties::INodeProperty {
@@ -1940,8 +3689,16 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
             default: None,
             description: Some("Asana Project ID".into()),
             hint: None,
-            required: true,
-            display_options: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![
+                        serde_json::json!("createTask"),
+                        serde_json::json!("listProjectTasks"),
+                    ],
+                }),
+            }),
             options: None,
         },
         barqflow_core::properties::INodeProperty {
@@ -1951,7 +3708,135 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
             default: None,
             description: Some("Name of task to create".into()),
             hint: None,
-            required: true,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("createTask")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "notes".into(),
+            display_name: "Notes".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Text,
+            default: None,
+            description: Some("Optional task notes.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("createTask")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "method".into(),
+            display_name: "Method".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Options,
+            default: Some(serde_json::json!("GET")),
+            description: Some("HTTP method for API Call operation.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("apiCall")],
+                }),
+            }),
+            options: Some(vec![
+                barqflow_core::properties::NodePropertyOption {
+                    name: "GET".into(),
+                    value: serde_json::json!("GET"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "POST".into(),
+                    value: serde_json::json!("POST"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "PUT".into(),
+                    value: serde_json::json!("PUT"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "PATCH".into(),
+                    value: serde_json::json!("PATCH"),
+                    description: None,
+                },
+                barqflow_core::properties::NodePropertyOption {
+                    name: "DELETE".into(),
+                    value: serde_json::json!("DELETE"),
+                    description: None,
+                },
+            ]),
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "resourcePath".into(),
+            display_name: "Resource Path".into(),
+            r#type: barqflow_core::properties::NodePropertyType::String,
+            default: Some(serde_json::json!("/tasks")),
+            description: Some("Resource path for API Call operation.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("apiCall")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "queryParameters".into(),
+            display_name: "Query Parameters".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Collection,
+            default: Some(serde_json::json!([])),
+            description: Some("Optional query parameters.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "headers".into(),
+            display_name: "Headers".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Collection,
+            default: Some(serde_json::json!([])),
+            description: Some("Optional custom headers.".into()),
+            hint: None,
+            required: false,
+            display_options: None,
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "body".into(),
+            display_name: "Body".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Text,
+            default: None,
+            description: Some("Body for API Call operation.".into()),
+            hint: None,
+            required: false,
+            display_options: Some(barqflow_core::properties::NodeDisplayOptions {
+                r#show: Some(barqflow_core::properties::NodeDisplayCondition {
+                    property: "operation".into(),
+                    values: vec![serde_json::json!("apiCall")],
+                }),
+            }),
+            options: None,
+        },
+        barqflow_core::properties::INodeProperty {
+            name: "timeout".into(),
+            display_name: "Timeout (ms)".into(),
+            r#type: barqflow_core::properties::NodePropertyType::Number,
+            default: Some(serde_json::json!(60000)),
+            description: Some("Request timeout.".into()),
+            hint: None,
+            required: false,
             display_options: None,
             options: None,
         },
