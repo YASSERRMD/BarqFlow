@@ -884,6 +884,15 @@ pub struct ExtensionProvidedAssetsResponse {
     pub panels: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtensionActionResponse {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub required_capabilities: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExtensionBundleResponse {
@@ -896,12 +905,35 @@ pub struct ExtensionBundleResponse {
     pub homepage: Option<String>,
     pub entrypoint: Option<String>,
     pub capabilities: Vec<String>,
+    pub actions: Vec<ExtensionActionResponse>,
     pub permissions: ExtensionPermissionScopeResponse,
     pub provided_assets: ExtensionProvidedAssetsResponse,
     pub source_path: String,
     pub digest: String,
+    pub signature_status: String,
+    pub signature_key_id: Option<String>,
     pub status: String,
     pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtensionActionInvocationResponse {
+    pub bundle_id: String,
+    pub action_id: String,
+    pub status: String,
+    pub summary: String,
+    pub capability_trace: Vec<String>,
+    pub output: Value,
+    pub signature_status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InvokeExtensionActionRequest {
+    pub action_id: String,
+    #[serde(default)]
+    pub context: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

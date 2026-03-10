@@ -1,0 +1,7 @@
+[
+  {
+    "keyId": "barqflow-dev-rsa-2026",
+    "algorithm": "rsa-sha256",
+    "publicKeyPath": "keys/barqflow-dev-rsa-2026.pub.pem"
+  }
+]

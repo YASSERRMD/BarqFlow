@@ -162,6 +162,11 @@ pub fn create_router(state: AppState) -> Router {
             workspace_repo: Arc::clone(&state.workspace_repo),
             api_key_repo: Arc::clone(&state.api_key_repo),
             node_registry: Arc::clone(&state.node_registry),
+            webhook_registry: Arc::clone(&state.webhook_registry),
+            active_cron_jobs: Arc::clone(&state.active_cron_jobs),
+            active_executions: Arc::clone(&state.active_executions),
+            execution_dispatch_repo: Arc::clone(&state.execution_dispatch_repo),
+            operations_runtime: state.operations_runtime.clone(),
         }))
         .merge(health_routes(HealthState {
             webhook_registry: Arc::clone(&state.webhook_registry),

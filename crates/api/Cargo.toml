@@ -33,6 +33,7 @@ async-stream = "0.3"
 futures-core = "0.3"
 sha2 = "0.10"
 hex = "0.4"
+rsa = { version = "0.9", features = ["sha2", "pem"] }
 
 [dev-dependencies]
 wiremock.workspace = true

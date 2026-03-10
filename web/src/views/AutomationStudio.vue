@@ -2,20 +2,30 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
+  Activity,
   AlertTriangle,
   ArrowRight,
   CheckCircle2,
+  Fingerprint,
   Loader2,
   Package2,
+  Play,
   Rocket,
   ShieldCheck,
+  ShieldX,
   Sparkles,
+  TerminalSquare,
   Wand2,
   Workflow,
 } from 'lucide-vue-next'
-import { generateWorkflowDraft, listExtensionBundles } from '../features/studio/api'
+import { generateWorkflowDraft, invokeExtensionAction, listExtensionBundles } from '../features/studio/api'
 import { saveWorkflow } from '../features/workflows/api'
-import type { ExtensionBundleRecord, WorkflowDraftRecord } from '../types/contracts'
+import type {
+  ExtensionActionInvocationRecord,
+  ExtensionActionRecord,
+  ExtensionBundleRecord,
+  WorkflowDraftRecord,
+} from '../types/contracts'
 
 const router = useRouter()
 const prompt = ref('')
@@ -26,6 +36,10 @@ const pageError = ref<string | null>(null)
 const extensionError = ref<string | null>(null)
 const draft = ref<WorkflowDraftRecord | null>(null)
 const extensions = ref<ExtensionBundleRecord[]>([])
+const actionContexts = ref<Record<string, string>>({})
+const actionErrors = ref<Record<string, string | null>>({})
+const actionResults = ref<Record<string, ExtensionActionInvocationRecord>>({})
+const invokingActionKey = ref<string | null>(null)
 
 const samplePrompts = [
   'Receive webhook leads, score high-intent submissions with AI, and notify Slack for urgent ones.',
@@ -45,6 +59,12 @@ const recommendedBundles = computed(() => {
 const extensionCount = computed(() => extensions.value.length)
 const validatedExtensionCount = computed(
   () => extensions.value.filter((bundle) => bundle.status === 'validated').length,
+)
+const verifiedSignatureCount = computed(
+  () => extensions.value.filter((bundle) => bundle.signatureStatus === 'verified').length,
+)
+const runtimeActionCount = computed(() =>
+  extensions.value.reduce((total, bundle) => total + bundle.actions.length, 0),
 )
 
 function applySamplePrompt(sample: string) {
@@ -66,9 +86,88 @@ function isRecommendedBundle(bundle: ExtensionBundleRecord) {
   return (draft.value?.recommendedExtensions || []).includes(bundle.id)
 }
 
+function actionKey(bundleId: string, actionId: string) {
+  return `${bundleId}:${actionId}`
+}
+
+function actionContextValue(bundleId: string, actionId: string) {
+  return actionContexts.value[actionKey(bundleId, actionId)] || defaultActionContext(actionId)
+}
+
+function actionError(bundleId: string, actionId: string) {
+  return actionErrors.value[actionKey(bundleId, actionId)] || null
+}
+
+function actionResult(bundleId: string, actionId: string) {
+  return actionResults.value[actionKey(bundleId, actionId)] || null
+}
+
+function ensureActionContexts(bundles: ExtensionBundleRecord[]) {
+  for (const bundle of bundles) {
+    for (const action of bundle.actions) {
+      const key = actionKey(bundle.id, action.id)
+      if (!actionContexts.value[key]) {
+        actionContexts.value[key] = defaultActionContext(action.id)
+      }
+    }
+  }
+}
+
+function defaultActionContext(actionId: string) {
+  switch (actionId) {
+    case 'runtime-health':
+      return JSON.stringify({ scope: 'workspace', includeAdvice: true }, null, 2)
+    case 'incident-brief':
+      return JSON.stringify(
+        {
+          incidentTitle: 'Slack delivery latency spike',
+          severity: 'high',
+          currentError: 'Slack API requests exceeded the configured timeout window.',
+        },
+        null,
+        2,
+      )
+    case 'prompt-planner':
+      return JSON.stringify(
+        {
+          prompt: 'Summarize GitHub issue backlog with AI and notify Slack when priority is high.',
+        },
+        null,
+        2,
+      )
+    case 'run-diagnosis':
+      return JSON.stringify(
+        {
+          failingNode: 'OpenAI Summarizer',
+          status: 'failed',
+          error: 'Upstream provider rejected the model parameter.',
+        },
+        null,
+        2,
+      )
+    default:
+      return JSON.stringify({}, null, 2)
+  }
+}
+
+function signatureBadgeClass(status: string) {
+  switch (status) {
+    case 'verified':
+      return 'bg-emerald-100 text-emerald-700'
+    case 'unsigned':
+      return 'bg-slate-200 text-slate-700'
+    default:
+      return 'bg-red-100 text-red-700'
+  }
+}
+
 function digestPreview(digest: string) {
   if (!digest) return 'n/a'
   return `${digest.slice(0, 12)}...`
+}
+
+function stringifyOutput(output: Record<string, unknown>) {
+  return JSON.stringify(output, null, 2)
 }
 
 async function loadExtensions() {
@@ -77,6 +176,7 @@ async function loadExtensions() {
   try {
     const response = await listExtensionBundles()
     extensions.value = Array.isArray(response.data) ? response.data : []
+    ensureActionContexts(extensions.value)
   } catch (error: any) {
     extensionError.value = error?.response?.data || error?.message || 'Failed to load extension catalog.'
   } finally {
@@ -120,6 +220,33 @@ async function openDraftInEditor() {
   }
 }
 
+async function runBundleAction(bundle: ExtensionBundleRecord, action: ExtensionActionRecord) {
+  const key = actionKey(bundle.id, action.id)
+  invokingActionKey.value = key
+  actionErrors.value[key] = null
+
+  let context = {}
+  try {
+    context = JSON.parse(actionContexts.value[key] || '{}')
+  } catch (error: any) {
+    actionErrors.value[key] = error?.message || 'Context must be valid JSON.'
+    invokingActionKey.value = null
+    return
+  }
+
+  try {
+    const response = await invokeExtensionAction(bundle.id, {
+      actionId: action.id,
+      context,
+    })
+    actionResults.value[key] = response.data
+  } catch (error: any) {
+    actionErrors.value[key] = error?.response?.data || error?.message || 'Failed to invoke extension action.'
+  } finally {
+    invokingActionKey.value = null
+  }
+}
+
 onMounted(() => {
   loadExtensions()
 })
@@ -150,9 +277,19 @@ onMounted(() => {
               <p class="mt-1 text-xs text-slate-500">Catalogs discovered from the local extension registry.</p>
             </div>
             <div class="rounded-[1.4rem] border border-slate-200 bg-slate-50 px-4 py-4 shadow-sm">
+              <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Verified Signatures</p>
+              <p class="mt-2 text-3xl font-black text-emerald-600">{{ verifiedSignatureCount }}</p>
+              <p class="mt-1 text-xs text-slate-500">Bundles trusted for runtime invocation in this build.</p>
+            </div>
+            <div class="rounded-[1.4rem] border border-slate-200 bg-slate-50 px-4 py-4 shadow-sm">
               <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Validated</p>
-              <p class="mt-2 text-3xl font-black text-emerald-600">{{ validatedExtensionCount }}</p>
-              <p class="mt-1 text-xs text-slate-500">Bundles with assets that match the current BarqFlow build.</p>
+              <p class="mt-2 text-3xl font-black text-slate-950">{{ validatedExtensionCount }}</p>
+              <p class="mt-1 text-xs text-slate-500">Bundles with assets aligned to the current platform surface.</p>
+            </div>
+            <div class="rounded-[1.4rem] border border-slate-200 bg-slate-50 px-4 py-4 shadow-sm">
+              <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Runtime Actions</p>
+              <p class="mt-2 text-3xl font-black text-slate-950">{{ runtimeActionCount }}</p>
+              <p class="mt-1 text-xs text-slate-500">Capability-scoped actions exposed by the built-in packs.</p>
             </div>
           </div>
         </div>
@@ -441,6 +578,31 @@ onMounted(() => {
                   </div>
                 </div>
 
+                <div class="mt-4 grid gap-3 sm:grid-cols-2">
+                  <div class="rounded-2xl border border-white/70 bg-white/80 px-3 py-3">
+                    <div class="flex items-center justify-between gap-3">
+                      <p class="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">Trust</p>
+                      <Fingerprint class="h-4 w-4 text-slate-400" />
+                    </div>
+                    <div class="mt-2 flex flex-wrap items-center gap-2">
+                      <span :class="['rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em]', signatureBadgeClass(bundle.signatureStatus)]">
+                        {{ bundle.signatureStatus }}
+                      </span>
+                      <span class="text-xs text-slate-500">
+                        {{ bundle.signatureKeyId || 'No key id recorded' }}
+                      </span>
+                    </div>
+                  </div>
+                  <div class="rounded-2xl border border-white/70 bg-white/80 px-3 py-3">
+                    <div class="flex items-center justify-between gap-3">
+                      <p class="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">Runtime Actions</p>
+                      <Activity class="h-4 w-4 text-slate-400" />
+                    </div>
+                    <p class="mt-2 text-sm font-semibold text-slate-900">{{ bundle.actions.length }} exposed actions</p>
+                    <p class="mt-1 text-xs text-slate-500">Only verified built-in packs can execute these actions.</p>
+                  </div>
+                </div>
+
                 <div class="mt-4 flex flex-wrap gap-2">
                   <span
                     v-for="capability in bundle.capabilities"
@@ -449,6 +611,104 @@ onMounted(() => {
                   >
                     {{ capability }}
                   </span>
+                </div>
+
+                <div v-if="bundle.actions.length > 0" class="mt-5 space-y-4">
+                  <div
+                    v-for="action in bundle.actions"
+                    :key="action.id"
+                    class="rounded-[1.35rem] border border-white/70 bg-white/90 px-4 py-4"
+                  >
+                    <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                      <div class="max-w-xl">
+                        <div class="flex flex-wrap items-center gap-2">
+                          <p class="text-sm font-bold text-slate-950">{{ action.name }}</p>
+                          <span class="rounded-full bg-slate-950 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-white">
+                            {{ action.id }}
+                          </span>
+                        </div>
+                        <p class="mt-2 text-sm leading-6 text-slate-600">{{ action.description }}</p>
+                      </div>
+                      <button
+                        type="button"
+                        class="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
+                        :disabled="invokingActionKey === actionKey(bundle.id, action.id) || bundle.signatureStatus !== 'verified'"
+                        @click="runBundleAction(bundle, action)"
+                      >
+                        <Loader2 v-if="invokingActionKey === actionKey(bundle.id, action.id)" class="h-4 w-4 animate-spin" />
+                        <Play v-else class="h-4 w-4" />
+                        Invoke Action
+                      </button>
+                    </div>
+
+                    <div class="mt-4 flex flex-wrap gap-2">
+                      <span
+                        v-for="capability in action.requiredCapabilities"
+                        :key="capability"
+                        class="rounded-full bg-slate-100 px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-600"
+                      >
+                        {{ capability }}
+                      </span>
+                    </div>
+
+                    <label class="mt-4 block">
+                      <span class="mb-2 block text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">Invocation Context (JSON)</span>
+                      <textarea
+                        v-model="actionContexts[actionKey(bundle.id, action.id)]"
+                        rows="7"
+                        class="w-full rounded-[1.2rem] border border-slate-200 bg-slate-50 px-4 py-3 font-mono text-xs leading-6 text-slate-700 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+                      ></textarea>
+                    </label>
+
+                    <div
+                      v-if="bundle.signatureStatus !== 'verified'"
+                      class="mt-4 flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+                    >
+                      <ShieldX class="mt-0.5 h-4 w-4 shrink-0" />
+                      <span>This bundle cannot execute runtime actions until its signature is verified.</span>
+                    </div>
+
+                    <div
+                      v-if="actionError(bundle.id, action.id)"
+                      class="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+                    >
+                      {{ actionError(bundle.id, action.id) }}
+                    </div>
+
+                    <div
+                      v-if="actionResult(bundle.id, action.id)"
+                      class="mt-4 rounded-[1.3rem] border border-emerald-200 bg-emerald-50/80 px-4 py-4"
+                    >
+                      <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                        <div>
+                          <p class="text-[11px] font-bold uppercase tracking-[0.16em] text-emerald-700">Latest Invocation</p>
+                          <p class="mt-2 text-sm font-semibold text-slate-900">{{ actionResult(bundle.id, action.id)?.summary }}</p>
+                        </div>
+                        <div class="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-emerald-700 ring-1 ring-emerald-200">
+                          <ShieldCheck class="h-3.5 w-3.5" />
+                          {{ actionResult(bundle.id, action.id)?.signatureStatus }}
+                        </div>
+                      </div>
+
+                      <div class="mt-4 flex flex-wrap gap-2">
+                        <span
+                          v-for="capability in actionResult(bundle.id, action.id)?.capabilityTrace || []"
+                          :key="capability"
+                          class="rounded-full bg-white px-3 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-600 ring-1 ring-emerald-200"
+                        >
+                          {{ capability }}
+                        </span>
+                      </div>
+
+                      <div class="mt-4 rounded-[1.15rem] border border-emerald-200 bg-slate-950 px-4 py-4 text-xs text-slate-100">
+                        <div class="mb-2 flex items-center gap-2 text-emerald-300">
+                          <TerminalSquare class="h-4 w-4" />
+                          Structured output
+                        </div>
+                        <pre class="overflow-x-auto whitespace-pre-wrap leading-6">{{ stringifyOutput(actionResult(bundle.id, action.id)?.output || {}) }}</pre>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 <div v-if="bundle.warnings.length > 0" class="mt-4 space-y-2">
@@ -486,6 +746,15 @@ onMounted(() => {
                 <Rocket class="mt-0.5 h-4 w-4 shrink-0" />
                 <p>
                   Opening a draft creates a real workflow record immediately. The studio does not store drafts server-side before that step.
+                </p>
+              </div>
+            </div>
+
+            <div class="mt-4 rounded-[1.5rem] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-700">
+              <div class="flex items-start gap-3">
+                <ShieldCheck class="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                <p>
+                  Runtime actions are restricted to verified built-in packs and are evaluated against the bundle capability manifest before execution.
                 </p>
               </div>
             </div>

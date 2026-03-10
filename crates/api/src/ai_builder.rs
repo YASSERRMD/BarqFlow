@@ -663,6 +663,7 @@ mod tests {
             homepage: None,
             entrypoint: None,
             capabilities: vec![],
+            actions: vec![],
             permissions: ExtensionPermissionScopeResponse {
                 network: vec![],
                 credentials: vec![],
@@ -676,6 +677,8 @@ mod tests {
             },
             source_path: "extensions/test/barqflow-plugin.json".to_string(),
             digest: "digest".to_string(),
+            signature_status: "verified".to_string(),
+            signature_key_id: Some("test-key".to_string()),
             status: "validated".to_string(),
             warnings: vec![],
         }

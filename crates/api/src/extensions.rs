@@ -1,17 +1,25 @@
 use crate::contracts::{
-    ExtensionBundleResponse, ExtensionPermissionScopeResponse, ExtensionProvidedAssetsResponse,
+    ExtensionActionResponse, ExtensionBundleResponse, ExtensionPermissionScopeResponse,
+    ExtensionProvidedAssetsResponse,
 };
 use crate::workflow_templates::find_workflow_template;
+use base64::Engine as _;
 use barqflow_registry::registry::NodeRegistry;
+use rsa::pkcs1v15::{Signature, VerifyingKey};
+use rsa::pkcs8::DecodePublicKey;
+use rsa::signature::Verifier;
+use rsa::RsaPublicKey;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 const DEFAULT_EXTENSION_DIR: &str = "extensions";
 const MANIFEST_FILE_NAME: &str = "barqflow-plugin.json";
+const SIGNATURE_FILE_NAME: &str = "barqflow-plugin.sig.json";
+const DEFAULT_TRUSTED_KEYS_FILE: &str = "extensions/trusted-public-keys.json";
 const SUPPORTED_RUNTIMES: &[&str] = &["builtin-pack", "wasm-preview1", "native-static"];
 const SUPPORTED_CAPABILITIES: &[&str] = &[
     "workflow:compose",
@@ -42,6 +50,8 @@ struct ExtensionManifest {
     #[serde(default)]
     capabilities: Vec<String>,
     #[serde(default)]
+    actions: Vec<ExtensionActionManifest>,
+    #[serde(default)]
     permissions: ExtensionPermissionManifest,
     #[serde(default)]
     provides: ExtensionProvidesManifest,
@@ -71,22 +81,71 @@ struct ExtensionProvidesManifest {
     panels: Vec<String>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExtensionActionManifest {
+    id: String,
+    name: String,
+    description: String,
+    #[serde(default)]
+    required_capabilities: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExtensionSignatureManifest {
+    key_id: String,
+    algorithm: String,
+    signature: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TrustedExtensionKeyManifest {
+    key_id: String,
+    algorithm: String,
+    public_key_path: String,
+}
+
+#[derive(Debug, Clone)]
+struct TrustedExtensionKey {
+    algorithm: String,
+    public_key_pem: String,
+}
+
+#[derive(Debug, Clone)]
+struct SignatureVerification {
+    status: String,
+    key_id: Option<String>,
+    warning: Option<String>,
+}
+
 pub fn discover_extensions(
     node_registry: &NodeRegistry,
 ) -> Result<Vec<ExtensionBundleResponse>, String> {
     let search_roots = extension_search_roots();
-    discover_extensions_in(&search_roots, node_registry)
+    let trusted_keys = load_trusted_extension_keys()?;
+    discover_extensions_with_keys(&search_roots, node_registry, &trusted_keys)
 }
 
 pub fn discover_extensions_in(
     search_roots: &[PathBuf],
     node_registry: &NodeRegistry,
 ) -> Result<Vec<ExtensionBundleResponse>, String> {
+    let trusted_keys = load_trusted_extension_keys()?;
+    discover_extensions_with_keys(search_roots, node_registry, &trusted_keys)
+}
+
+fn discover_extensions_with_keys(
+    search_roots: &[PathBuf],
+    node_registry: &NodeRegistry,
+    trusted_keys: &HashMap<String, TrustedExtensionKey>,
+) -> Result<Vec<ExtensionBundleResponse>, String> {
     let mut bundles = Vec::new();
 
     for root in search_roots {
         for manifest_path in manifest_paths(root)? {
-            let bundle = load_manifest(&manifest_path, node_registry)?;
+            let bundle = load_manifest(&manifest_path, node_registry, trusted_keys)?;
             bundles.push(bundle);
         }
     }
@@ -158,6 +217,7 @@ fn manifest_paths(root: &Path) -> Result<Vec<PathBuf>, String> {
 fn load_manifest(
     manifest_path: &Path,
     node_registry: &NodeRegistry,
+    trusted_keys: &HashMap<String, TrustedExtensionKey>,
 ) -> Result<ExtensionBundleResponse, String> {
     let raw = fs::read(manifest_path).map_err(|error| {
         format!(
@@ -176,12 +236,17 @@ fn load_manifest(
     let mut warnings = Vec::new();
 
     validate_manifest(manifest_path, &manifest, node_registry, &mut warnings);
+    let signature = verify_manifest_signature(manifest_path, &raw, trusted_keys)?;
+    if let Some(warning) = signature.warning.clone() {
+        warnings.push(warning);
+    }
 
     let status = if warnings.iter().any(|warning| {
         warning.contains("Unknown runtime")
             || warning.contains("requires an entrypoint")
             || warning.contains("not registered")
             || warning.contains("not available")
+            || warning.contains("signature")
     }) {
         "needsAttention"
     } else if warnings.is_empty() {
@@ -200,6 +265,16 @@ fn load_manifest(
         homepage: manifest.homepage,
         entrypoint: manifest.entrypoint,
         capabilities: dedup_sorted(manifest.capabilities),
+        actions: manifest
+            .actions
+            .into_iter()
+            .map(|action| ExtensionActionResponse {
+                id: action.id,
+                name: action.name,
+                description: action.description,
+                required_capabilities: dedup_sorted(action.required_capabilities),
+            })
+            .collect(),
         permissions: ExtensionPermissionScopeResponse {
             network: dedup_sorted(manifest.permissions.network),
             credentials: dedup_sorted(manifest.permissions.credentials),
@@ -213,8 +288,150 @@ fn load_manifest(
         },
         source_path: manifest_path.display().to_string(),
         digest,
+        signature_status: signature.status,
+        signature_key_id: signature.key_id,
         status: status.to_string(),
         warnings,
+    })
+}
+
+fn trusted_keys_path() -> PathBuf {
+    env::var("BARQFLOW_EXTENSION_TRUSTED_KEYS_FILE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from(DEFAULT_TRUSTED_KEYS_FILE))
+}
+
+fn load_trusted_extension_keys() -> Result<HashMap<String, TrustedExtensionKey>, String> {
+    let key_manifest_path = trusted_keys_path();
+    if !key_manifest_path.exists() {
+        return Ok(HashMap::new());
+    }
+
+    let raw = fs::read(&key_manifest_path).map_err(|error| {
+        format!(
+            "Failed to read trusted extension key manifest {}: {error}",
+            key_manifest_path.display()
+        )
+    })?;
+    let manifests: Vec<TrustedExtensionKeyManifest> =
+        serde_json::from_slice(&raw).map_err(|error| {
+            format!(
+                "Failed to parse trusted extension key manifest {}: {error}",
+                key_manifest_path.display()
+            )
+        })?;
+
+    let base_dir = key_manifest_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf();
+
+    let mut trusted_keys = HashMap::new();
+    for manifest in manifests {
+        let public_key_path = base_dir.join(manifest.public_key_path);
+        let public_key_pem = fs::read_to_string(&public_key_path).map_err(|error| {
+            format!(
+                "Failed to read trusted extension public key {}: {error}",
+                public_key_path.display()
+            )
+        })?;
+        trusted_keys.insert(
+            manifest.key_id,
+            TrustedExtensionKey {
+                algorithm: manifest.algorithm,
+                public_key_pem,
+            },
+        );
+    }
+
+    Ok(trusted_keys)
+}
+
+fn verify_manifest_signature(
+    manifest_path: &Path,
+    raw_manifest: &[u8],
+    trusted_keys: &HashMap<String, TrustedExtensionKey>,
+) -> Result<SignatureVerification, String> {
+    let signature_path = manifest_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(SIGNATURE_FILE_NAME);
+    if !signature_path.exists() {
+        return Ok(SignatureVerification {
+            status: "unsigned".to_string(),
+            key_id: None,
+            warning: None,
+        });
+    }
+
+    let raw_signature = fs::read(&signature_path).map_err(|error| {
+        format!(
+            "Failed to read extension signature {}: {error}",
+            signature_path.display()
+        )
+    })?;
+    let signature_manifest: ExtensionSignatureManifest =
+        serde_json::from_slice(&raw_signature).map_err(|error| {
+            format!(
+                "Failed to parse extension signature {}: {error}",
+                signature_path.display()
+            )
+        })?;
+
+    let Some(trusted_key) = trusted_keys.get(&signature_manifest.key_id) else {
+        return Ok(SignatureVerification {
+            status: "untrusted".to_string(),
+            key_id: Some(signature_manifest.key_id),
+            warning: Some("Extension signature could not be verified against the trusted keyring.".to_string()),
+        });
+    };
+
+    if !signature_manifest.algorithm.eq_ignore_ascii_case("rsa-sha256")
+        || !trusted_key.algorithm.eq_ignore_ascii_case("rsa-sha256")
+    {
+        return Ok(SignatureVerification {
+            status: "invalid".to_string(),
+            key_id: Some(signature_manifest.key_id),
+            warning: Some("Extension signature algorithm is not supported by the current runtime.".to_string()),
+        });
+    }
+
+    let public_key = RsaPublicKey::from_public_key_pem(&trusted_key.public_key_pem).map_err(
+        |error| {
+            format!(
+                "Failed to parse trusted public key '{}' for extension signature verification: {error}",
+                signature_manifest.key_id
+            )
+        },
+    )?;
+    let verifying_key = VerifyingKey::<Sha256>::new(public_key);
+    let signature_bytes = base64::engine::general_purpose::STANDARD
+        .decode(signature_manifest.signature.as_bytes())
+        .map_err(|error| {
+            format!(
+                "Failed to decode extension signature for {}: {error}",
+                manifest_path.display()
+            )
+        })?;
+    let signature = Signature::try_from(signature_bytes.as_slice()).map_err(|error| {
+        format!(
+            "Failed to parse extension signature for {}: {error}",
+            manifest_path.display()
+        )
+    })?;
+
+    if verifying_key.verify(raw_manifest, &signature).is_err() {
+        return Ok(SignatureVerification {
+            status: "invalid".to_string(),
+            key_id: Some(signature_manifest.key_id),
+            warning: Some("Extension signature verification failed for the current manifest bytes.".to_string()),
+        });
+    }
+
+    Ok(SignatureVerification {
+        status: "verified".to_string(),
+        key_id: Some(signature_manifest.key_id),
+        warning: None,
     })
 }
 
@@ -266,6 +483,23 @@ fn validate_manifest(
                 "Capability '{}' is not part of the current allow-list.",
                 capability
             ));
+        }
+    }
+
+    for action in &manifest.actions {
+        if action.id.trim().is_empty() {
+            warnings.push("Runtime action is missing a stable id.".to_string());
+        }
+        if action.name.trim().is_empty() {
+            warnings.push("Runtime action is missing a display name.".to_string());
+        }
+        for capability in &action.required_capabilities {
+            if !SUPPORTED_CAPABILITIES.contains(&capability.as_str()) {
+                warnings.push(format!(
+                    "Runtime action '{}' requires unsupported capability '{}'.",
+                    action.id, capability
+                ));
+            }
         }
     }
 
