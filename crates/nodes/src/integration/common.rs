@@ -168,18 +168,6 @@ pub(crate) fn ensure_required_string(
     Ok(normalized)
 }
 
-pub(crate) fn require_auth_token(
-    node_name: &str,
-    token: Option<String>,
-) -> Result<String, BarqError> {
-    ensure_required_string(
-        node_name,
-        "Auth Token",
-        token,
-        "Add a valid API token in this node, or add credentials at /credentials and bind them.",
-    )
-}
-
 async fn resolve_secret_from_parameter_or_credentials(
     context: &dyn IExecuteFunctions,
     node_name: &str,
@@ -264,6 +252,25 @@ pub(crate) async fn resolve_bot_token(
         node_name,
         "botToken",
         "Bot Token",
+        item_index,
+        credential_type,
+        credential_fields,
+    )
+    .await
+}
+
+pub(crate) async fn resolve_api_key(
+    context: &dyn IExecuteFunctions,
+    node_name: &str,
+    item_index: usize,
+    credential_type: &str,
+    credential_fields: &[&str],
+) -> Result<String, BarqError> {
+    resolve_secret_from_parameter_or_credentials(
+        context,
+        node_name,
+        "apiKey",
+        "API Key",
         item_index,
         credential_type,
         credential_fields,
