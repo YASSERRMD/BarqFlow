@@ -1,4 +1,5 @@
 use crate::repositories::credential::CredentialRepository;
+use crate::repositories::governance::GovernanceRepository;
 use crate::repositories::workflow::WorkflowRepository;
 use crate::subworkflow_executor::RepositorySubWorkflowExecutor;
 use axum::{
@@ -127,6 +128,7 @@ pub struct WebhookState {
     pub webhook_registry: WebhookRegistry,
     pub node_registry: Arc<NodeRegistry>,
     pub credential_repo: Arc<CredentialRepository>,
+    pub governance_repo: Arc<GovernanceRepository>,
 }
 
 pub fn webhook_routes(state: WebhookState) -> Router {
@@ -228,12 +230,14 @@ async fn handle_webhook(
     let credential_provider = Arc::new(
         crate::credentials_provider::RepositoryCredentialProvider::new(
             Arc::clone(&state.credential_repo),
+            Arc::clone(&state.governance_repo),
             &nodes,
         ),
     );
     let subworkflow_executor = Arc::new(RepositorySubWorkflowExecutor::new(
         Arc::clone(&state.workflow_repo),
         Arc::clone(&state.credential_repo),
+        Arc::clone(&state.governance_repo),
         Arc::clone(&state.node_registry),
     ));
 
@@ -370,7 +374,8 @@ mod tests {
             workflow_repo: repo,
             webhook_registry: registry,
             node_registry: Arc::new(NodeRegistry::new()), // Empty mock
-            credential_repo: Arc::new(CredentialRepository::new(pool)),
+            credential_repo: Arc::new(CredentialRepository::new(pool.clone())),
+            governance_repo: Arc::new(GovernanceRepository::new(pool)),
         };
 
         let app = webhook_routes(state);

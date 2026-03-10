@@ -595,6 +595,101 @@ export interface CreateApiKeyRequest {
   expiresAt?: string | null
 }
 
+export interface SecretProviderRecord {
+  id: string
+  workspaceId: string
+  name: string
+  providerType: string
+  config: Record<string, unknown>
+  status: string
+  lastValidatedAt?: string | null
+  lastError?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface WorkspacePolicyRecord {
+  workspaceId: string
+  blockedNodeTypes: string[]
+  blockedSupportTiers: string[]
+  approvalRequiredNodeTypes: string[]
+  maxWorkflowNodes?: number | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface PromotionTargetRecord {
+  id: string
+  workspaceId: string
+  name: string
+  environment: string
+  gitRepoUrl?: string | null
+  gitBranch?: string | null
+  requiresApproval: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface PromotionRequestRecord {
+  id: string
+  workspaceId: string
+  workflowId: string
+  targetId: string
+  requestedByUserId?: string | null
+  approvedByUserId?: string | null
+  status: string
+  sourceControlRef?: string | null
+  workflowSnapshot: Record<string, unknown>
+  notes?: string | null
+  requestedAt: string
+  approvedAt?: string | null
+}
+
+export interface AuditLogRecord {
+  id: string
+  workspaceId: string
+  actorUserId?: string | null
+  actorEmail?: string | null
+  action: string
+  resourceType: string
+  resourceId?: string | null
+  summary: string
+  metadata: Record<string, unknown>
+  createdAt: string
+}
+
+export interface CreateSecretProviderRequest {
+  name: string
+  providerType: string
+  config: Record<string, unknown>
+}
+
+export interface UpdateWorkspacePolicyRequest {
+  blockedNodeTypes: string[]
+  blockedSupportTiers: string[]
+  approvalRequiredNodeTypes: string[]
+  maxWorkflowNodes?: number | null
+}
+
+export interface CreatePromotionTargetRequest {
+  name: string
+  environment: string
+  gitRepoUrl?: string | null
+  gitBranch?: string | null
+  requiresApproval?: boolean
+}
+
+export interface CreatePromotionRequestPayload {
+  workflowId: string
+  targetId: string
+  sourceControlRef?: string | null
+  notes?: string | null
+}
+
+export interface ApprovePromotionRequestPayload {
+  notes?: string | null
+}
+
 export interface ExtensionPermissionScope {
   network: string[]
   credentials: string[]

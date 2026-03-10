@@ -1,6 +1,7 @@
 use crate::credentials_provider::RepositoryCredentialProvider;
 use crate::repositories::credential::CredentialRepository;
 use crate::repositories::execution::ExecutionRepository;
+use crate::repositories::governance::GovernanceRepository;
 use crate::repositories::workflow::WorkflowRepository;
 use async_trait::async_trait;
 use barqflow_core::errors::BarqError;
@@ -23,6 +24,7 @@ use uuid::Uuid;
 pub struct RepositorySubWorkflowExecutor {
     workflow_repo: Arc<WorkflowRepository>,
     credential_repo: Arc<CredentialRepository>,
+    governance_repo: Arc<GovernanceRepository>,
     node_registry: Arc<NodeRegistry>,
     execution_repo: Option<Arc<ExecutionRepository>>,
 }
@@ -31,11 +33,13 @@ impl RepositorySubWorkflowExecutor {
     pub fn new(
         workflow_repo: Arc<WorkflowRepository>,
         credential_repo: Arc<CredentialRepository>,
+        governance_repo: Arc<GovernanceRepository>,
         node_registry: Arc<NodeRegistry>,
     ) -> Self {
         Self {
             workflow_repo,
             credential_repo,
+            governance_repo,
             node_registry,
             execution_repo: None,
         }
@@ -207,6 +211,7 @@ impl SubWorkflowExecutor for RepositorySubWorkflowExecutor {
 
         let credential_provider = Arc::new(RepositoryCredentialProvider::new(
             Arc::clone(&self.credential_repo),
+            Arc::clone(&self.governance_repo),
             &child_nodes,
         ));
 
@@ -353,7 +358,10 @@ mod tests {
     #[sqlx::test(migrations = "./migrations")]
     async fn executes_child_workflow_and_returns_terminal_output(pool: PgPool) {
         let workflow_repo = Arc::new(WorkflowRepository::new(pool.clone()));
-        let credential_repo = Arc::new(CredentialRepository::new(pool));
+        let credential_repo = Arc::new(CredentialRepository::new(pool.clone()));
+        let governance_repo = Arc::new(crate::repositories::governance::GovernanceRepository::new(
+            pool,
+        ));
         let node_registry = Arc::new(NodeRegistry::new());
         barqflow_nodes::register_all_nodes(&node_registry);
 
@@ -397,6 +405,7 @@ mod tests {
         let subworkflow_executor = Arc::new(RepositorySubWorkflowExecutor::new(
             Arc::clone(&workflow_repo),
             Arc::clone(&credential_repo),
+            Arc::clone(&governance_repo),
             Arc::clone(&node_registry),
         ));
 
@@ -433,7 +442,10 @@ mod tests {
     #[sqlx::test(migrations = "./migrations")]
     async fn missing_child_workflow_returns_subworkflow_error(pool: PgPool) {
         let workflow_repo = Arc::new(WorkflowRepository::new(pool.clone()));
-        let credential_repo = Arc::new(CredentialRepository::new(pool));
+        let credential_repo = Arc::new(CredentialRepository::new(pool.clone()));
+        let governance_repo = Arc::new(crate::repositories::governance::GovernanceRepository::new(
+            pool,
+        ));
         let node_registry = Arc::new(NodeRegistry::new());
         barqflow_nodes::register_all_nodes(&node_registry);
 
@@ -455,6 +467,7 @@ mod tests {
         let subworkflow_executor = Arc::new(RepositorySubWorkflowExecutor::new(
             Arc::clone(&workflow_repo),
             Arc::clone(&credential_repo),
+            Arc::clone(&governance_repo),
             Arc::clone(&node_registry),
         ));
 

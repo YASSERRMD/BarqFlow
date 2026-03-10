@@ -1,4 +1,6 @@
+use crate::governance::resolve_credential_map;
 use crate::repositories::credential::CredentialRepository;
+use crate::repositories::governance::GovernanceRepository;
 use async_trait::async_trait;
 use barqflow_core::errors::BarqError;
 use barqflow_core::schema::INode;
@@ -12,11 +14,16 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub struct RepositoryCredentialProvider {
     repo: Arc<CredentialRepository>,
+    governance_repo: Arc<GovernanceRepository>,
     node_bindings: HashMap<String, HashMap<String, Uuid>>,
 }
 
 impl RepositoryCredentialProvider {
-    pub fn new(repo: Arc<CredentialRepository>, nodes: &[INode]) -> Self {
+    pub fn new(
+        repo: Arc<CredentialRepository>,
+        governance_repo: Arc<GovernanceRepository>,
+        nodes: &[INode],
+    ) -> Self {
         let mut node_bindings: HashMap<String, HashMap<String, Uuid>> = HashMap::new();
         for node in nodes {
             let mut bindings = HashMap::new();
@@ -28,6 +35,7 @@ impl RepositoryCredentialProvider {
 
         Self {
             repo,
+            governance_repo,
             node_bindings,
         }
     }
@@ -75,16 +83,26 @@ impl RepositoryCredentialProvider {
             });
         }
 
-        let object = credential
-            .data
-            .as_object()
-            .ok_or_else(|| BarqError::NodeOperationError {
+        let resolved = resolve_credential_map(
+            &self.governance_repo,
+            credential.workspace_id,
+            &credential.data,
+        )
+        .await
+        .map_err(|message| BarqError::NodeOperationError {
+            node_name: node_id.to_string(),
+            message: format!("Credential secret resolution failed: {}", message),
+        })?;
+
+        if resolved.is_empty() {
+            return Err(BarqError::NodeOperationError {
                 node_name: node_id.to_string(),
                 message: format!(
-                    "Credential '{}' resolved to non-object payload and cannot be used",
+                    "Credential '{}' resolved to an empty payload and cannot be used",
                     credential.name
                 ),
-            })?;
+            });
+        }
 
         if let Err(error) = self.repo.record_usage(*credential_id).await {
             warn!(
@@ -95,7 +113,7 @@ impl RepositoryCredentialProvider {
             );
         }
 
-        Ok(object.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+        Ok(resolved)
     }
 }
 
@@ -141,7 +159,8 @@ mod tests {
             "12345678901234567890123456789012",
         );
 
-        let repo = Arc::new(CredentialRepository::new(pool));
+        let repo = Arc::new(CredentialRepository::new(pool.clone()));
+        let governance_repo = Arc::new(GovernanceRepository::new(pool));
         let credential = repo
             .create(
                 "OpenAI Prod",
@@ -155,7 +174,11 @@ mod tests {
             .unwrap();
 
         let nodes = vec![node_with_binding("node-1", "openAiApi", credential.id)];
-        let provider = RepositoryCredentialProvider::new(Arc::clone(&repo), &nodes);
+        let provider = RepositoryCredentialProvider::new(
+            Arc::clone(&repo),
+            Arc::clone(&governance_repo),
+            &nodes,
+        );
         let creds = provider
             .get_credentials("node-1", "openAiApi")
             .await
@@ -174,7 +197,8 @@ mod tests {
             "12345678901234567890123456789012",
         );
 
-        let repo = Arc::new(CredentialRepository::new(pool));
+        let repo = Arc::new(CredentialRepository::new(pool.clone()));
+        let governance_repo = Arc::new(GovernanceRepository::new(pool));
         let nodes = vec![INode {
             id: NodeId::new("node-2"),
             name: "No Binding".to_string(),
@@ -186,7 +210,11 @@ mod tests {
             disabled: false,
         }];
 
-        let provider = RepositoryCredentialProvider::new(Arc::clone(&repo), &nodes);
+        let provider = RepositoryCredentialProvider::new(
+            Arc::clone(&repo),
+            Arc::clone(&governance_repo),
+            &nodes,
+        );
         let err = provider
             .get_credentials("node-2", "openAiApi")
             .await

@@ -150,3 +150,71 @@ pub struct ApiKeyEntity {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct SecretProviderEntity {
+    pub id: Uuid,
+    pub workspace_id: Uuid,
+    pub name: String,
+    pub provider_type: String,
+    pub config: serde_json::Value,
+    pub status: String,
+    pub last_validated_at: Option<DateTime<Utc>>,
+    pub last_error: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct WorkspacePolicyEntity {
+    pub workspace_id: Uuid,
+    pub blocked_node_types: serde_json::Value,
+    pub blocked_support_tiers: serde_json::Value,
+    pub approval_required_node_types: serde_json::Value,
+    pub max_workflow_nodes: Option<i32>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct PromotionTargetEntity {
+    pub id: Uuid,
+    pub workspace_id: Uuid,
+    pub name: String,
+    pub environment: String,
+    pub git_repo_url: Option<String>,
+    pub git_branch: Option<String>,
+    pub requires_approval: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct PromotionRequestEntity {
+    pub id: Uuid,
+    pub workspace_id: Uuid,
+    pub workflow_id: Uuid,
+    pub target_id: Uuid,
+    pub requested_by_user_id: Option<Uuid>,
+    pub approved_by_user_id: Option<Uuid>,
+    pub status: String,
+    pub source_control_ref: Option<String>,
+    pub workflow_snapshot: serde_json::Value,
+    pub notes: Option<String>,
+    pub requested_at: DateTime<Utc>,
+    pub approved_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct AuditLogEntity {
+    pub id: Uuid,
+    pub workspace_id: Uuid,
+    pub actor_user_id: Option<Uuid>,
+    pub actor_email: Option<String>,
+    pub action: String,
+    pub resource_type: String,
+    pub resource_id: Option<Uuid>,
+    pub summary: String,
+    pub metadata: serde_json::Value,
+    pub created_at: DateTime<Utc>,
+}

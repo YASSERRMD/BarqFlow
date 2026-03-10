@@ -7,6 +7,7 @@ import {
   History,
   LogOut,
   Menu,
+  ShieldCheck,
   Sparkles,
   Settings,
   Workflow,
@@ -54,6 +55,15 @@ const navItems = [
     matches: (path: string) => path.startsWith('/observability'),
     pageTitle: 'Observability Command Center',
     pageDescription: 'Track node latency, workflow bottlenecks, clustered failures, and credential health across the active workspace.',
+  },
+  {
+    name: 'Governance',
+    path: '/governance',
+    icon: ShieldCheck,
+    description: 'Policies, promotions, and audit controls',
+    matches: (path: string) => path.startsWith('/governance'),
+    pageTitle: 'Governance Control Center',
+    pageDescription: 'Control secret providers, node policy, approval gates, and audit activity across the active workspace.',
   },
   {
     name: 'Automation Studio',

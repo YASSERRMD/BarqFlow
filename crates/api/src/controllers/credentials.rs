@@ -2,8 +2,12 @@ use crate::auth::{require_authenticated_user, require_workspace_role, Authentica
 use crate::contracts::{
     CredentialOAuthConnectResponse, CredentialResponse, CredentialValidationResponse,
 };
+use crate::governance::{
+    extract_external_secret_ref, resolve_credential_data, resolve_credential_map,
+};
 use crate::repositories::{
-    api_key::ApiKeyRepository, credential::CredentialRepository, workspace::WorkspaceRepository,
+    api_key::ApiKeyRepository, credential::CredentialRepository, governance::GovernanceRepository,
+    workspace::WorkspaceRepository,
 };
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::{
@@ -22,6 +26,7 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub struct AppState {
     pub credential_repo: Arc<CredentialRepository>,
+    pub governance_repo: Arc<GovernanceRepository>,
     pub credential_registry: Arc<CredentialRegistry>,
     pub user_repo: Arc<UserRepo>,
     pub workspace_repo: Arc<WorkspaceRepository>,
@@ -40,8 +45,14 @@ fn mask_credential_data(data: &serde_json::Value) -> serde_json::Value {
     };
 
     let masked: serde_json::Map<String, serde_json::Value> = object
-        .keys()
-        .map(|k| (k.clone(), serde_json::json!("******")))
+        .iter()
+        .map(|(key, value)| {
+            if extract_external_secret_ref(value).is_some() {
+                (key.clone(), value.clone())
+            } else {
+                (key.clone(), serde_json::json!("******"))
+            }
+        })
         .collect();
     serde_json::Value::Object(masked)
 }
@@ -460,8 +471,31 @@ async fn start_oauth_connect(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Credential not found".to_string()))?;
 
-    let (updated_data, response) =
-        build_oauth_connect_payload(existing.id, &existing.cred_type, &existing.data, &headers)?;
+    let resolved_data =
+        resolve_credential_data(&state.governance_repo, auth.workspace_id, &existing.data)
+            .await
+            .map_err(|message| (StatusCode::BAD_REQUEST, message))?;
+
+    let (resolved_updated_data, response) =
+        build_oauth_connect_payload(existing.id, &existing.cred_type, &resolved_data, &headers)?;
+    let mut updated_data = existing.data.clone();
+    let updated_object = updated_data.as_object_mut().ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            "Credential payload must be a JSON object".to_string(),
+        )
+    })?;
+    let resolved_object = resolved_updated_data.as_object().ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            "Credential payload must be a JSON object".to_string(),
+        )
+    })?;
+    for key in ["oauthState", "oauthCsrfState", "redirectUri"] {
+        if let Some(value) = resolved_object.get(key) {
+            updated_object.insert(key.to_string(), value.clone());
+        }
+    }
 
     state
         .credential_repo
@@ -471,22 +505,6 @@ async fn start_oauth_connect(
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Credential not found".to_string()))?;
 
     Ok(Json(response))
-}
-
-fn credential_data_to_map(
-    data: &serde_json::Value,
-) -> Result<HashMap<String, GenericValue>, (StatusCode, String)> {
-    let object = data.as_object().ok_or_else(|| {
-        (
-            StatusCode::BAD_REQUEST,
-            "Credential payload must be a JSON object".to_string(),
-        )
-    })?;
-
-    Ok(object
-        .iter()
-        .map(|(key, value)| (key.clone(), value.clone()))
-        .collect())
 }
 
 async fn validate_credential_data(
@@ -549,7 +567,15 @@ async fn test_credential(
 ) -> Result<Json<CredentialValidationResponse>, (StatusCode, String)> {
     let auth = require_credentials_auth(&headers, &state).await?;
     require_workspace_role(&auth, "member")?;
-    match validate_credential_data(&state, &payload.credential_type, &payload.data).await {
+    let resolved_payload = resolve_credential_map(
+        &state.governance_repo,
+        auth.workspace_id,
+        &serde_json::Value::Object(payload.data.clone().into_iter().collect()),
+    )
+    .await
+    .map_err(|message| (StatusCode::BAD_REQUEST, message))?;
+
+    match validate_credential_data(&state, &payload.credential_type, &resolved_payload).await {
         Ok(true) => Ok(Json(build_validation_response(
             true,
             "valid",
@@ -588,29 +614,33 @@ async fn test_saved_credential(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Credential not found".to_string()))?;
 
-    let data_map = match credential_data_to_map(&credential.data) {
-        Ok(data_map) => data_map,
-        Err((status_code, message)) => {
-            state
-                .credential_repo
-                .record_test_result_in_workspace(
-                    auth.workspace_id,
-                    id,
-                    validation_status_from_error(status_code),
-                    Some(&message),
-                )
-                .await
-                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let data_map =
+        match resolve_credential_map(&state.governance_repo, auth.workspace_id, &credential.data)
+            .await
+        {
+            Ok(data_map) => data_map,
+            Err(message) => {
+                let status_code = StatusCode::BAD_REQUEST;
+                state
+                    .credential_repo
+                    .record_test_result_in_workspace(
+                        auth.workspace_id,
+                        id,
+                        validation_status_from_error(status_code),
+                        Some(&message),
+                    )
+                    .await
+                    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-            return Ok(Json(build_validation_response(
-                false,
-                validation_status_from_error(status_code),
-                message,
-                Some(credential.id),
-                Some(credential.cred_type),
-            )));
-        }
-    };
+                return Ok(Json(build_validation_response(
+                    false,
+                    validation_status_from_error(status_code),
+                    message,
+                    Some(credential.id),
+                    Some(credential.cred_type),
+                )));
+            }
+        };
 
     match validate_credential_data(&state, &credential.cred_type, &data_map).await {
         Ok(true) => {
@@ -813,7 +843,8 @@ mod tests {
 
         let (user_repo, workspace_repo, api_key_repo, token) = seed_auth_context(&pool).await;
         let state = AppState {
-            credential_repo: Arc::new(CredentialRepository::new(pool)),
+            credential_repo: Arc::new(CredentialRepository::new(pool.clone())),
+            governance_repo: Arc::new(GovernanceRepository::new(pool)),
             credential_registry: Arc::new(registry),
             user_repo,
             workspace_repo,
@@ -848,9 +879,11 @@ mod tests {
 
         let registry = CredentialRegistry::new();
         let repo = Arc::new(CredentialRepository::new(pool.clone()));
+        let governance_repo = Arc::new(GovernanceRepository::new(pool.clone()));
         let (user_repo, workspace_repo, api_key_repo, token) = seed_auth_context(&pool).await;
         let state = AppState {
             credential_repo: Arc::clone(&repo),
+            governance_repo: Arc::clone(&governance_repo),
             credential_registry: Arc::new(registry),
             user_repo,
             workspace_repo,
@@ -919,9 +952,11 @@ mod tests {
             .unwrap();
 
         let repo = Arc::new(CredentialRepository::new(pool.clone()));
+        let governance_repo = Arc::new(GovernanceRepository::new(pool.clone()));
         let (user_repo, workspace_repo, api_key_repo, token) = seed_auth_context(&pool).await;
         let state = AppState {
             credential_repo: Arc::clone(&repo),
+            governance_repo: Arc::clone(&governance_repo),
             credential_registry: Arc::new(registry),
             user_repo,
             workspace_repo,

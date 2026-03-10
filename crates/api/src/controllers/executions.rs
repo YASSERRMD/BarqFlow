@@ -7,13 +7,13 @@ use crate::execution_events::{
 use crate::operations::{maybe_run_execution_pruning, OperationsRuntime};
 use crate::repositories::{
     api_key::ApiKeyRepository, credential::CredentialRepository, execution::ExecutionRepository,
-    execution_log::ExecutionLogRepository, workflow::WorkflowRepository,
-    workspace::WorkspaceRepository,
+    execution_log::ExecutionLogRepository, governance::GovernanceRepository,
+    workflow::WorkflowRepository, workspace::WorkspaceRepository,
 };
 use crate::routes::{ActiveExecutionControl, ActiveExecutionManager};
 use crate::subworkflow_executor::RepositorySubWorkflowExecutor;
-use async_trait::async_trait;
 use async_stream::stream;
+use async_trait::async_trait;
 use axum::http::StatusCode;
 use axum::{
     extract::{Path, Query, State},
@@ -42,6 +42,7 @@ pub struct AppState {
     pub workflow_repo: Arc<WorkflowRepository>,
     pub node_registry: Arc<barqflow_registry::registry::NodeRegistry>,
     pub credential_repo: Arc<CredentialRepository>,
+    pub governance_repo: Arc<GovernanceRepository>,
     pub user_repo: Arc<UserRepo>,
     pub workspace_repo: Arc<WorkspaceRepository>,
     pub api_key_repo: Arc<ApiKeyRepository>,
@@ -325,9 +326,7 @@ async fn get_execution_logs(
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
 
     Ok(Json(
-        logs.into_iter()
-            .map(ExecutionLogResponse::from)
-            .collect(),
+        logs.into_iter().map(ExecutionLogResponse::from).collect(),
     ))
 }
 
@@ -771,6 +770,7 @@ async fn resume_execution(
     let credential_provider = Arc::new(
         crate::credentials_provider::RepositoryCredentialProvider::new(
             Arc::clone(&state.credential_repo),
+            Arc::clone(&state.governance_repo),
             &nodes,
         ),
     );
@@ -778,6 +778,7 @@ async fn resume_execution(
         RepositorySubWorkflowExecutor::new(
             Arc::clone(&state.workflow_repo),
             Arc::clone(&state.credential_repo),
+            Arc::clone(&state.governance_repo),
             Arc::clone(&state.node_registry),
         )
         .with_execution_repo(Arc::clone(&state.execution_repo)),
@@ -1068,7 +1069,10 @@ async fn run_workflow_execution(
     let execution_id = new_exec.id;
     let state_for_dispatch = state.clone();
     tokio::spawn(async move {
-        let permit = state_for_dispatch.operations_runtime.acquire_worker_permit().await;
+        let permit = state_for_dispatch
+            .operations_runtime
+            .acquire_worker_permit()
+            .await;
         state_for_dispatch.operations_runtime.mark_started().await;
 
         if let Err((status_code, message)) = start_dispatched_execution(
@@ -1140,6 +1144,7 @@ async fn start_dispatched_execution(
     let credential_provider = Arc::new(
         crate::credentials_provider::RepositoryCredentialProvider::new(
             Arc::clone(&state.credential_repo),
+            Arc::clone(&state.governance_repo),
             &workflow.nodes,
         ),
     );
@@ -1147,6 +1152,7 @@ async fn start_dispatched_execution(
         RepositorySubWorkflowExecutor::new(
             Arc::clone(&state.workflow_repo),
             Arc::clone(&state.credential_repo),
+            Arc::clone(&state.governance_repo),
             Arc::clone(&state.node_registry),
         )
         .with_execution_repo(Arc::clone(&state.execution_repo)),
@@ -1323,7 +1329,10 @@ async fn start_dispatched_execution(
 
         let mut active = state_for_completion.active_executions.write().await;
         active.remove(&execution_id);
-        state_for_completion.operations_runtime.mark_finished().await;
+        state_for_completion
+            .operations_runtime
+            .mark_finished()
+            .await;
         drop(worker_permit);
     });
 

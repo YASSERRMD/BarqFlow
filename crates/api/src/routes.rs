@@ -2,8 +2,8 @@ use crate::execution_events::ExecutionEventHub;
 use crate::operations::OperationsRuntime;
 use crate::repositories::{
     api_key::ApiKeyRepository, credential::CredentialRepository, execution::ExecutionRepository,
-    execution_log::ExecutionLogRepository, workflow::WorkflowRepository,
-    workspace::WorkspaceRepository,
+    execution_log::ExecutionLogRepository, governance::GovernanceRepository,
+    workflow::WorkflowRepository, workspace::WorkspaceRepository,
 };
 use axum::Router;
 use barqflow_db::users::UserRepo;
@@ -28,6 +28,7 @@ use crate::active_workflows::ActiveCronJobs;
 use crate::controllers::{
     credentials::{credential_routes, AppState as CredState},
     executions::{execution_routes, AppState as ExecState},
+    governance::{governance_routes, AppState as GovernanceState},
     health::{health_routes, AppState as HealthState},
     identity::{identity_routes, AppState as IdentityState},
     nodes::{node_routes, AppState as NodeState},
@@ -46,6 +47,7 @@ pub struct AppState {
     pub credential_repo: Arc<CredentialRepository>,
     pub exec_repo: Arc<ExecutionRepository>,
     pub execution_log_repo: Arc<ExecutionLogRepository>,
+    pub governance_repo: Arc<GovernanceRepository>,
     pub user_repo: Arc<UserRepo>,
     pub workspace_repo: Arc<WorkspaceRepository>,
     pub api_key_repo: Arc<ApiKeyRepository>,
@@ -74,6 +76,7 @@ pub fn create_router(state: AppState) -> Router {
         .merge(workflow_routes(WfState {
             workflow_repo: Arc::clone(&state.workflow_repo),
             credential_repo: Arc::clone(&state.credential_repo),
+            governance_repo: Arc::clone(&state.governance_repo),
             user_repo: Arc::clone(&state.user_repo),
             workspace_repo: Arc::clone(&state.workspace_repo),
             api_key_repo: Arc::clone(&state.api_key_repo),
@@ -88,6 +91,7 @@ pub fn create_router(state: AppState) -> Router {
             workflow_repo: Arc::clone(&state.workflow_repo),
             node_registry: Arc::clone(&state.node_registry),
             credential_repo: Arc::clone(&state.credential_repo),
+            governance_repo: Arc::clone(&state.governance_repo),
             user_repo: Arc::clone(&state.user_repo),
             workspace_repo: Arc::clone(&state.workspace_repo),
             api_key_repo: Arc::clone(&state.api_key_repo),
@@ -97,7 +101,15 @@ pub fn create_router(state: AppState) -> Router {
         }))
         .merge(credential_routes(CredState {
             credential_repo: Arc::clone(&state.credential_repo),
+            governance_repo: Arc::clone(&state.governance_repo),
             credential_registry: Arc::clone(&state.credential_registry),
+            user_repo: Arc::clone(&state.user_repo),
+            workspace_repo: Arc::clone(&state.workspace_repo),
+            api_key_repo: Arc::clone(&state.api_key_repo),
+        }))
+        .merge(governance_routes(GovernanceState {
+            governance_repo: Arc::clone(&state.governance_repo),
+            workflow_repo: Arc::clone(&state.workflow_repo),
             user_repo: Arc::clone(&state.user_repo),
             workspace_repo: Arc::clone(&state.workspace_repo),
             api_key_repo: Arc::clone(&state.api_key_repo),
@@ -153,6 +165,7 @@ pub fn create_router(state: AppState) -> Router {
         webhook_registry: Arc::clone(&state.webhook_registry),
         node_registry: Arc::clone(&state.node_registry),
         credential_repo: Arc::clone(&state.credential_repo),
+        governance_repo: Arc::clone(&state.governance_repo),
     });
 
     Router::new()

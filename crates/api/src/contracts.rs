@@ -1,7 +1,9 @@
 use barqflow_core::properties::INodeProperty;
 use barqflow_core::schema::CredentialReference;
 use barqflow_db::models::{
-    ApiKeyEntity, CredentialEntity, ExecutionEntity, ExecutionLogEntity, TagEntity, WorkflowEntity,
+    ApiKeyEntity, AuditLogEntity, CredentialEntity, ExecutionEntity, ExecutionLogEntity,
+    PromotionRequestEntity, PromotionTargetEntity, SecretProviderEntity, TagEntity, WorkflowEntity,
+    WorkspacePolicyEntity,
 };
 use barqflow_registry::registry::NodeInfo;
 use chrono::{DateTime, Utc};
@@ -680,6 +682,183 @@ impl From<ApiKeyEntity> for ApiKeyResponse {
 pub struct ApiKeyCreateResponse {
     pub api_key: String,
     pub key: ApiKeyResponse,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretProviderResponse {
+    pub id: Uuid,
+    pub workspace_id: Uuid,
+    pub name: String,
+    pub provider_type: String,
+    pub config: Value,
+    pub status: String,
+    pub last_validated_at: Option<DateTime<Utc>>,
+    pub last_error: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<SecretProviderEntity> for SecretProviderResponse {
+    fn from(value: SecretProviderEntity) -> Self {
+        Self {
+            id: value.id,
+            workspace_id: value.workspace_id,
+            name: value.name,
+            provider_type: value.provider_type,
+            config: value.config,
+            status: value.status,
+            last_validated_at: value.last_validated_at,
+            last_error: value.last_error,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspacePolicyResponse {
+    pub workspace_id: Uuid,
+    pub blocked_node_types: Vec<String>,
+    pub blocked_support_tiers: Vec<String>,
+    pub approval_required_node_types: Vec<String>,
+    pub max_workflow_nodes: Option<i32>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<WorkspacePolicyEntity> for WorkspacePolicyResponse {
+    fn from(value: WorkspacePolicyEntity) -> Self {
+        Self {
+            workspace_id: value.workspace_id,
+            blocked_node_types: value
+                .blocked_node_types
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|entry| entry.as_str())
+                .map(ToString::to_string)
+                .collect(),
+            blocked_support_tiers: value
+                .blocked_support_tiers
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|entry| entry.as_str())
+                .map(ToString::to_string)
+                .collect(),
+            approval_required_node_types: value
+                .approval_required_node_types
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|entry| entry.as_str())
+                .map(ToString::to_string)
+                .collect(),
+            max_workflow_nodes: value.max_workflow_nodes,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PromotionTargetResponse {
+    pub id: Uuid,
+    pub workspace_id: Uuid,
+    pub name: String,
+    pub environment: String,
+    pub git_repo_url: Option<String>,
+    pub git_branch: Option<String>,
+    pub requires_approval: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<PromotionTargetEntity> for PromotionTargetResponse {
+    fn from(value: PromotionTargetEntity) -> Self {
+        Self {
+            id: value.id,
+            workspace_id: value.workspace_id,
+            name: value.name,
+            environment: value.environment,
+            git_repo_url: value.git_repo_url,
+            git_branch: value.git_branch,
+            requires_approval: value.requires_approval,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PromotionRequestResponse {
+    pub id: Uuid,
+    pub workspace_id: Uuid,
+    pub workflow_id: Uuid,
+    pub target_id: Uuid,
+    pub requested_by_user_id: Option<Uuid>,
+    pub approved_by_user_id: Option<Uuid>,
+    pub status: String,
+    pub source_control_ref: Option<String>,
+    pub workflow_snapshot: Value,
+    pub notes: Option<String>,
+    pub requested_at: DateTime<Utc>,
+    pub approved_at: Option<DateTime<Utc>>,
+}
+
+impl From<PromotionRequestEntity> for PromotionRequestResponse {
+    fn from(value: PromotionRequestEntity) -> Self {
+        Self {
+            id: value.id,
+            workspace_id: value.workspace_id,
+            workflow_id: value.workflow_id,
+            target_id: value.target_id,
+            requested_by_user_id: value.requested_by_user_id,
+            approved_by_user_id: value.approved_by_user_id,
+            status: value.status,
+            source_control_ref: value.source_control_ref,
+            workflow_snapshot: value.workflow_snapshot,
+            notes: value.notes,
+            requested_at: value.requested_at,
+            approved_at: value.approved_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditLogResponse {
+    pub id: Uuid,
+    pub workspace_id: Uuid,
+    pub actor_user_id: Option<Uuid>,
+    pub actor_email: Option<String>,
+    pub action: String,
+    pub resource_type: String,
+    pub resource_id: Option<Uuid>,
+    pub summary: String,
+    pub metadata: Value,
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<AuditLogEntity> for AuditLogResponse {
+    fn from(value: AuditLogEntity) -> Self {
+        Self {
+            id: value.id,
+            workspace_id: value.workspace_id,
+            actor_user_id: value.actor_user_id,
+            actor_email: value.actor_email,
+            action: value.action,
+            resource_type: value.resource_type,
+            resource_id: value.resource_id,
+            summary: value.summary,
+            metadata: value.metadata,
+            created_at: value.created_at,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

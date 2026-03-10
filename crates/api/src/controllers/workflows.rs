@@ -5,11 +5,13 @@ use crate::contracts::{
     WorkflowNodeChangeResponse, WorkflowResponse, WorkflowTemplateResponse,
 };
 use crate::controllers::webhooks::WebhookRegistry;
+use crate::governance::{enforce_workflow_policy, record_governance_event};
 use crate::repositories::workflow::{
     SortDirection, WorkflowListFilters, WorkflowRepository, WorkflowSortBy, WorkflowUpsert,
 };
 use crate::repositories::{
-    api_key::ApiKeyRepository, credential::CredentialRepository, workspace::WorkspaceRepository,
+    api_key::ApiKeyRepository, credential::CredentialRepository, governance::GovernanceRepository,
+    workspace::WorkspaceRepository,
 };
 use crate::workflow_templates::{
     find_workflow_template, list_workflow_templates, WorkflowTemplateDefinition,
@@ -34,6 +36,7 @@ use uuid::Uuid;
 pub struct AppState {
     pub workflow_repo: Arc<WorkflowRepository>,
     pub credential_repo: Arc<CredentialRepository>,
+    pub governance_repo: Arc<GovernanceRepository>,
     pub user_repo: Arc<UserRepo>,
     pub workspace_repo: Arc<WorkspaceRepository>,
     pub api_key_repo: Arc<ApiKeyRepository>,
@@ -180,14 +183,11 @@ async fn create_workflow(
 ) -> Result<Json<WorkflowResponse>, (StatusCode, String)> {
     let auth = require_workflow_auth(&headers, &state).await?;
     require_workspace_role(&auth, "member")?;
+    let upsert = to_workflow_upsert(payload)?;
+    enforce_policy_for_nodes(&state, &auth, &upsert.nodes).await?;
     let workflow = state
         .workflow_repo
-        .create_document_in_workspace(
-            auth.workspace_id,
-            Some(auth.id),
-            to_workflow_upsert(payload)?,
-            "create",
-        )
+        .create_document_in_workspace(auth.workspace_id, Some(auth.id), upsert, "create")
         .await
         .map_err(internal_error)?;
 
@@ -202,14 +202,11 @@ async fn update_workflow(
 ) -> Result<Json<WorkflowResponse>, (StatusCode, String)> {
     let auth = require_workflow_auth(&headers, &state).await?;
     require_workspace_role(&auth, "member")?;
+    let upsert = to_workflow_upsert(payload)?;
+    enforce_policy_for_nodes(&state, &auth, &upsert.nodes).await?;
     let updated = state
         .workflow_repo
-        .update_document_in_workspace(
-            auth.workspace_id,
-            id,
-            to_workflow_upsert(payload)?,
-            "update",
-        )
+        .update_document_in_workspace(auth.workspace_id, id, upsert, "update")
         .await
         .map_err(internal_error)?
         .ok_or_else(|| not_found("Workflow not found"))?;
@@ -228,6 +225,7 @@ async fn toggle_workflow_active(
     let manager = ActiveWorkflowManager::new(
         Arc::clone(&state.workflow_repo),
         Arc::clone(&state.credential_repo),
+        Arc::clone(&state.governance_repo),
         Arc::clone(&state.node_registry),
         Arc::clone(&state.webhook_registry),
         state.job_scheduler.clone(),
@@ -311,6 +309,8 @@ async fn duplicate_workflow(
         .map_err(internal_error)?
         .ok_or_else(|| not_found("Workflow not found"))?;
 
+    enforce_policy_for_nodes(&state, &auth, &workflow.workflow.nodes).await?;
+
     let duplicated = state
         .workflow_repo
         .create_document_in_workspace(
@@ -347,6 +347,8 @@ async fn import_workflow(
     if name.is_empty() {
         return Err((StatusCode::BAD_REQUEST, "Workflow name is required".into()));
     }
+
+    enforce_policy_for_nodes(&state, &auth, &payload.workflow.nodes).await?;
 
     let imported = state
         .workflow_repo
@@ -491,6 +493,7 @@ async fn instantiate_workflow_template(
     if workflow_name.is_empty() {
         return Err((StatusCode::BAD_REQUEST, "Workflow name is required".into()));
     }
+    enforce_policy_for_nodes(&state, &auth, &template.nodes).await?;
     let workflow = state
         .workflow_repo
         .create_document_in_workspace(
@@ -596,6 +599,31 @@ fn parse_tags_csv(raw: Option<&str>) -> Vec<String> {
         .filter(|tag| !tag.is_empty())
         .map(ToString::to_string)
         .collect()
+}
+
+async fn enforce_policy_for_nodes(
+    state: &AppState,
+    auth: &AuthenticatedUser,
+    nodes: &Value,
+) -> Result<(), (StatusCode, String)> {
+    if let Err(message) =
+        enforce_workflow_policy(&state.governance_repo, auth.workspace_id, nodes).await
+    {
+        let _ = record_governance_event(
+            &state.governance_repo,
+            auth,
+            "governance.policy.workflowDenied",
+            "workflow",
+            None,
+            "Blocked workflow write because it violates workspace policy.",
+            serde_json::json!({ "message": message.clone() }),
+        )
+        .await;
+
+        return Err((StatusCode::FORBIDDEN, message));
+    }
+
+    Ok(())
 }
 
 fn parse_sort_by(raw: Option<&str>) -> WorkflowSortBy {
