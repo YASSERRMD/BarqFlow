@@ -1,11 +1,12 @@
 import { defineStore } from 'pinia';
 import api from '../api';
+import type { CreateExecutionRequest, ExecutionRecord, WorkflowRecord, WorkflowUpsertRequest } from '../types/contracts';
 
 export const useWorkflowStore = defineStore('workflows', {
     state: () => ({
-        workflows: [] as any[],
-        activeWorkflow: null as any,
-        executions: [] as any[],
+        workflows: [] as WorkflowRecord[],
+        activeWorkflow: null as WorkflowRecord | null,
+        executions: [] as ExecutionRecord[],
         loading: false,
         error: null as string | null,
     }),
@@ -17,7 +18,7 @@ export const useWorkflowStore = defineStore('workflows', {
         } = {}) {
             this.loading = true;
             try {
-                const response = await api.get('/workflows', { params });
+                const response = await api.get<WorkflowRecord[]>('/workflows', { params });
                 this.workflows = response.data;
             } catch (err: any) {
                 this.error = err.message;
@@ -28,7 +29,7 @@ export const useWorkflowStore = defineStore('workflows', {
         async fetchWorkflow(id: string) {
             this.loading = true;
             try {
-                const response = await api.get(`/workflows/${id}`);
+                const response = await api.get<WorkflowRecord>(`/workflows/${id}`);
                 this.activeWorkflow = response.data;
             } catch (err: any) {
                 this.error = err.message;
@@ -36,10 +37,10 @@ export const useWorkflowStore = defineStore('workflows', {
                 this.loading = false;
             }
         },
-        async saveWorkflow(workflow: any) {
+        async saveWorkflow(workflow: WorkflowUpsertRequest & { id?: string }) {
             try {
                 if (workflow.id) {
-                    const response = await api.put(`/workflows/${workflow.id}`, workflow);
+                    const response = await api.put<WorkflowRecord>(`/workflows/${workflow.id}`, workflow);
                     this.workflows = this.workflows.map((wf) =>
                         wf.id === workflow.id ? response.data : wf,
                     );
@@ -47,7 +48,7 @@ export const useWorkflowStore = defineStore('workflows', {
                     return response.data;
                 }
 
-                const response = await api.post('/workflows', workflow);
+                const response = await api.post<WorkflowRecord>('/workflows', workflow);
                 this.workflows.push(response.data);
                 this.activeWorkflow = response.data;
                 return response.data;
@@ -70,7 +71,7 @@ export const useWorkflowStore = defineStore('workflows', {
         },
         async toggleWorkflowActive(id: string, active: boolean) {
             try {
-                const response = await api.put(`/workflows/${id}/activate`, { active });
+                const response = await api.put<WorkflowRecord>(`/workflows/${id}/activate`, { active });
                 this.workflows = this.workflows.map((wf) =>
                     wf.id === id ? response.data : wf,
                 );
@@ -85,7 +86,7 @@ export const useWorkflowStore = defineStore('workflows', {
         },
         async duplicateWorkflow(id: string) {
             try {
-                const response = await api.post(`/workflows/${id}/duplicate`);
+                const response = await api.post<WorkflowRecord>(`/workflows/${id}/duplicate`);
                 this.workflows.unshift(response.data);
                 return response.data;
             } catch (err: any) {
@@ -93,10 +94,10 @@ export const useWorkflowStore = defineStore('workflows', {
                 throw err;
             }
         },
-        async executeWorkflow(workflowId: string, payload: any = {}) {
+        async executeWorkflow(workflowId: string, payload: CreateExecutionRequest = {}) {
             this.loading = true;
             try {
-                const response = await api.post(`/executions/workflow/${workflowId}`, payload);
+                const response = await api.post<ExecutionRecord>(`/executions/workflow/${workflowId}`, payload);
                 return response.data;
             } catch (err: any) {
                 this.error = err.message;
@@ -105,10 +106,10 @@ export const useWorkflowStore = defineStore('workflows', {
                 this.loading = false;
             }
         },
-        async executeWorkflowToNode(workflowId: string, nodeId: string, payload: any = {}) {
+        async executeWorkflowToNode(workflowId: string, nodeId: string, payload: CreateExecutionRequest = {}) {
             this.loading = true;
             try {
-                const response = await api.post(
+                const response = await api.post<ExecutionRecord>(
                     `/executions/workflow/${workflowId}/test-node/${encodeURIComponent(nodeId)}`,
                     payload,
                 );

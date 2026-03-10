@@ -1,5 +1,6 @@
 pub mod active_workflows;
 pub mod auth;
+pub mod contracts;
 pub mod controllers;
 pub mod credentials_provider;
 pub mod crypto;

@@ -232,8 +232,8 @@ function toCanvasNode(inode: any): any {
     },
     data: {
       type: nodeType,
-      kind: typeEntry?.kind || (schema?.is_trigger ? 'trigger' : 'action'),
-      isTrigger: !!(typeEntry?.isTrigger || schema?.is_trigger),
+      kind: typeEntry?.kind || (schema?.isTrigger ? 'trigger' : 'action'),
+      isTrigger: !!(typeEntry?.isTrigger || schema?.isTrigger),
       label: inode.name,
       description: typeEntry?.description || schema?.description || '',
       status: null,
@@ -517,7 +517,7 @@ async function ensureRequiredCredentialsPresent(
     const response = await api.get('/credentials')
     const availableByType = new Map<string, Set<string>>()
     ;(response.data || []).forEach((cred: any) => {
-      const type = String(cred?.cred_type || cred?.credential_type || '')
+      const type = String(cred?.credentialType || '')
       const id = String(cred?.id || '')
       if (!type || !id) return
       if (!availableByType.has(type)) {
@@ -638,7 +638,10 @@ async function handleSave() {
   const payloadConnections = buildWorkflowConnections(flow.nodes, flow.edges)
 
   const payload = {
-    id: route.params.id !== 'new' ? route.params.id : undefined,
+    id:
+      route.params.id && route.params.id !== 'new'
+        ? String(Array.isArray(route.params.id) ? route.params.id[0] : route.params.id)
+        : undefined,
     name: getCurrentWorkflowName(),
     nodes: payloadNodes,
     connections: payloadConnections,
@@ -856,7 +859,7 @@ async function handleTestNode(node: any) {
       return
     }
 
-    const nodeResult = result?.data?.[node.data.label]
+    const nodeResult: any = result?.data?.[node.data.label]
 
     if (nodeResult?.success) {
       const outputsCount = Array.isArray(nodeResult?.outputs)
@@ -958,7 +961,7 @@ function onDrop(event: DragEvent) {
   const schema = nodeSchema.schema || typeEntry?.schema || null
 
   const propertiesObj = buildDefaultProperties(schema)
-  const label = makeUniqueNodeLabel(nodeSchema.name || schema?.display_name || typeName)
+  const label = makeUniqueNodeLabel(nodeSchema.name || schema?.displayName || schema?.display_name || typeName)
 
   const newNode = {
     id: createNodeId(),
@@ -966,8 +969,8 @@ function onDrop(event: DragEvent) {
     position,
     data: {
       type: typeName,
-      kind: typeEntry?.kind || nodeSchema.kind || (schema?.is_trigger ? 'trigger' : 'action'),
-      isTrigger: !!(typeEntry?.isTrigger || nodeSchema.isTrigger || schema?.is_trigger),
+      kind: typeEntry?.kind || nodeSchema.kind || (schema?.isTrigger || schema?.is_trigger ? 'trigger' : 'action'),
+      isTrigger: !!(typeEntry?.isTrigger || nodeSchema.isTrigger || schema?.isTrigger || schema?.is_trigger),
       label,
       description: nodeSchema.description || schema?.description || '',
       status: null,

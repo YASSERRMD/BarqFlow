@@ -1,4 +1,5 @@
 use crate::auth::{generate_jwt, hash_password, verify_password, Claims};
+use crate::contracts::{AuthResponse, AuthUserResponse, UserProfileResponse};
 use axum::{
     extract::{Json, State},
     http::StatusCode,
@@ -6,7 +7,7 @@ use axum::{
     Router,
 };
 use barqflow_db::users::UserRepo;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sqlx::Error as SqlxError;
 
 #[derive(Clone)]
@@ -23,25 +24,14 @@ pub fn user_routes(state: AppState) -> Router {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RegisterRequest {
     pub email: String,
     pub password: String,
+    #[serde(alias = "first_name")]
     pub first_name: Option<String>,
+    #[serde(alias = "last_name")]
     pub last_name: Option<String>,
-}
-
-#[derive(Serialize)]
-pub struct AuthResponse {
-    pub token: String,
-    pub user_id: String,
-    pub user: AuthUser,
-}
-
-#[derive(Serialize)]
-pub struct AuthUser {
-    pub id: String,
-    pub email: String,
-    pub role: String,
 }
 
 #[derive(Deserialize)]
@@ -75,7 +65,7 @@ async fn register_user(
     Ok(Json(AuthResponse {
         token,
         user_id: new_user.id.to_string(),
-        user: AuthUser {
+        user: AuthUserResponse {
             id: new_user.id.to_string(),
             email: new_user.email,
             role: new_user.global_role,
@@ -123,7 +113,7 @@ async fn login_user(
     Ok(Json(AuthResponse {
         token,
         user_id: user.id.to_string(),
-        user: AuthUser {
+        user: AuthUserResponse {
             id: user.id.to_string(),
             email: user.email,
             role: user.global_role,
@@ -131,17 +121,10 @@ async fn login_user(
     }))
 }
 
-#[derive(Serialize)]
-pub struct ProfileResponse {
-    pub id: String,
-    pub email: String,
-    pub role: String,
-}
-
 async fn get_profile(
     claims: Claims,
     State(state): State<AppState>,
-) -> Result<Json<ProfileResponse>, (StatusCode, String)> {
+) -> Result<Json<UserProfileResponse>, (StatusCode, String)> {
     let user_uuid = uuid::Uuid::parse_str(&claims.sub)
         .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid UUID in token".into()))?;
 
@@ -152,7 +135,7 @@ async fn get_profile(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "User not found".into()))?;
 
-    Ok(Json(ProfileResponse {
+    Ok(Json(UserProfileResponse {
         id: user.id.to_string(),
         email: user.email,
         role: user.global_role,

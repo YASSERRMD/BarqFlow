@@ -158,7 +158,7 @@ const nodeSchema = computed(() => {
 
 const documentationUrl = computed(() => {
   const schema = nodeSchema.value as any
-  return schema?.documentation_url || schema?.documentationUrl || null
+  return schema?.documentationUrl || schema?.documentation_url || null
 })
 
 const nodeCredentialRefs = computed(() => {

@@ -5,11 +5,11 @@ import api from '../api'
 
 interface ExecutionEntity {
   id: string
-  workflow_id: string
+  workflowId: string
   status: string
   data: any
-  started_at: string
-  stopped_at?: string | null
+  startedAt: string
+  stoppedAt?: string | null
 }
 
 const executions = ref<ExecutionEntity[]>([])
@@ -30,7 +30,7 @@ const filteredExecutions = computed(() => {
     const matchesQuery =
       q.length === 0 ||
       exec.id.toLowerCase().includes(q) ||
-      exec.workflow_id.toLowerCase().includes(q)
+      exec.workflowId.toLowerCase().includes(q)
 
     return matchesStatus && matchesQuery
   })
@@ -56,9 +56,9 @@ const executionJson = computed(() => {
 })
 
 function formatDuration(exec: ExecutionEntity): string {
-  if (!exec.stopped_at) return 'Running'
-  const start = new Date(exec.started_at).getTime()
-  const end = new Date(exec.stopped_at).getTime()
+  if (!exec.stoppedAt) return 'Running'
+  const start = new Date(exec.startedAt).getTime()
+  const end = new Date(exec.stoppedAt).getTime()
   const ms = Math.max(0, end - start)
 
   if (ms < 1000) return `${ms}ms`
@@ -246,7 +246,7 @@ onMounted(fetchExecutions)
                 </div>
 
                 <div>
-                  <h3 class="font-semibold text-slate-800 text-base">Workflow {{ exec.workflow_id.slice(0, 8) }}</h3>
+                  <h3 class="font-semibold text-slate-800 text-base">Workflow {{ exec.workflowId.slice(0, 8) }}</h3>
                   <div class="flex items-center text-xs text-slate-500 mt-1 gap-3">
                     <span class="font-mono text-slate-400">#{{ exec.id.slice(0, 8) }}</span>
                     <span class="flex items-center gap-1"><Clock class="w-3 h-3" /> {{ formatDuration(exec) }}</span>
@@ -255,7 +255,7 @@ onMounted(fetchExecutions)
               </div>
 
               <div class="text-right">
-                <span class="text-sm text-slate-500 block">{{ formatRelativeTime(exec.started_at) }}</span>
+                <span class="text-sm text-slate-500 block">{{ formatRelativeTime(exec.startedAt) }}</span>
                 <span
                   :class="[
                     'inline-block mt-1 text-xs font-semibold px-2 py-0.5 rounded-full',
@@ -308,7 +308,7 @@ onMounted(fetchExecutions)
         <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
           <div>
             <h2 class="font-semibold text-slate-900">Execution #{{ selectedExecution.id.slice(0, 8) }}</h2>
-            <p class="text-xs text-slate-500 mt-1">Workflow {{ selectedExecution.workflow_id }}</p>
+            <p class="text-xs text-slate-500 mt-1">Workflow {{ selectedExecution.workflowId }}</p>
           </div>
           <button
             @click="closeExecutionDetails"

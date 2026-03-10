@@ -1,5 +1,6 @@
 use crate::active_workflows::{ActiveCronJobs, ActiveWorkflowManager};
 use crate::auth::Claims;
+use crate::contracts::WorkflowResponse;
 use crate::controllers::webhooks::WebhookRegistry;
 use crate::repositories::credential::CredentialRepository;
 use crate::repositories::workflow::WorkflowRepository;
@@ -9,7 +10,6 @@ use axum::{
     routing::{get, post, put},
     Router,
 };
-use barqflow_db::models::WorkflowEntity;
 use barqflow_registry::registry::NodeRegistry;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -63,7 +63,7 @@ async fn get_workflows(
     _claims: Claims,
     State(state): State<AppState>,
     Query(query): Query<WorkflowListQuery>,
-) -> Result<Json<Vec<WorkflowEntity>>, (StatusCode, String)> {
+) -> Result<Json<Vec<WorkflowResponse>>, (StatusCode, String)> {
     let mut workflows = if let Some(active) = query.active {
         state
             .workflow_repo
@@ -89,14 +89,16 @@ async fn get_workflows(
         workflows.truncate(limit);
     }
 
-    Ok(Json(workflows))
+    Ok(Json(
+        workflows.into_iter().map(WorkflowResponse::from).collect(),
+    ))
 }
 
 async fn get_workflow(
     _claims: Claims,
     State(state): State<AppState>,
     Path(id): Path<uuid::Uuid>,
-) -> Result<Json<WorkflowEntity>, (StatusCode, String)> {
+) -> Result<Json<WorkflowResponse>, (StatusCode, String)> {
     let workflow = state
         .workflow_repo
         .find_by_id(id)
@@ -104,14 +106,14 @@ async fn get_workflow(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Workflow not found".into()))?;
 
-    Ok(Json(workflow))
+    Ok(Json(WorkflowResponse::from(workflow)))
 }
 
 async fn create_workflow(
     _claims: Claims,
     State(state): State<AppState>,
     Json(payload): Json<CreateWorkflowRequest>,
-) -> Result<Json<WorkflowEntity>, (StatusCode, String)> {
+) -> Result<Json<WorkflowResponse>, (StatusCode, String)> {
     let new_wf = state
         .workflow_repo
         .create(
@@ -123,7 +125,7 @@ async fn create_workflow(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    Ok(Json(new_wf))
+    Ok(Json(WorkflowResponse::from(new_wf)))
 }
 
 async fn update_workflow(
@@ -131,7 +133,7 @@ async fn update_workflow(
     State(state): State<AppState>,
     Path(id): Path<uuid::Uuid>,
     Json(payload): Json<CreateWorkflowRequest>,
-) -> Result<Json<WorkflowEntity>, (StatusCode, String)> {
+) -> Result<Json<WorkflowResponse>, (StatusCode, String)> {
     let updated_wf = state
         .workflow_repo
         .update(
@@ -145,7 +147,7 @@ async fn update_workflow(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Workflow not found".into()))?;
 
-    Ok(Json(updated_wf))
+    Ok(Json(WorkflowResponse::from(updated_wf)))
 }
 
 async fn toggle_workflow_active(
@@ -153,7 +155,7 @@ async fn toggle_workflow_active(
     State(state): State<AppState>,
     Path(id): Path<uuid::Uuid>,
     Json(payload): Json<ToggleActiveRequest>,
-) -> Result<Json<WorkflowEntity>, (StatusCode, String)> {
+) -> Result<Json<WorkflowResponse>, (StatusCode, String)> {
     let manager = ActiveWorkflowManager::new(
         Arc::clone(&state.workflow_repo),
         Arc::clone(&state.credential_repo),
@@ -175,7 +177,7 @@ async fn toggle_workflow_active(
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
     };
 
-    Ok(Json(updated_wf))
+    Ok(Json(WorkflowResponse::from(updated_wf)))
 }
 
 async fn delete_workflow(
@@ -200,7 +202,7 @@ async fn duplicate_workflow(
     _claims: Claims,
     State(state): State<AppState>,
     Path(id): Path<uuid::Uuid>,
-) -> Result<Json<WorkflowEntity>, (StatusCode, String)> {
+) -> Result<Json<WorkflowResponse>, (StatusCode, String)> {
     let workflow = state
         .workflow_repo
         .find_by_id(id)
@@ -219,5 +221,5 @@ async fn duplicate_workflow(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    Ok(Json(duplicated))
+    Ok(Json(WorkflowResponse::from(duplicated)))
 }

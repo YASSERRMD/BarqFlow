@@ -37,11 +37,11 @@ function formatRelativeTime(iso?: string | null): string {
 }
 
 function workflowRelativeUpdatedAt(wf: any): string {
-  return formatRelativeTime(wf?.updated_at || wf?.created_at)
+  return formatRelativeTime(wf?.updatedAt || wf?.createdAt)
 }
 
 function workflowTimestampTitle(wf: any): string {
-  const iso = wf?.updated_at || wf?.created_at
+  const iso = wf?.updatedAt || wf?.createdAt
   if (!iso) return 'Unknown'
 
   const date = new Date(iso)
@@ -71,15 +71,15 @@ async function fetchExecutionMetadata() {
     const nextMap: Record<string, any> = {}
 
     for (const exec of executions) {
-      const workflowId = String(exec?.workflow_id || '')
+      const workflowId = String(exec?.workflowId || '')
       if (!workflowId) continue
 
       const current = nextMap[workflowId]
-      const currentTs = current?.started_at
-        ? new Date(current.started_at).getTime()
+      const currentTs = current?.startedAt
+        ? new Date(current.startedAt).getTime()
         : Number.NEGATIVE_INFINITY
-      const candidateTs = exec?.started_at
-        ? new Date(exec.started_at).getTime()
+      const candidateTs = exec?.startedAt
+        ? new Date(exec.startedAt).getTime()
         : Number.NEGATIVE_INFINITY
 
       if (!current || candidateTs >= currentTs) {
@@ -116,7 +116,7 @@ function nodeCountLabel(wf: any): string {
 
 function workflowLastExecutionIso(wf: any): string | null {
   const execution = latestExecutionByWorkflow.value[String(wf?.id || '')]
-  return execution?.started_at || execution?.stopped_at || null
+  return execution?.startedAt || execution?.stoppedAt || null
 }
 
 function workflowLastExecutionLabel(wf: any): string {

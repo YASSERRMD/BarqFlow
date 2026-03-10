@@ -4,11 +4,11 @@ import { RefreshCw, ShieldCheck, Clock3, Workflow, KeyRound } from 'lucide-vue-n
 import api from '../api'
 
 interface RuntimeSettings {
-  server_time: string
+  serverTime: string
   environment: string
-  node_types_count: number
-  credential_types_count: number
-  encryption_key_configured: boolean
+  nodeTypesCount: number
+  credentialTypesCount: number
+  encryptionKeyConfigured: boolean
 }
 
 const runtime = ref<RuntimeSettings | null>(null)
@@ -16,8 +16,8 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 
 const formattedServerTime = computed(() => {
-  if (!runtime.value?.server_time) return '-'
-  return new Date(runtime.value.server_time).toLocaleString()
+  if (!runtime.value?.serverTime) return '-'
+  return new Date(runtime.value.serverTime).toLocaleString()
 })
 
 async function fetchRuntimeSettings() {
@@ -92,7 +92,7 @@ onMounted(fetchRuntimeSettings)
             <Workflow class="w-4 h-4" />
             Registered node types
           </div>
-          <p class="text-slate-900 text-lg font-semibold mt-2">{{ runtime.node_types_count }}</p>
+          <p class="text-slate-900 text-lg font-semibold mt-2">{{ runtime.nodeTypesCount }}</p>
         </div>
 
         <div class="bg-white border border-slate-200 rounded-2xl p-5">
@@ -100,7 +100,7 @@ onMounted(fetchRuntimeSettings)
             <KeyRound class="w-4 h-4" />
             Registered credential types
           </div>
-          <p class="text-slate-900 text-lg font-semibold mt-2">{{ runtime.credential_types_count }}</p>
+          <p class="text-slate-900 text-lg font-semibold mt-2">{{ runtime.credentialTypesCount }}</p>
         </div>
 
         <div class="bg-white border border-slate-200 rounded-2xl p-5 md:col-span-2">
@@ -111,10 +111,10 @@ onMounted(fetchRuntimeSettings)
           <p
             :class="[
               'text-lg font-semibold mt-2',
-              runtime.encryption_key_configured ? 'text-green-700' : 'text-red-700',
+              runtime.encryptionKeyConfigured ? 'text-green-700' : 'text-red-700',
             ]"
           >
-            {{ runtime.encryption_key_configured ? 'Configured' : 'Missing' }}
+            {{ runtime.encryptionKeyConfigured ? 'Configured' : 'Missing' }}
           </p>
         </div>
       </div>

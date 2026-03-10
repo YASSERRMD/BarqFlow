@@ -1,4 +1,5 @@
 use crate::auth::Claims;
+use crate::contracts::ExecutionResponse;
 use crate::repositories::credential::CredentialRepository;
 use crate::repositories::execution::ExecutionRepository;
 use crate::repositories::workflow::WorkflowRepository;
@@ -49,7 +50,9 @@ pub fn execution_routes(state: AppState) -> Router {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ExecutionListQuery {
+    #[serde(alias = "workflow_id")]
     pub workflow_id: Option<uuid::Uuid>,
     pub status: Option<String>,
     pub limit: Option<usize>,
@@ -66,7 +69,7 @@ async fn list_executions(
     _claims: Claims,
     State(state): State<AppState>,
     Query(query): Query<ExecutionListQuery>,
-) -> Result<Json<Vec<ExecutionEntity>>, (StatusCode, String)> {
+) -> Result<Json<Vec<ExecutionResponse>>, (StatusCode, String)> {
     let mut executions = if let Some(workflow_id) = query.workflow_id {
         state
             .execution_repo
@@ -89,14 +92,16 @@ async fn list_executions(
         executions.truncate(limit);
     }
 
-    Ok(Json(executions))
+    Ok(Json(
+        executions.into_iter().map(ExecutionResponse::from).collect(),
+    ))
 }
 
 async fn get_execution(
     _claims: Claims,
     State(state): State<AppState>,
     Path(id): Path<uuid::Uuid>,
-) -> Result<Json<ExecutionEntity>, (StatusCode, String)> {
+) -> Result<Json<ExecutionResponse>, (StatusCode, String)> {
     let exec = state
         .execution_repo
         .find_by_id(id)
@@ -104,7 +109,7 @@ async fn get_execution(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Execution not found".into()))?;
 
-    Ok(Json(exec))
+    Ok(Json(ExecutionResponse::from(exec)))
 }
 
 async fn delete_execution(
@@ -130,7 +135,7 @@ async fn execute_workflow(
     State(state): State<AppState>,
     Path(workflow_id): Path<uuid::Uuid>,
     Json(payload): Json<CreateExecutionRequest>,
-) -> Result<Json<ExecutionEntity>, (StatusCode, String)> {
+) -> Result<Json<ExecutionResponse>, (StatusCode, String)> {
     let execution = run_workflow_execution(
         &state,
         workflow_id,
@@ -138,7 +143,7 @@ async fn execute_workflow(
         payload.stop_at_node_id,
     )
     .await?;
-    Ok(Json(execution))
+    Ok(Json(ExecutionResponse::from(execution)))
 }
 
 async fn test_workflow_node(
@@ -146,20 +151,20 @@ async fn test_workflow_node(
     State(state): State<AppState>,
     Path((workflow_id, node_id)): Path<(uuid::Uuid, String)>,
     payload: Option<Json<CreateExecutionRequest>>,
-) -> Result<Json<ExecutionEntity>, (StatusCode, String)> {
+) -> Result<Json<ExecutionResponse>, (StatusCode, String)> {
     let manual = payload
         .as_ref()
         .and_then(|json| json.manual)
         .unwrap_or(true);
     let execution = run_workflow_execution(&state, workflow_id, manual, Some(node_id)).await?;
-    Ok(Json(execution))
+    Ok(Json(ExecutionResponse::from(execution)))
 }
 
 async fn retry_execution(
     _claims: Claims,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
-) -> Result<Json<ExecutionEntity>, (StatusCode, String)> {
+) -> Result<Json<ExecutionResponse>, (StatusCode, String)> {
     let execution = state
         .execution_repo
         .find_by_id(id)
@@ -168,14 +173,14 @@ async fn retry_execution(
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Execution not found".into()))?;
 
     let retried = run_workflow_execution(&state, execution.workflow_id, true, None).await?;
-    Ok(Json(retried))
+    Ok(Json(ExecutionResponse::from(retried)))
 }
 
 async fn stop_execution(
     _claims: Claims,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
-) -> Result<Json<ExecutionEntity>, (StatusCode, String)> {
+) -> Result<Json<ExecutionResponse>, (StatusCode, String)> {
     let execution = state
         .execution_repo
         .find_by_id(id)
@@ -208,7 +213,7 @@ async fn stop_execution(
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
             .ok_or_else(|| (StatusCode::NOT_FOUND, "Execution not found".into()))?;
-        return Ok(Json(updated));
+        return Ok(Json(ExecutionResponse::from(updated)));
     };
 
     control.cancellation_token.cancel();
@@ -256,7 +261,7 @@ async fn stop_execution(
     if !latest.status.eq_ignore_ascii_case("running")
         && !latest.status.eq_ignore_ascii_case("stopping")
     {
-        return Ok(Json(latest));
+        return Ok(Json(ExecutionResponse::from(latest)));
     }
 
     let stopped = state
@@ -273,7 +278,7 @@ async fn stop_execution(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Execution not found".into()))?;
 
-    Ok(Json(stopped))
+    Ok(Json(ExecutionResponse::from(stopped)))
 }
 
 fn summarize_node_results(
@@ -357,7 +362,7 @@ async fn resume_execution(
     State(state): State<AppState>,
     Path((execution_id, resume_token)): Path<(Uuid, String)>,
     payload: Option<Json<serde_json::Value>>,
-) -> Result<Json<ExecutionEntity>, (StatusCode, String)> {
+) -> Result<Json<ExecutionResponse>, (StatusCode, String)> {
     use barqflow_core::schema::{INodeExecutionData, ITaskDataConnections};
     use barqflow_core::types::{IDataObject, RunId};
     use barqflow_exec::runner::{ExecutionConfig, WorkflowRunContext, WorkflowRunner};
@@ -532,7 +537,7 @@ async fn resume_execution(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Execution not found".into()))?;
 
-    Ok(Json(updated))
+    Ok(Json(ExecutionResponse::from(updated)))
 }
 
 async fn run_workflow_execution(
