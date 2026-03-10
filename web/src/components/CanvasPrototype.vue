@@ -1,4 +1,5 @@
 <template>
+  <!-- Deprecated Phase 50 prototype. Keep only as a reference during editor refactors. -->
   <div class="canvas-wrapper" @mousemove="onMouseMove" @mouseup="onMouseUp" @mouseleave="onMouseUp">
     <!-- SVG layer for neural glow wires -->
     <svg class="wires-layer">
