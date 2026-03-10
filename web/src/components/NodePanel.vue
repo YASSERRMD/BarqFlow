@@ -382,11 +382,11 @@ watch(
 function getCategoryColor(type: string) {
   switch (type) {
     case 'trigger':
-      return 'bg-purple-100 text-purple-700'
+      return 'bg-teal-100 text-teal-700'
     case 'logic':
       return 'bg-amber-100 text-amber-700'
     case 'manipulation':
-      return 'bg-blue-100 text-blue-700'
+      return 'bg-sky-100 text-sky-700'
     default:
       return 'bg-brand-100 text-brand-700'
   }
@@ -596,36 +596,36 @@ function openCredentialsPage(credentialType?: string, displayName?: string) {
 <template>
   <div
     v-if="node"
-    class="fixed inset-0 z-40 bg-slate-900/20 transition-opacity"
+    class="fixed inset-0 z-40 bg-slate-950/30 backdrop-blur-[2px] transition-opacity"
     @click="emit('close')"
   ></div>
 
   <aside
-    class="fixed inset-y-0 right-0 z-50 flex w-[450px] flex-col border-l border-slate-200 bg-white shadow-2xl transition-transform duration-300 ease-in-out"
+    class="fixed inset-y-0 right-0 z-50 flex w-full max-w-[100vw] flex-col border-l border-slate-200 bg-white shadow-2xl transition-transform duration-300 ease-in-out sm:max-w-[480px]"
     :class="node ? 'translate-x-0' : 'translate-x-full pointer-events-none'"
   >
     <div v-if="node" class="flex h-full flex-1 flex-col bg-slate-50">
       <div
-        class="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4"
+        class="flex items-center justify-between border-b border-slate-200 bg-white px-5 py-4 sm:px-6"
       >
         <div class="flex items-center gap-3">
           <div
             :class="[
-              'flex h-8 w-8 items-center justify-center rounded',
+              'flex h-10 w-10 items-center justify-center rounded-2xl',
               getCategoryColor(node.data.kind || node.data.type),
             ]"
           >
             <Settings2 class="h-5 w-5" />
           </div>
           <div>
-            <h2 class="leading-tight text-lg font-bold text-slate-800">{{ node.data.label }}</h2>
-            <div class="mt-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-              {{ node.data.kind || node.data.type }} Node
-            </div>
+            <p class="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+              {{ node.data.kind || node.data.type }} node
+            </p>
+            <h2 class="mt-1 leading-tight text-lg font-black text-slate-900">{{ node.data.label }}</h2>
           </div>
         </div>
         <button
-          class="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+          class="rounded-xl p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
           @click="emit('close')"
         >
           <X class="h-5 w-5" />
@@ -634,15 +634,15 @@ function openCredentialsPage(credentialType?: string, displayName?: string) {
 
       <NdvTabBar v-model="activeTab" :tabs="tabs" />
 
-      <div class="flex-1 space-y-6 overflow-y-auto px-6 py-6">
+      <div class="flex-1 space-y-6 overflow-y-auto px-5 py-5 sm:px-6 sm:py-6">
         <div
-          class="flex gap-3 rounded-lg border border-blue-100 bg-blue-50/50 p-3 text-sm text-blue-800"
+          class="flex gap-3 rounded-2xl border border-sky-100 bg-sky-50/80 p-4 text-sm text-sky-900"
         >
-          <Info class="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
+          <Info class="mt-0.5 h-4 w-4 shrink-0 text-sky-600" />
           <p>
             {{
               node.data.description ||
-              'Configure this node to handle your workflow data processing requirements.'
+              'Configure this node to control its parameters, bindings, and runtime behavior.'
             }}
           </p>
         </div>
@@ -688,25 +688,25 @@ function openCredentialsPage(credentialType?: string, displayName?: string) {
       </div>
 
       <div
-        class="flex items-center justify-between gap-3 border-t border-slate-200 bg-white px-6 py-4"
+        class="flex flex-col gap-3 border-t border-slate-200 bg-white px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6"
       >
         <button
-          class="rounded-lg border border-transparent p-2 text-slate-400 transition-colors hover:border-red-100 hover:bg-red-50 hover:text-red-600"
+          class="inline-flex items-center justify-center rounded-xl border border-transparent p-2 text-slate-400 transition-colors hover:border-red-100 hover:bg-red-50 hover:text-red-600"
           title="Delete Node"
           @click="onDeleteNode"
         >
           <Trash2 class="h-5 w-5" />
         </button>
-        <div class="flex gap-2">
+        <div class="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
           <button
-            class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+            class="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
             @click="applyMockData"
           >
             Mock Data
           </button>
           <button
             :disabled="isTesting || !canTestNode"
-            class="flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white shadow-sm disabled:opacity-60 hover:bg-brand-700"
+            class="flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition disabled:opacity-60 hover:bg-slate-800"
             @click="emit('test-node', node)"
           >
             <Play class="h-4 w-4 fill-current" />

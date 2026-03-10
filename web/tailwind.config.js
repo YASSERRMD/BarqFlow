@@ -7,8 +7,8 @@ export default {
     theme: {
         extend: {
             fontFamily: {
-                sans: ['Inter', 'sans-serif'],
-                display: ['Outfit', 'sans-serif'],
+                sans: ['Manrope', 'sans-serif'],
+                display: ['Archivo', 'sans-serif'],
             },
             colors: {
                 brand: {
@@ -32,6 +32,7 @@ export default {
                 'node': '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)',
                 'node-hover': '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
                 'glass': '0 8px 32px 0 rgba(31, 38, 135, 0.07)',
+                'panel': '0 20px 45px rgba(15, 23, 42, 0.08)',
             }
         },
     },
