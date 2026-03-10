@@ -1,7 +1,7 @@
 use crate::integration::common::{
     build_standard_output, build_url, ensure_required_string, execute_prepared_request,
     get_optional_param, get_optional_string_param, get_string_param, get_u64_param, parse_body,
-    parse_kv_pairs, require_auth_token, run_count, PreparedRequest,
+    parse_kv_pairs, resolve_auth_token, run_count, PreparedRequest,
 };
 use async_trait::async_trait;
 use barqflow_core::errors::BarqError;
@@ -55,10 +55,9 @@ impl INodeType for RedisNode {
             )
             .await;
             let timeout_ms = get_u64_param(context, "timeout", item_index, 60_000).await;
-            let auth_token = require_auth_token(
-                "Redis",
-                get_optional_string_param(context, "authToken", item_index).await,
-            )?;
+            let auth_token =
+                resolve_auth_token(context, "Redis", item_index, "redisApi", &["accessToken"])
+                    .await?;
 
             let headers = get_optional_param(context, "headers", item_index)
                 .await
@@ -179,6 +178,32 @@ mod tests {
         context.add_param("baseUrl", json!(server.url()));
         context.add_param("authToken", json!("redis-token"));
         context.add_param("key", json!("myKey"));
+
+        let result = RedisNode::new().execute(&context).await.unwrap();
+        mock.assert_async().await;
+        assert_eq!(
+            result[0][0].json.0.get("status").and_then(|v| v.as_u64()),
+            Some(200)
+        );
+    }
+
+    #[tokio::test]
+    async fn redis_uses_bound_credential_when_auth_token_is_empty() {
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock("GET", "/get/myKey")
+            .match_header("authorization", "Bearer redis-token")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"result":"value"}"#)
+            .create_async()
+            .await;
+
+        let mut context = MockContext::new("Redis", "barqflow-nodes.redis");
+        context.add_param("operation", json!("get"));
+        context.add_param("baseUrl", json!(server.url()));
+        context.add_param("key", json!("myKey"));
+        context.add_credential("redisApi", "accessToken", json!("redis-token"));
 
         let result = RedisNode::new().execute(&context).await.unwrap();
         mock.assert_async().await;

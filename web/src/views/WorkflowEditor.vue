@@ -98,6 +98,36 @@ const NODE_CREDENTIAL_REQUIREMENTS: Record<
   'barqflow-nodes.oneDrive': [
     { credentialType: 'oneDriveApi', displayName: 'OneDrive API', required: true },
   ],
+  'barqflow-nodes.linear': [
+    { credentialType: 'linearApi', displayName: 'Linear API', required: true },
+  ],
+  'barqflow-nodes.mysql': [
+    { credentialType: 'mysqlApi', displayName: 'MySQL API', required: true },
+  ],
+  'barqflow-nodes.redis': [
+    { credentialType: 'redisApi', displayName: 'Redis API', required: true },
+  ],
+  'barqflow-nodes.zendesk': [
+    { credentialType: 'zendeskApi', displayName: 'Zendesk API', required: true },
+  ],
+  'barqflow-nodes.salesforce': [
+    { credentialType: 'salesforceApi', displayName: 'Salesforce API', required: true },
+  ],
+  'barqflow-nodes.quickbooks': [
+    { credentialType: 'quickbooksApi', displayName: 'QuickBooks API', required: true },
+  ],
+  'barqflow-nodes.zoom': [
+    { credentialType: 'zoomApi', displayName: 'Zoom API', required: true },
+  ],
+  'barqflow-nodes.trello': [
+    { credentialType: 'trelloApi', displayName: 'Trello API', required: true },
+  ],
+  'barqflow-nodes.outlook': [
+    { credentialType: 'outlookApi', displayName: 'Outlook API', required: true },
+  ],
+  'barqflow-nodes.paypal': [
+    { credentialType: 'paypalApi', displayName: 'PayPal API', required: true },
+  ],
 }
 
 function normalizeNodeCredentials(rawCredentials: any, nodeId: string): Record<string, string> {
