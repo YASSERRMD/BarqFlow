@@ -1,8 +1,7 @@
 use barqflow_core::properties::INodeProperty;
 use barqflow_core::schema::CredentialReference;
 use barqflow_db::models::{
-    ApiKeyEntity, CredentialEntity, ExecutionEntity, ExecutionLogEntity, TagEntity,
-    WorkflowEntity,
+    ApiKeyEntity, CredentialEntity, ExecutionEntity, ExecutionLogEntity, TagEntity, WorkflowEntity,
 };
 use barqflow_registry::registry::NodeInfo;
 use chrono::{DateTime, Utc};
@@ -322,6 +321,9 @@ pub struct NodeSchemaResponse {
     pub name: String,
     pub display_name: String,
     pub description: String,
+    pub category: String,
+    pub support_tier: String,
+    pub support_note: Option<String>,
     pub is_trigger: bool,
     pub type_version: f32,
     pub max_inputs: usize,
@@ -334,6 +336,10 @@ pub struct NodeSchemaResponse {
 impl NodeSchemaResponse {
     pub fn from_node_info(
         info: NodeInfo,
+        category: impl Into<String>,
+        support_tier: impl Into<String>,
+        support_note: Option<String>,
+        documentation_url: Option<String>,
         credentials: Vec<CredentialReference>,
         defaults: Value,
     ) -> Self {
@@ -341,10 +347,13 @@ impl NodeSchemaResponse {
             name: info.name,
             display_name: info.display_name,
             description: info.description,
+            category: category.into(),
+            support_tier: support_tier.into(),
+            support_note,
             is_trigger: info.is_trigger,
             type_version: info.version,
             max_inputs: info.max_inputs,
-            documentation_url: None,
+            documentation_url,
             properties: info.properties.properties,
             credentials,
             defaults,

@@ -11,78 +11,148 @@ pub mod subworkflow;
 pub mod trigger;
 pub mod wait;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NodeSupportTier {
+    Supported,
+    Beta,
+    Hidden,
+}
+
 pub fn register_all_credentials(registry: &barqflow_registry::registry::CredentialRegistry) {
     credentials::register_all_credentials(registry);
 }
 
+pub fn node_ui_category(name: &str) -> Option<&'static str> {
+    match name {
+        "n8n-nodes-base.manualTrigger"
+        | "barqflow-nodes.wait"
+        | "barqflow-nodes.errorTrigger"
+        | "barqflow-nodes.webhook"
+        | "barqflow-nodes.cronTrigger" => Some("Triggers"),
+        "n8n-nodes-base.if"
+        | "n8n-nodes-base.switch"
+        | "n8n-nodes-base.merge"
+        | "n8n-nodes-base.set"
+        | "n8n-nodes-base.filter"
+        | "n8n-nodes-base.itemLists"
+        | "n8n-nodes-base.code" => Some("Data & Logic"),
+        "n8n-nodes-base.httpRequest" | "barqflow-nodes.executeWorkflow" => Some("Core"),
+        _ if name.starts_with("barqflow-nodes.") => Some("Integrations"),
+        _ => None,
+    }
+}
+
+pub fn node_support_tier(name: &str) -> Option<NodeSupportTier> {
+    match name {
+        "n8n-nodes-base.httpRequest"
+        | "n8n-nodes-base.if"
+        | "n8n-nodes-base.switch"
+        | "n8n-nodes-base.merge"
+        | "n8n-nodes-base.set"
+        | "n8n-nodes-base.filter"
+        | "n8n-nodes-base.itemLists"
+        | "n8n-nodes-base.code"
+        | "n8n-nodes-base.manualTrigger"
+        | "barqflow-nodes.wait"
+        | "barqflow-nodes.errorTrigger"
+        | "barqflow-nodes.webhook"
+        | "barqflow-nodes.cronTrigger"
+        | "barqflow-nodes.executeWorkflow"
+        | "barqflow-nodes.postgres"
+        | "barqflow-nodes.openai"
+        | "barqflow-nodes.ollama"
+        | "barqflow-nodes.slack"
+        | "barqflow-nodes.github"
+        | "barqflow-nodes.telegram"
+        | "barqflow-nodes.googleSheets"
+        | "barqflow-nodes.gmail"
+        | "barqflow-nodes.twilio"
+        | "barqflow-nodes.shopify"
+        | "barqflow-nodes.barqDbInsert"
+        | "barqflow-nodes.barqDbSearch"
+        | "barqflow-nodes.barqDbDelete" => Some(NodeSupportTier::Supported),
+        "barqflow-nodes.discord"
+        | "barqflow-nodes.notion"
+        | "barqflow-nodes.airtable"
+        | "barqflow-nodes.jira"
+        | "barqflow-nodes.stripe"
+        | "barqflow-nodes.sendGrid"
+        | "barqflow-nodes.hubspot"
+        | "barqflow-nodes.asana"
+        | "barqflow-nodes.googleDrive"
+        | "barqflow-nodes.outlook"
+        | "barqflow-nodes.mailchimp"
+        | "barqflow-nodes.salesforce"
+        | "barqflow-nodes.redis"
+        | "barqflow-nodes.mysql"
+        | "barqflow-nodes.awsS3"
+        | "barqflow-nodes.trello"
+        | "barqflow-nodes.gitlab"
+        | "barqflow-nodes.bitbucket"
+        | "barqflow-nodes.dropbox"
+        | "barqflow-nodes.linear"
+        | "barqflow-nodes.clickUp"
+        | "barqflow-nodes.monday"
+        | "barqflow-nodes.pipedrive" => Some(NodeSupportTier::Beta),
+        "barqflow-nodes.oneDrive"
+        | "barqflow-nodes.paypal"
+        | "barqflow-nodes.zoom"
+        | "barqflow-nodes.calendly"
+        | "barqflow-nodes.zendesk"
+        | "barqflow-nodes.intercom"
+        | "barqflow-nodes.freshdesk"
+        | "barqflow-nodes.quickbooks"
+        | "barqflow-nodes.xero" => Some(NodeSupportTier::Hidden),
+        _ => None,
+    }
+}
+
+pub fn node_support_note(name: &str) -> Option<&'static str> {
+    match node_support_tier(name)? {
+        NodeSupportTier::Supported => Some(
+            "Supported node with production-facing parameter and credential coverage in BarqFlow.",
+        ),
+        NodeSupportTier::Beta => Some(
+            "Beta node: common operations are implemented, but depth and edge-case coverage are still expanding.",
+        ),
+        NodeSupportTier::Hidden => Some(
+            "Hidden catalog entry until credential coverage and runtime depth are promoted.",
+        ),
+    }
+}
+
+pub fn node_documentation_url(name: &str) -> Option<&'static str> {
+    match name {
+        "n8n-nodes-base.httpRequest" => {
+            Some("https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.httprequest/")
+        }
+        "barqflow-nodes.postgres" => Some("https://www.postgresql.org/docs/current/index.html"),
+        "barqflow-nodes.openai" => Some("https://platform.openai.com/docs/overview"),
+        "barqflow-nodes.ollama" => Some("https://ollama.com/library"),
+        "barqflow-nodes.slack" => Some("https://api.slack.com/web"),
+        "barqflow-nodes.github" => Some("https://docs.github.com/en/rest"),
+        "barqflow-nodes.telegram" => Some("https://core.telegram.org/bots/api"),
+        "barqflow-nodes.googleSheets" => Some("https://developers.google.com/sheets/api"),
+        "barqflow-nodes.gmail" => Some("https://developers.google.com/gmail/api"),
+        "barqflow-nodes.twilio" => Some("https://www.twilio.com/docs/usage/api"),
+        "barqflow-nodes.shopify" => Some("https://shopify.dev/docs/api/admin-rest"),
+        _ => None,
+    }
+}
+
 pub fn is_node_ui_exposed(name: &str) -> bool {
     matches!(
-        name,
-        "n8n-nodes-base.httpRequest"
-            | "n8n-nodes-base.if"
-            | "n8n-nodes-base.switch"
-            | "n8n-nodes-base.merge"
-            | "n8n-nodes-base.set"
-            | "n8n-nodes-base.filter"
-            | "n8n-nodes-base.itemLists"
-            | "n8n-nodes-base.code"
-            | "n8n-nodes-base.manualTrigger"
-            | "barqflow-nodes.wait"
-            | "barqflow-nodes.errorTrigger"
-            | "barqflow-nodes.webhook"
-            | "barqflow-nodes.cronTrigger"
-            | "barqflow-nodes.executeWorkflow"
-            | "barqflow-nodes.postgres"
-            | "barqflow-nodes.openai"
-            | "barqflow-nodes.ollama"
-            | "barqflow-nodes.slack"
-            | "barqflow-nodes.github"
-            | "barqflow-nodes.discord"
-            | "barqflow-nodes.notion"
-            | "barqflow-nodes.airtable"
-            | "barqflow-nodes.jira"
-            | "barqflow-nodes.stripe"
-            | "barqflow-nodes.sendGrid"
-            | "barqflow-nodes.hubspot"
-            | "barqflow-nodes.asana"
-            | "barqflow-nodes.telegram"
-            | "barqflow-nodes.googleSheets"
-            | "barqflow-nodes.googleDrive"
-            | "barqflow-nodes.outlook"
-            | "barqflow-nodes.mailchimp"
-            | "barqflow-nodes.salesforce"
-            | "barqflow-nodes.redis"
-            | "barqflow-nodes.mysql"
-            | "barqflow-nodes.awsS3"
-            | "barqflow-nodes.gmail"
-            | "barqflow-nodes.twilio"
-            | "barqflow-nodes.trello"
-            | "barqflow-nodes.gitlab"
-            | "barqflow-nodes.bitbucket"
-            | "barqflow-nodes.dropbox"
-            | "barqflow-nodes.oneDrive"
-            | "barqflow-nodes.linear"
-            | "barqflow-nodes.clickUp"
-            | "barqflow-nodes.monday"
-            | "barqflow-nodes.shopify"
-            | "barqflow-nodes.paypal"
-            | "barqflow-nodes.zoom"
-            | "barqflow-nodes.calendly"
-            | "barqflow-nodes.zendesk"
-            | "barqflow-nodes.intercom"
-            | "barqflow-nodes.freshdesk"
-            | "barqflow-nodes.pipedrive"
-            | "barqflow-nodes.quickbooks"
-            | "barqflow-nodes.xero"
-            | "barqflow-nodes.barqDbInsert"
-            | "barqflow-nodes.barqDbSearch"
-            | "barqflow-nodes.barqDbDelete"
+        node_support_tier(name),
+        Some(NodeSupportTier::Supported | NodeSupportTier::Beta)
     )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{is_node_ui_exposed, register_all_nodes};
+    use super::{
+        is_node_ui_exposed, node_documentation_url, node_support_tier, node_ui_category,
+        register_all_nodes, NodeSupportTier,
+    };
     use barqflow_registry::registry::NodeRegistry;
 
     fn property_names_for(registry: &NodeRegistry, node_name: &str) -> Vec<String> {
@@ -107,8 +177,29 @@ mod tests {
         assert!(is_node_ui_exposed("barqflow-nodes.gmail"));
         assert!(is_node_ui_exposed("barqflow-nodes.twilio"));
         assert!(is_node_ui_exposed("barqflow-nodes.shopify"));
-        assert!(is_node_ui_exposed("barqflow-nodes.zoom"));
         assert!(is_node_ui_exposed("barqflow-nodes.barqDbInsert"));
+    }
+
+    #[test]
+    fn test_node_catalog_metadata_classifies_tiers_and_hidden_entries() {
+        assert_eq!(
+            node_support_tier("barqflow-nodes.openai"),
+            Some(NodeSupportTier::Supported)
+        );
+        assert_eq!(
+            node_support_tier("barqflow-nodes.monday"),
+            Some(NodeSupportTier::Beta)
+        );
+        assert_eq!(
+            node_support_tier("barqflow-nodes.paypal"),
+            Some(NodeSupportTier::Hidden)
+        );
+        assert!(!is_node_ui_exposed("barqflow-nodes.paypal"));
+        assert_eq!(node_ui_category("barqflow-nodes.webhook"), Some("Triggers"));
+        assert_eq!(
+            node_documentation_url("barqflow-nodes.openai"),
+            Some("https://platform.openai.com/docs/overview")
+        );
     }
 
     #[test]
@@ -146,7 +237,13 @@ mod tests {
             ),
             (
                 "n8n-nodes-base.if",
-                vec!["combineOperation", "conditions", "operation", "value1", "value2"],
+                vec![
+                    "combineOperation",
+                    "conditions",
+                    "operation",
+                    "value1",
+                    "value2",
+                ],
             ),
             (
                 "n8n-nodes-base.switch",
@@ -161,7 +258,13 @@ mod tests {
             ),
             (
                 "n8n-nodes-base.filter",
-                vec!["combineOperation", "conditions", "operation", "value1", "value2"],
+                vec![
+                    "combineOperation",
+                    "conditions",
+                    "operation",
+                    "value1",
+                    "value2",
+                ],
             ),
             (
                 "n8n-nodes-base.code",
@@ -169,7 +272,10 @@ mod tests {
             ),
             ("n8n-nodes-base.manualTrigger", vec![]),
             ("barqflow-nodes.wait", vec!["resume", "amount", "unit"]),
-            ("barqflow-nodes.webhook", vec!["path", "httpMethod", "responseMode"]),
+            (
+                "barqflow-nodes.webhook",
+                vec!["path", "httpMethod", "responseMode"],
+            ),
             ("barqflow-nodes.cronTrigger", vec!["cron"]),
             (
                 "barqflow-nodes.executeWorkflow",
@@ -723,8 +829,7 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
             default: Some(serde_json::json!([])),
             description: Some("JSON array of filter conditions.".into()),
             hint: Some(
-                r#"[{"value1":"={{$json.status}}","operation":"equals","value2":"ready"}]"#
-                    .into(),
+                r#"[{"value1":"={{$json.status}}","operation":"equals","value2":"ready"}]"#.into(),
             ),
             required: false,
             display_options: None,
@@ -908,7 +1013,9 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
             display_name: "Mode".into(),
             r#type: barqflow_core::properties::NodePropertyType::Options,
             default: Some(serde_json::json!("runOnceForAllItems")),
-            description: Some("Choose whether the script runs once for all items or once per item.".into()),
+            description: Some(
+                "Choose whether the script runs once for all items or once per item.".into(),
+            ),
             hint: None,
             required: true,
             display_options: None,
@@ -1484,7 +1591,7 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
         barqflow_core::properties::INodeProperty {
             name: "model".into(),
             display_name: "Model".into(),
-            r#type: barqflow_core::properties::NodePropertyType::String,
+            r#type: barqflow_core::properties::NodePropertyType::LoadOptions,
             default: Some(serde_json::json!("gpt-4o-mini")),
             description: Some("The OpenAI model to use".into()),
             hint: None,
@@ -1598,7 +1705,7 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
         barqflow_core::properties::INodeProperty {
             name: "model".into(),
             display_name: "Model".into(),
-            r#type: barqflow_core::properties::NodePropertyType::String,
+            r#type: barqflow_core::properties::NodePropertyType::LoadOptions,
             default: Some(serde_json::json!("llama3")),
             description: Some("The Ollama model to use".into()),
             hint: None,
