@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { fetchProfile, login, register, type AuthCredentials } from './api'
-import type { UserProfile } from '../../types/contracts'
+import type { AuthResponse, UserProfile } from '../../types/contracts'
 
 export const useAuthStore = defineStore('auth', {
   state: () => ({
@@ -11,20 +11,28 @@ export const useAuthStore = defineStore('auth', {
   }),
   getters: {
     isAuthenticated: (state) => !!state.token,
+    activeWorkspace: (state) => state.user?.activeWorkspace ?? null,
+    userName: (state) => {
+      const firstName = state.user?.firstName?.trim()
+      const lastName = state.user?.lastName?.trim()
+      const fullName = [firstName, lastName].filter(Boolean).join(' ')
+      if (fullName) return fullName
+      const fallback = state.user?.email?.split('@')[0]
+      return fallback ? fallback.charAt(0).toUpperCase() + fallback.slice(1) : 'Workspace User'
+    },
   },
   actions: {
+    applyAuthResponse(response: AuthResponse) {
+      this.token = response.token
+      this.user = response.user
+      localStorage.setItem('token', response.token)
+    },
     async login(credentials: AuthCredentials) {
       this.loading = true
       this.error = null
       try {
         const response = await login(credentials)
-        this.token = response.data.token
-        this.user =
-          response.data.user ??
-          (response.data.userId
-            ? { id: response.data.userId, email: credentials.email, role: 'user' }
-            : null)
-        localStorage.setItem('token', this.token as string)
+        this.applyAuthResponse(response.data)
         return true
       } catch (err: any) {
         this.error = err.response?.data?.message || 'Login failed'
@@ -38,13 +46,7 @@ export const useAuthStore = defineStore('auth', {
       this.error = null
       try {
         const response = await register(credentials)
-        this.token = response.data.token
-        this.user =
-          response.data.user ??
-          (response.data.userId
-            ? { id: response.data.userId, email: credentials.email, role: 'user' }
-            : null)
-        localStorage.setItem('token', this.token as string)
+        this.applyAuthResponse(response.data)
         return true
       } catch (err: any) {
         this.error = err.response?.data?.message || 'Registration failed'

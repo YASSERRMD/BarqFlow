@@ -1,115 +1,592 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { RefreshCw, ShieldCheck, Clock3, Workflow, KeyRound } from 'lucide-vue-next'
-import { getRuntimeSettings, type RuntimeSettings } from '../features/settings/api'
+import {
+  AlertTriangle,
+  ArrowRightLeft,
+  Building2,
+  CheckCircle2,
+  Clock3,
+  KeyRound,
+  LockKeyhole,
+  RefreshCw,
+  Server,
+  ShieldCheck,
+  UserPlus,
+  Users2,
+  Workflow,
+} from 'lucide-vue-next'
+import { useAuthStore } from '../stores/auth'
+import {
+  addWorkspaceMember,
+  changePassword,
+  createApiKey,
+  createWorkspace,
+  getRuntimeSettings,
+  listApiKeys,
+  listWorkspaceMembers,
+  listWorkspaces,
+  revokeApiKey,
+  selectWorkspace,
+  type RuntimeSettings,
+} from '../features/settings/api'
+import type { ApiKeyCreateResult, ApiKeyRecord, WorkspaceMember, WorkspaceSummary } from '../types/contracts'
+
+const authStore = useAuthStore()
 
 const runtime = ref<RuntimeSettings | null>(null)
+const workspaces = ref<WorkspaceSummary[]>([])
+const members = ref<WorkspaceMember[]>([])
+const apiKeys = ref<ApiKeyRecord[]>([])
+
 const loading = ref(false)
 const error = ref<string | null>(null)
+const successMessage = ref<string | null>(null)
+const createdApiKey = ref<ApiKeyCreateResult | null>(null)
+const switchingWorkspaceId = ref<string | null>(null)
 
+const workspaceForm = ref({ name: '' })
+const memberForm = ref({ email: '', role: 'member' })
+const apiKeyForm = ref({ name: '', expiresAt: '' })
+const passwordForm = ref({ currentPassword: '', newPassword: '', confirmPassword: '' })
+
+const activeWorkspace = computed(() => authStore.activeWorkspace)
+const canWriteWorkspace = computed(() => ['owner', 'admin', 'member'].includes(authStore.user?.workspaceRole || ''))
+const canManageMembers = computed(() => ['owner', 'admin'].includes(authStore.user?.workspaceRole || ''))
+const activeApiKeysCount = computed(() => apiKeys.value.filter((key) => !key.revokedAt).length)
+const workspaceMemberCount = computed(() => members.value.length)
 const formattedServerTime = computed(() => {
   if (!runtime.value?.serverTime) return '-'
   return new Date(runtime.value.serverTime).toLocaleString()
 })
 
-async function fetchRuntimeSettings() {
+function setFeedback(message: string) {
+  successMessage.value = message
+  error.value = null
+}
+
+async function loadSettingsSurface() {
   loading.value = true
   error.value = null
   try {
-    const response = await getRuntimeSettings()
-    runtime.value = response.data
+    const [runtimeResponse, workspacesResponse, membersResponse, apiKeysResponse] = await Promise.all([
+      getRuntimeSettings(),
+      listWorkspaces(),
+      listWorkspaceMembers(),
+      listApiKeys(),
+    ])
+
+    runtime.value = runtimeResponse.data
+    workspaces.value = workspacesResponse.data
+    members.value = membersResponse.data
+    apiKeys.value = apiKeysResponse.data
   } catch (err: any) {
-    error.value = err?.response?.data || err?.message || 'Failed to load runtime settings'
+    error.value = err?.response?.data?.message || err?.response?.data || err?.message || 'Failed to load settings'
   } finally {
     loading.value = false
   }
 }
 
-onMounted(fetchRuntimeSettings)
+async function refreshSurface() {
+  await authStore.fetchMe()
+  await loadSettingsSurface()
+}
+
+async function handleWorkspaceSwitch(workspaceId: string) {
+  if (!workspaceId || workspaceId === activeWorkspace.value?.id) return
+  switchingWorkspaceId.value = workspaceId
+  error.value = null
+  successMessage.value = null
+  try {
+    await selectWorkspace(workspaceId)
+    await authStore.fetchMe()
+    await loadSettingsSurface()
+    setFeedback('Active workspace updated.')
+  } catch (err: any) {
+    error.value = err?.response?.data?.message || err?.response?.data || err?.message || 'Failed to switch workspace'
+  } finally {
+    switchingWorkspaceId.value = null
+  }
+}
+
+async function handleWorkspaceCreate() {
+  const name = workspaceForm.value.name.trim()
+  if (!name) {
+    error.value = 'Workspace name is required.'
+    return
+  }
+
+  try {
+    await createWorkspace({ name })
+    workspaceForm.value.name = ''
+    await authStore.fetchMe()
+    await loadSettingsSurface()
+    setFeedback('Workspace created.')
+  } catch (err: any) {
+    error.value = err?.response?.data?.message || err?.response?.data || err?.message || 'Failed to create workspace'
+  }
+}
+
+async function handleMemberInvite() {
+  if (!canManageMembers.value) return
+
+  const email = memberForm.value.email.trim()
+  if (!email) {
+    error.value = 'Member email is required.'
+    return
+  }
+
+  try {
+    await addWorkspaceMember({ email, role: memberForm.value.role })
+    memberForm.value.email = ''
+    memberForm.value.role = 'member'
+    await loadSettingsSurface()
+    setFeedback('Workspace membership updated.')
+  } catch (err: any) {
+    error.value = err?.response?.data?.message || err?.response?.data || err?.message || 'Failed to update workspace membership'
+  }
+}
+
+async function handleApiKeyCreate() {
+  if (!canWriteWorkspace.value) return
+
+  const name = apiKeyForm.value.name.trim()
+  if (!name) {
+    error.value = 'API key name is required.'
+    return
+  }
+
+  try {
+    const response = await createApiKey({
+      name,
+      expiresAt: apiKeyForm.value.expiresAt || null,
+    })
+    createdApiKey.value = response.data
+    apiKeyForm.value.name = ''
+    apiKeyForm.value.expiresAt = ''
+    await loadSettingsSurface()
+    setFeedback('API key created. Copy it now; the raw value is only shown once.')
+  } catch (err: any) {
+    error.value = err?.response?.data?.message || err?.response?.data || err?.message || 'Failed to create API key'
+  }
+}
+
+async function handleApiKeyRevoke(apiKeyId: string) {
+  if (!canWriteWorkspace.value) return
+
+  try {
+    await revokeApiKey(apiKeyId)
+    await loadSettingsSurface()
+    setFeedback('API key revoked.')
+  } catch (err: any) {
+    error.value = err?.response?.data?.message || err?.response?.data || err?.message || 'Failed to revoke API key'
+  }
+}
+
+async function copyCreatedApiKey() {
+  if (!createdApiKey.value?.apiKey) return
+  await navigator.clipboard.writeText(createdApiKey.value.apiKey)
+  setFeedback('API key copied to clipboard.')
+}
+
+async function handlePasswordChange() {
+  if (passwordForm.value.newPassword.trim().length < 8) {
+    error.value = 'New password must be at least 8 characters.'
+    return
+  }
+
+  if (passwordForm.value.newPassword !== passwordForm.value.confirmPassword) {
+    error.value = 'Password confirmation does not match.'
+    return
+  }
+
+  try {
+    const response = await changePassword({
+      currentPassword: passwordForm.value.currentPassword,
+      newPassword: passwordForm.value.newPassword,
+    })
+    authStore.user = response.data
+    passwordForm.value.currentPassword = ''
+    passwordForm.value.newPassword = ''
+    passwordForm.value.confirmPassword = ''
+    setFeedback('Password updated.')
+  } catch (err: any) {
+    error.value = err?.response?.data?.message || err?.response?.data || err?.message || 'Failed to update password'
+  }
+}
+
+onMounted(refreshSurface)
 </script>
 
 <template>
-  <div class="h-full bg-slate-50 overflow-auto p-6 md:p-10">
-    <div class="max-w-4xl mx-auto space-y-6">
-      <div class="flex items-center justify-between">
-        <div>
-          <h1 class="text-3xl font-bold text-slate-900">Settings</h1>
-          <p class="text-slate-500 text-sm mt-1">
-            Runtime and security state for this BarqFlow instance.
-          </p>
+  <div class="h-full overflow-auto bg-slate-50 px-4 py-6 md:px-8 md:py-8">
+    <div class="mx-auto max-w-7xl space-y-6">
+      <section class="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm md:p-8">
+        <div class="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+          <div class="space-y-3">
+            <p class="text-[11px] font-bold uppercase tracking-[0.24em] text-slate-500">Control Plane Settings</p>
+            <div>
+              <h1 class="text-3xl font-display font-bold tracking-tight text-slate-950">Workspace, access, and runtime operations</h1>
+              <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+                Manage workspace boundaries, operator access, service credentials, and runtime posture from one administrative surface.
+              </p>
+            </div>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-3">
+            <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">Active workspace</p>
+              <p class="mt-1 text-sm font-semibold text-slate-950">{{ activeWorkspace?.name || 'No workspace' }}</p>
+            </div>
+            <button
+              class="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-60"
+              :disabled="loading"
+              @click="refreshSurface"
+            >
+              <RefreshCw class="h-4 w-4" />
+              Refresh
+            </button>
+          </div>
         </div>
-        <button
-          @click="fetchRuntimeSettings"
-          :disabled="loading"
-          class="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-60"
-        >
-          <RefreshCw class="w-4 h-4" />
-          Refresh
-        </button>
-      </div>
+      </section>
 
-      <div
-        v-if="loading"
-        class="bg-white border border-slate-200 rounded-2xl p-6 text-sm text-slate-500"
-      >
-        Loading runtime settings...
-      </div>
-
-      <div
-        v-else-if="error"
-        class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 text-sm"
-      >
+      <div v-if="error" class="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
         {{ error }}
       </div>
-
-      <div v-else-if="runtime" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div class="bg-white border border-slate-200 rounded-2xl p-5">
-          <div class="flex items-center gap-2 text-slate-500 text-sm font-medium">
-            <Clock3 class="w-4 h-4" />
-            Server time
+      <div v-if="successMessage" class="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+        {{ successMessage }}
+      </div>
+      <div v-if="createdApiKey" class="rounded-[2rem] border border-sky-200 bg-sky-50 p-5 shadow-sm">
+        <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div>
+            <p class="text-sm font-semibold text-sky-900">New API key ready</p>
+            <p class="mt-1 text-sm text-sky-800">This raw key will not be shown again after you leave this screen.</p>
+            <code class="mt-4 block overflow-x-auto rounded-2xl bg-slate-950 px-4 py-3 text-xs text-slate-100">{{ createdApiKey.apiKey }}</code>
           </div>
-          <p class="text-slate-900 text-lg font-semibold mt-2">{{ formattedServerTime }}</p>
-        </div>
-
-        <div class="bg-white border border-slate-200 rounded-2xl p-5">
-          <div class="flex items-center gap-2 text-slate-500 text-sm font-medium">
-            <ShieldCheck class="w-4 h-4" />
-            Environment
-          </div>
-          <p class="text-slate-900 text-lg font-semibold mt-2 capitalize">{{ runtime.environment }}</p>
-        </div>
-
-        <div class="bg-white border border-slate-200 rounded-2xl p-5">
-          <div class="flex items-center gap-2 text-slate-500 text-sm font-medium">
-            <Workflow class="w-4 h-4" />
-            Registered node types
-          </div>
-          <p class="text-slate-900 text-lg font-semibold mt-2">{{ runtime.nodeTypesCount }}</p>
-        </div>
-
-        <div class="bg-white border border-slate-200 rounded-2xl p-5">
-          <div class="flex items-center gap-2 text-slate-500 text-sm font-medium">
-            <KeyRound class="w-4 h-4" />
-            Registered credential types
-          </div>
-          <p class="text-slate-900 text-lg font-semibold mt-2">{{ runtime.credentialTypesCount }}</p>
-        </div>
-
-        <div class="bg-white border border-slate-200 rounded-2xl p-5 md:col-span-2">
-          <div class="flex items-center gap-2 text-slate-500 text-sm font-medium">
-            <ShieldCheck class="w-4 h-4" />
-            Encryption key status
-          </div>
-          <p
-            :class="[
-              'text-lg font-semibold mt-2',
-              runtime.encryptionKeyConfigured ? 'text-green-700' : 'text-red-700',
-            ]"
+          <button
+            class="inline-flex items-center justify-center rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
+            @click="copyCreatedApiKey"
           >
-            {{ runtime.encryptionKeyConfigured ? 'Configured' : 'Missing' }}
-          </p>
+            Copy key
+          </button>
         </div>
       </div>
+
+      <div v-if="loading" class="rounded-[2rem] border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">
+        Loading workspace settings...
+      </div>
+
+      <template v-else>
+        <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div class="rounded-[1.75rem] border border-slate-200 bg-white p-5 shadow-sm">
+            <div class="flex items-center gap-2 text-sm font-medium text-slate-500">
+              <Building2 class="h-4 w-4" />
+              Active workspace
+            </div>
+            <p class="mt-3 text-2xl font-semibold text-slate-950">{{ activeWorkspace?.name || '-' }}</p>
+            <p class="mt-2 text-xs uppercase tracking-[0.18em] text-slate-500">{{ activeWorkspace?.role || authStore.user?.workspaceRole || 'viewer' }}</p>
+          </div>
+
+          <div class="rounded-[1.75rem] border border-slate-200 bg-white p-5 shadow-sm">
+            <div class="flex items-center gap-2 text-sm font-medium text-slate-500">
+              <Users2 class="h-4 w-4" />
+              Team members
+            </div>
+            <p class="mt-3 text-2xl font-semibold text-slate-950">{{ workspaceMemberCount }}</p>
+            <p class="mt-2 text-sm text-slate-500">Operators in the current workspace boundary.</p>
+          </div>
+
+          <div class="rounded-[1.75rem] border border-slate-200 bg-white p-5 shadow-sm">
+            <div class="flex items-center gap-2 text-sm font-medium text-slate-500">
+              <KeyRound class="h-4 w-4" />
+              Active API keys
+            </div>
+            <p class="mt-3 text-2xl font-semibold text-slate-950">{{ activeApiKeysCount }}</p>
+            <p class="mt-2 text-sm text-slate-500">Non-revoked machine access credentials.</p>
+          </div>
+
+          <div class="rounded-[1.75rem] border border-slate-200 bg-white p-5 shadow-sm">
+            <div class="flex items-center gap-2 text-sm font-medium text-slate-500">
+              <Server class="h-4 w-4" />
+              Runtime environment
+            </div>
+            <p class="mt-3 text-2xl font-semibold capitalize text-slate-950">{{ runtime?.environment || '-' }}</p>
+            <p class="mt-2 text-sm text-slate-500">Server time {{ formattedServerTime }}</p>
+          </div>
+        </section>
+
+        <section class="grid gap-6 xl:grid-cols-[1.2fr,0.8fr]">
+          <div class="space-y-6">
+            <div class="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+              <div class="flex items-start justify-between gap-4">
+                <div>
+                  <p class="text-sm font-semibold text-slate-950">Workspace directory</p>
+                  <p class="mt-1 text-sm text-slate-500">Switch operating context or establish a new workspace boundary for a separate team.</p>
+                </div>
+                <ArrowRightLeft class="mt-1 h-5 w-5 text-slate-400" />
+              </div>
+
+              <div class="mt-5 grid gap-3">
+                <button
+                  v-for="workspace in workspaces"
+                  :key="workspace.id"
+                  class="flex items-center justify-between rounded-2xl border px-4 py-4 text-left transition"
+                  :class="workspace.id === activeWorkspace?.id ? 'border-slate-950 bg-slate-950 text-white' : 'border-slate-200 bg-slate-50 text-slate-900 hover:bg-white'"
+                  :disabled="switchingWorkspaceId === workspace.id"
+                  @click="handleWorkspaceSwitch(workspace.id)"
+                >
+                  <div>
+                    <p class="text-sm font-semibold">{{ workspace.name }}</p>
+                    <p :class="workspace.id === activeWorkspace?.id ? 'text-slate-300' : 'text-slate-500'" class="mt-1 text-xs uppercase tracking-[0.18em]">
+                      {{ workspace.role }}
+                    </p>
+                  </div>
+                  <span class="rounded-full px-3 py-1 text-xs font-semibold" :class="workspace.id === activeWorkspace?.id ? 'bg-white/10 text-white' : 'bg-white text-slate-600'">
+                    {{ workspace.id === activeWorkspace?.id ? 'Active' : 'Switch' }}
+                  </span>
+                </button>
+              </div>
+
+              <div class="mt-6 rounded-[1.75rem] border border-slate-200 bg-slate-50 p-4">
+                <div class="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                  <Building2 class="h-4 w-4 text-slate-500" />
+                  Create workspace
+                </div>
+                <div class="mt-4 flex flex-col gap-3 md:flex-row">
+                  <input
+                    v-model="workspaceForm.name"
+                    type="text"
+                    placeholder="Platform Reliability"
+                    class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400"
+                  />
+                  <button
+                    class="inline-flex items-center justify-center rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
+                    @click="handleWorkspaceCreate"
+                  >
+                    Create
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+              <div class="flex items-start justify-between gap-4">
+                <div>
+                  <p class="text-sm font-semibold text-slate-950">Team access</p>
+                  <p class="mt-1 text-sm text-slate-500">Assign operators to the current workspace with explicit ownership and execution privileges.</p>
+                </div>
+                <Users2 class="mt-1 h-5 w-5 text-slate-400" />
+              </div>
+
+              <div class="mt-5 space-y-3">
+                <div
+                  v-for="member in members"
+                  :key="member.membershipId"
+                  class="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 md:flex-row md:items-center md:justify-between"
+                >
+                  <div>
+                    <p class="text-sm font-semibold text-slate-950">{{ member.firstName || member.email }}</p>
+                    <p class="mt-1 text-sm text-slate-500">{{ member.email }}</p>
+                  </div>
+                  <div class="flex items-center gap-3 text-xs uppercase tracking-[0.16em] text-slate-500">
+                    <span class="rounded-full bg-white px-3 py-1.5 font-semibold text-slate-700">{{ member.role }}</span>
+                    <span>Joined {{ new Date(member.createdAt).toLocaleDateString() }}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="mt-6 rounded-[1.75rem] border border-slate-200 bg-slate-50 p-4">
+                <div class="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                  <UserPlus class="h-4 w-4 text-slate-500" />
+                  Add or update member
+                </div>
+                <div class="mt-4 grid gap-3 md:grid-cols-[1.2fr,0.8fr,auto]">
+                  <input
+                    v-model="memberForm.email"
+                    type="email"
+                    placeholder="operator@company.com"
+                    :disabled="!canManageMembers"
+                    class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400 disabled:cursor-not-allowed disabled:bg-slate-100"
+                  />
+                  <select
+                    v-model="memberForm.role"
+                    :disabled="!canManageMembers"
+                    class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400 disabled:cursor-not-allowed disabled:bg-slate-100"
+                  >
+                    <option value="viewer">Viewer</option>
+                    <option value="member">Member</option>
+                    <option value="admin">Admin</option>
+                    <option value="owner">Owner</option>
+                  </select>
+                  <button
+                    class="inline-flex items-center justify-center rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                    :disabled="!canManageMembers"
+                    @click="handleMemberInvite"
+                  >
+                    Save
+                  </button>
+                </div>
+                <p v-if="!canManageMembers" class="mt-3 text-xs text-slate-500">Only workspace admins and owners can change membership.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="space-y-6">
+            <div class="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+              <div class="flex items-start justify-between gap-4">
+                <div>
+                  <p class="text-sm font-semibold text-slate-950">Machine access</p>
+                  <p class="mt-1 text-sm text-slate-500">Issue and revoke API keys for agents, CI jobs, and service integrations.</p>
+                </div>
+                <KeyRound class="mt-1 h-5 w-5 text-slate-400" />
+              </div>
+
+              <div class="mt-5 space-y-3">
+                <div
+                  v-for="key in apiKeys"
+                  :key="key.id"
+                  class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4"
+                >
+                  <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <p class="text-sm font-semibold text-slate-950">{{ key.name }}</p>
+                      <p class="mt-1 text-sm text-slate-500">{{ key.keyPrefix }}</p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <span class="rounded-full px-3 py-1 text-xs font-semibold" :class="key.revokedAt ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'">
+                        {{ key.revokedAt ? 'Revoked' : 'Active' }}
+                      </span>
+                      <button
+                        v-if="!key.revokedAt"
+                        class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-50"
+                        :disabled="!canWriteWorkspace"
+                        @click="handleApiKeyRevoke(key.id)"
+                      >
+                        Revoke
+                      </button>
+                    </div>
+                  </div>
+                  <div class="mt-3 grid gap-2 text-xs text-slate-500">
+                    <p>Created {{ new Date(key.createdAt).toLocaleString() }}</p>
+                    <p v-if="key.lastUsedAt">Last used {{ new Date(key.lastUsedAt).toLocaleString() }}</p>
+                    <p v-if="key.expiresAt">Expires {{ new Date(key.expiresAt).toLocaleString() }}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div class="mt-6 rounded-[1.75rem] border border-slate-200 bg-slate-50 p-4">
+                <div class="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                  <KeyRound class="h-4 w-4 text-slate-500" />
+                  Create API key
+                </div>
+                <div class="mt-4 space-y-3">
+                  <input
+                    v-model="apiKeyForm.name"
+                    type="text"
+                    placeholder="CI deploy runner"
+                    :disabled="!canWriteWorkspace"
+                    class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400 disabled:cursor-not-allowed disabled:bg-slate-100"
+                  />
+                  <input
+                    v-model="apiKeyForm.expiresAt"
+                    type="datetime-local"
+                    :disabled="!canWriteWorkspace"
+                    class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400 disabled:cursor-not-allowed disabled:bg-slate-100"
+                  />
+                  <button
+                    class="inline-flex w-full items-center justify-center rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                    :disabled="!canWriteWorkspace"
+                    @click="handleApiKeyCreate"
+                  >
+                    Create machine credential
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+              <div class="flex items-start justify-between gap-4">
+                <div>
+                  <p class="text-sm font-semibold text-slate-950">Password and session security</p>
+                  <p class="mt-1 text-sm text-slate-500">Rotate the operator password used for interactive access to this control plane.</p>
+                </div>
+                <LockKeyhole class="mt-1 h-5 w-5 text-slate-400" />
+              </div>
+
+              <div class="mt-5 space-y-3">
+                <input
+                  v-model="passwordForm.currentPassword"
+                  type="password"
+                  placeholder="Current password"
+                  class="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400"
+                />
+                <input
+                  v-model="passwordForm.newPassword"
+                  type="password"
+                  placeholder="New password"
+                  class="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400"
+                />
+                <input
+                  v-model="passwordForm.confirmPassword"
+                  type="password"
+                  placeholder="Confirm new password"
+                  class="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400"
+                />
+                <button
+                  class="inline-flex w-full items-center justify-center rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
+                  @click="handlePasswordChange"
+                >
+                  Update password
+                </button>
+              </div>
+            </div>
+
+            <div class="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+              <div class="flex items-start justify-between gap-4">
+                <div>
+                  <p class="text-sm font-semibold text-slate-950">Runtime posture</p>
+                  <p class="mt-1 text-sm text-slate-500">Instance health indicators and registry footprint for this BarqFlow deployment.</p>
+                </div>
+                <ShieldCheck class="mt-1 h-5 w-5 text-slate-400" />
+              </div>
+
+              <div class="mt-5 grid gap-3">
+                <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <div class="flex items-center gap-2 text-sm font-medium text-slate-500">
+                    <Clock3 class="h-4 w-4" />
+                    Server time
+                  </div>
+                  <p class="mt-2 text-base font-semibold text-slate-950">{{ formattedServerTime }}</p>
+                </div>
+                <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <div class="flex items-center gap-2 text-sm font-medium text-slate-500">
+                    <Server class="h-4 w-4" />
+                    Registered node types
+                  </div>
+                  <p class="mt-2 text-base font-semibold text-slate-950">{{ runtime?.nodeTypesCount || 0 }}</p>
+                </div>
+                <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <div class="flex items-center gap-2 text-sm font-medium text-slate-500">
+                    <Workflow class="h-4 w-4" />
+                    Registered credential types
+                  </div>
+                  <p class="mt-2 text-base font-semibold text-slate-950">{{ runtime?.credentialTypesCount || 0 }}</p>
+                </div>
+                <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <div class="flex items-center gap-2 text-sm font-medium text-slate-500">
+                    <AlertTriangle class="h-4 w-4" />
+                    Encryption key status
+                  </div>
+                  <p class="mt-2 inline-flex items-center gap-2 text-base font-semibold" :class="runtime?.encryptionKeyConfigured ? 'text-emerald-700' : 'text-red-700'">
+                    <CheckCircle2 v-if="runtime?.encryptionKeyConfigured" class="h-4 w-4" />
+                    <AlertTriangle v-else class="h-4 w-4" />
+                    {{ runtime?.encryptionKeyConfigured ? 'Configured' : 'Missing' }}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </template>
     </div>
   </div>
 </template>
