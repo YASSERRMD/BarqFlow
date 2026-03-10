@@ -1,233 +1,274 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { Plus, Search, Shield, Key, Lock, X, Trash2, Edit2, FlaskConical, CheckCircle2, XCircle, Loader2 } from 'lucide-vue-next'
+import { useRoute, useRouter } from 'vue-router'
+import {
+  ArrowRight,
+  CheckCircle2,
+  ExternalLink,
+  FlaskConical,
+  KeyRound,
+  Loader2,
+  Pencil,
+  PlugZap,
+  Plus,
+  RefreshCcw,
+  Search,
+  Shield,
+  Shuffle,
+  Trash2,
+  X,
+  XCircle,
+} from 'lucide-vue-next'
 import {
   createCredential,
   deleteCredentialById,
   listCredentials,
   listCredentialTypes,
+  rotateCredential,
+  startCredentialOAuthConnect,
   testCredentialType,
   testSavedCredentialById,
   updateCredential,
 } from '../features/credentials/api'
+import {
+  CREDENTIAL_QUICK_STARTS,
+  credentialAuthKind,
+  credentialStatusPresentation,
+  credentialSupportsOAuthConnect,
+  formatDateTime,
+  formatRelativeTime,
+  isSecretCredentialField,
+} from '../features/credentials/helpers'
+import type {
+  CredentialSummary,
+  CredentialTypeContract,
+  CredentialValidationResult,
+  NodeProperty,
+} from '../types/contracts'
 
-const credentials = ref<any[]>([])
-const credentialTypes = ref<any[]>([])
+const route = useRoute()
+const router = useRouter()
 
-const categories = ['All', 'Database', 'Messaging', 'AI', 'Marketing', 'Storage']
-const activeCategory = ref('All')
+const credentials = ref<CredentialSummary[]>([])
+const credentialTypes = ref<CredentialTypeContract[]>([])
+const credentialsLoading = ref(false)
+const credentialTypesLoading = ref(false)
+const pageError = ref<string | null>(null)
+const pageNotice = ref<string | null>(null)
+
 const searchTerm = ref('')
+const authFilter = ref<'all' | 'oauth' | 'token' | 'database' | 'custom'>('all')
+const statusFilter = ref<'all' | 'validated' | 'attention' | 'untested'>('all')
 
 const isModalOpen = ref(false)
-const isEditMode = ref(false)
+const modalMode = ref<'create' | 'edit' | 'rotate'>('create')
 const editingCredentialId = ref<string | null>(null)
-const selectedType = ref<any>(null)
-const newCredentialData = ref<any>({})
-const newCredentialName = ref('')
-
-const saveLoading = ref(false)
-const testLoading = ref(false)
-const rowTestLoading = ref<Record<string, boolean>>({})
-const rowTestResult = ref<
-  Record<string, { status: 'valid' | 'invalid' | 'error'; message: string }>
->({})
+const selectedTypeName = ref('')
+const draftCredentialName = ref('')
+const draftCredentialData = ref<Record<string, unknown>>({})
 const modalError = ref<string | null>(null)
 const modalSuccess = ref<string | null>(null)
-const lastTestValid = ref<boolean | null>(null)
+const draftValidation = ref<CredentialValidationResult | null>(null)
+const saveLoading = ref(false)
+const testLoading = ref(false)
+const rowLoading = ref<Record<string, string>>({})
+const routedIntentHandled = ref('')
+
+const credentialTypeMap = computed(() => {
+  return new Map(credentialTypes.value.map((type) => [type.name, type]))
+})
+
+const selectedType = computed(() => {
+  return credentialTypeMap.value.get(selectedTypeName.value) || null
+})
+
+const quickStarts = computed(() => {
+  return CREDENTIAL_QUICK_STARTS.map((entry) => ({
+    ...entry,
+    type: credentialTypeMap.value.get(entry.credentialType) || null,
+  })).filter((entry) => entry.type)
+})
+
+const requestedCredentialType = computed(() => {
+  const raw = route.query.credentialType ?? route.query.type
+  return typeof raw === 'string' ? raw.trim() : ''
+})
+
+const requestedReturnTo = computed(() => {
+  const raw = route.query.returnTo
+  return typeof raw === 'string' && raw.trim() ? raw.trim() : null
+})
+
+const requestedNodeName = computed(() => {
+  const raw = route.query.nodeName ?? route.query.nodeId
+  return typeof raw === 'string' && raw.trim() ? raw.trim() : null
+})
+
+const selectedTypeAuthKind = computed(() => credentialAuthKind(selectedType.value))
+const canConnectSelectedType = computed(() => credentialSupportsOAuthConnect(selectedType.value))
+const isCreateMode = computed(() => modalMode.value === 'create')
+const isEditMode = computed(() => modalMode.value === 'edit')
+const isRotateMode = computed(() => modalMode.value === 'rotate')
 
 const filteredCredentials = computed(() => {
   const query = searchTerm.value.trim().toLowerCase()
-  return credentials.value.filter((cred) => {
-    const type = (cred.credentialType || '').toLowerCase()
-    const name = (cred.name || '').toLowerCase()
-    const matchesCategory =
-      activeCategory.value === 'All' ||
-      type.includes(activeCategory.value.toLowerCase())
-    const matchesQuery =
-      query.length === 0 || name.includes(query) || type.includes(query)
 
-    return matchesCategory && matchesQuery
+  return credentials.value.filter((credential) => {
+    const credentialType = credentialTypeMap.value.get(credential.credentialType) || null
+    const authKind = credentialAuthKind(credentialType)
+    const status = credentialStatusPresentation(credential, credentialType)
+    const matchesQuery =
+      query.length === 0 ||
+      credential.name.toLowerCase().includes(query) ||
+      credential.credentialType.toLowerCase().includes(query) ||
+      status.detail.toLowerCase().includes(query)
+    const matchesAuth = authFilter.value === 'all' || authKind === authFilter.value
+    const matchesStatus =
+      statusFilter.value === 'all' ||
+      (statusFilter.value === 'validated' && status.label === 'Validated') ||
+      (statusFilter.value === 'validated' && status.label === 'Connected') ||
+      (statusFilter.value === 'attention' && ['Needs Fix', 'Test Error', 'Retest Required'].includes(status.label)) ||
+      (statusFilter.value === 'untested' && status.label === 'Saved')
+
+    return matchesQuery && matchesAuth && matchesStatus
   })
 })
 
-function formatRelativeTime(iso?: string | null): string {
-  if (!iso) return 'Never used'
-
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return 'Never used'
-
-  const diffSeconds = Math.floor((date.getTime() - Date.now()) / 1000)
-  const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' })
-  const absSeconds = Math.abs(diffSeconds)
-
-  if (absSeconds < 60) return rtf.format(diffSeconds, 'second')
-
-  const diffMinutes = Math.floor(diffSeconds / 60)
-  if (Math.abs(diffMinutes) < 60) return rtf.format(diffMinutes, 'minute')
-
-  const diffHours = Math.floor(diffMinutes / 60)
-  if (Math.abs(diffHours) < 24) return rtf.format(diffHours, 'hour')
-
-  const diffDays = Math.floor(diffHours / 24)
-  if (Math.abs(diffDays) < 30) return rtf.format(diffDays, 'day')
-
-  return date.toLocaleDateString()
+function oauthRedirectUri(): string {
+  return `${window.location.origin}/rest/oauth2-credential/callback`
 }
 
-function credentialLastUsedIso(cred: any): string | null {
-  return cred?.lastUsedAt || cred?.updatedAt || cred?.createdAt || null
+function cloneDefaultValue<T>(value: T): T {
+  if (value === undefined || value === null) return value
+  return JSON.parse(JSON.stringify(value)) as T
 }
 
-function credentialLastUsedLabel(cred: any): string {
-  return formatRelativeTime(credentialLastUsedIso(cred))
+function typeLabel(typeName: string): string {
+  return credentialTypeMap.value.get(typeName)?.displayName || typeName
 }
 
-function credentialLastUsedTitle(cred: any): string {
-  const iso = credentialLastUsedIso(cred)
-  if (!iso) return 'Never used'
-
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return 'Never used'
-  return date.toLocaleString()
+function authKindLabel(type: CredentialTypeContract | null): string {
+  switch (credentialAuthKind(type)) {
+    case 'oauth':
+      return 'OAuth2'
+    case 'token':
+      return 'Token'
+    case 'database':
+      return 'Database'
+    default:
+      return 'Custom'
+  }
 }
-
-watch(
-  () => JSON.stringify(newCredentialData.value),
-  () => {
-    if (lastTestValid.value !== null) {
-      lastTestValid.value = null
-      modalSuccess.value = null
-    }
-  },
-)
-
-onMounted(async () => {
-  await fetchCredentials()
-  await fetchCredentialTypes()
-})
 
 function resetModalState() {
   modalError.value = null
   modalSuccess.value = null
-  lastTestValid.value = null
+  draftValidation.value = null
 }
 
-function openCreateModal() {
-  isModalOpen.value = true
-  isEditMode.value = false
-  editingCredentialId.value = null
-  selectedType.value = null
-  newCredentialData.value = {}
-  newCredentialName.value = ''
-  resetModalState()
-}
+function buildDraftForType(type: CredentialTypeContract, mode: 'create' | 'edit' | 'rotate') {
+  const draft: Record<string, unknown> = {}
 
-function credentialTypeName(cred: any): string {
-  return String(cred?.credentialType || '')
-}
-
-async function openEditModal(cred: any) {
-  if (credentialTypes.value.length === 0) {
-    await fetchCredentialTypes()
-  }
-
-  const credType = credentialTypeName(cred)
-  const matchedType = credentialTypes.value.find((type: any) => type.name === credType)
-
-  isModalOpen.value = true
-  isEditMode.value = true
-  editingCredentialId.value = String(cred.id)
-  selectedType.value =
-    matchedType ||
-    ({
-      name: credType,
-      displayName: credType,
-      properties: [],
-    } as any)
-  newCredentialName.value = String(cred.name || '')
-  newCredentialData.value = {}
-  resetModalState()
-}
-
-function chooseType(type: any) {
-  selectedType.value = type
-  newCredentialData.value = {}
-  resetModalState()
-}
-
-function changeType() {
-  selectedType.value = null
-  newCredentialData.value = {}
-  resetModalState()
-}
-
-async function fetchCredentials() {
-  try {
-    const res = await listCredentials()
-    credentials.value = res.data
-  } catch (err) {
-    console.error(err)
-  }
-}
-
-function credentialRuntimeStatus(
-  credId: string,
-): { label: string; dotClass: string; textClass: string; title: string } {
-  const result = rowTestResult.value[credId]
-  if (!result) {
-    return {
-      label: 'Saved',
-      dotClass: 'bg-green-500',
-      textClass: 'text-green-600',
-      title: 'Credential is saved. Click Test to verify runtime connectivity.',
+  if (mode === 'create') {
+    for (const property of type.properties || []) {
+      if (property.default !== undefined) {
+        draft[property.name] = cloneDefaultValue(property.default)
+      }
     }
   }
 
-  if (result.status === 'valid') {
-    return {
-      label: 'Validated',
-      dotClass: 'bg-emerald-500',
-      textClass: 'text-emerald-600',
-      title: result.message,
-    }
+  if (credentialSupportsOAuthConnect(type) && draft.redirectUri === undefined) {
+    draft.redirectUri = oauthRedirectUri()
   }
 
-  if (result.status === 'invalid') {
-    return {
-      label: 'Invalid',
-      dotClass: 'bg-red-500',
-      textClass: 'text-red-600',
-      title: result.message,
-    }
-  }
-
-  return {
-    label: 'Error',
-    dotClass: 'bg-amber-500',
-    textClass: 'text-amber-600',
-    title: result.message,
-  }
+  return draft
 }
 
-function compactCredentialData(raw: Record<string, any>) {
-  const compacted: Record<string, any> = {}
+function compactCredentialData(raw: Record<string, unknown>) {
+  const compacted: Record<string, unknown> = {}
+
   Object.entries(raw || {}).forEach(([key, value]) => {
     if (value === undefined) return
+    if (typeof value === 'string' && value.trim().length === 0) return
     compacted[key] = value
   })
+
   return compacted
 }
 
-async function fetchCredentialTypes() {
+function rowActionState(id: string, action: string) {
+  return rowLoading.value[id] === action
+}
+
+function openCreateModal(typeName?: string) {
+  modalMode.value = 'create'
+  editingCredentialId.value = null
+  selectedTypeName.value = typeName || ''
+  draftCredentialName.value = ''
+  draftCredentialData.value = selectedTypeName.value && selectedType.value
+    ? buildDraftForType(selectedType.value, 'create')
+    : {}
+  resetModalState()
+  isModalOpen.value = true
+}
+
+function openEditModal(credential: CredentialSummary, mode: 'edit' | 'rotate' = 'edit') {
+  const matchedType = credentialTypeMap.value.get(credential.credentialType)
+  modalMode.value = mode
+  editingCredentialId.value = credential.id
+  selectedTypeName.value = credential.credentialType
+  draftCredentialName.value = credential.name
+  draftCredentialData.value = matchedType ? buildDraftForType(matchedType, mode) : {}
+  resetModalState()
+  isModalOpen.value = true
+}
+
+function closeModal() {
+  isModalOpen.value = false
+  editingCredentialId.value = null
+  selectedTypeName.value = ''
+  draftCredentialName.value = ''
+  draftCredentialData.value = {}
+  resetModalState()
+}
+
+function chooseCredentialType(typeName: string) {
+  selectedTypeName.value = typeName
+  const matchedType = credentialTypeMap.value.get(typeName)
+  draftCredentialData.value = matchedType ? buildDraftForType(matchedType, modalMode.value) : {}
+  draftValidation.value = null
+  modalError.value = null
+  modalSuccess.value = null
+}
+
+async function fetchCredentials() {
+  credentialsLoading.value = true
+  pageError.value = null
+
   try {
-    const res = await listCredentialTypes()
-    credentialTypes.value = res.data
-  } catch (err) {
-    console.error(err)
+    const response = await listCredentials()
+    credentials.value = response.data
+  } catch (error: any) {
+    pageError.value = error?.response?.data || error?.message || 'Failed to load credentials.'
+  } finally {
+    credentialsLoading.value = false
   }
 }
 
-async function testCredential() {
+async function fetchCredentialTypes() {
+  credentialTypesLoading.value = true
+
+  try {
+    const response = await listCredentialTypes()
+    credentialTypes.value = response.data
+  } catch (error: any) {
+    pageError.value = error?.response?.data || error?.message || 'Failed to load credential types.'
+  } finally {
+    credentialTypesLoading.value = false
+  }
+}
+
+async function testDraftCredential() {
   if (!selectedType.value) return
 
   testLoading.value = true
@@ -235,31 +276,110 @@ async function testCredential() {
   modalSuccess.value = null
 
   try {
-    const res = await testCredentialType({
+    const response = await testCredentialType({
       credentialType: selectedType.value.name,
-      data: newCredentialData.value,
+      data: compactCredentialData(draftCredentialData.value),
     })
 
-    if (res.data?.valid) {
-      lastTestValid.value = true
-      modalSuccess.value = 'Credential test passed.'
+    draftValidation.value = response.data
+    if (response.data.valid) {
+      modalSuccess.value = response.data.message
     } else {
-      lastTestValid.value = false
-      modalError.value = 'Credential test failed.'
+      modalError.value = response.data.message
     }
-  } catch (err: any) {
-    lastTestValid.value = false
-    modalError.value = err?.response?.data || err?.message || 'Credential test failed.'
+  } catch (error: any) {
+    modalError.value = error?.response?.data || error?.message || 'Credential validation failed.'
+    draftValidation.value = {
+      valid: false,
+      status: 'error',
+      message: modalError.value || 'Credential validation failed.',
+    }
   } finally {
     testLoading.value = false
   }
 }
 
-async function saveCredential() {
-  if (!selectedType.value || !newCredentialName.value) return
+function setRowLoading(id: string, action: string | null) {
+  rowLoading.value = {
+    ...rowLoading.value,
+    [id]: action || '',
+  }
+}
 
-  if (!isEditMode.value && lastTestValid.value !== true) {
-    modalError.value = 'Run and pass credential test before saving.'
+async function openOAuthPopup(connectUrl: string) {
+  return new Promise<{ success: boolean; credentialId?: string; message: string }>((resolve, reject) => {
+    const popup = window.open(connectUrl, 'barqflow-oauth-connect', 'width=640,height=760,noopener=no,noreferrer=no')
+    if (!popup) {
+      reject(new Error('Popup blocked. Allow popups and try again.'))
+      return
+    }
+
+    let settled = false
+    let closeTimer = 0
+
+    const cleanup = () => {
+      window.removeEventListener('message', onMessage)
+      if (closeTimer) {
+        window.clearInterval(closeTimer)
+      }
+    }
+
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return
+      if (!event.data || event.data.source !== 'barqflow-oauth2') return
+
+      settled = true
+      cleanup()
+      resolve({
+        success: !!event.data.success,
+        credentialId: event.data.credentialId || undefined,
+        message: String(event.data.message || ''),
+      })
+    }
+
+    window.addEventListener('message', onMessage)
+    closeTimer = window.setInterval(() => {
+      if (!popup || popup.closed) {
+        cleanup()
+        if (!settled) {
+          reject(new Error('OAuth popup closed before the connection completed.'))
+        }
+      }
+    }, 400)
+  })
+}
+
+async function connectCredential(credential: CredentialSummary) {
+  const credentialType = credentialTypeMap.value.get(credential.credentialType) || null
+  if (!credentialSupportsOAuthConnect(credentialType)) {
+    pageNotice.value = `${credential.name} uses a manual credential flow. Save the values directly instead.`
+    return
+  }
+
+  setRowLoading(credential.id, 'connect')
+  pageError.value = null
+  pageNotice.value = null
+
+  try {
+    const response = await startCredentialOAuthConnect(credential.id)
+    const result = await openOAuthPopup(response.data.connectUrl)
+    await fetchCredentials()
+
+    if (!result.success) {
+      throw new Error(result.message || 'OAuth connection failed.')
+    }
+
+    pageNotice.value = result.message || `${credential.name} connected successfully.`
+  } catch (error: any) {
+    pageError.value = error?.message || 'OAuth connection failed.'
+  } finally {
+    setRowLoading(credential.id, null)
+  }
+}
+
+async function saveCredential(action: 'save' | 'connect') {
+  if (!selectedType.value || !draftCredentialName.value.trim()) {
+    modalError.value = 'Credential name is required.'
     return
   }
 
@@ -268,317 +388,655 @@ async function saveCredential() {
   modalSuccess.value = null
 
   try {
-    const dataPayload = compactCredentialData(newCredentialData.value)
-
-    if (isEditMode.value) {
-      if (!editingCredentialId.value) {
-        throw new Error('Missing credential id for edit operation')
-      }
-
-      await updateCredential(editingCredentialId.value, {
-        name: newCredentialName.value,
-        data: dataPayload,
-      })
-    } else {
-      await createCredential({
-        name: newCredentialName.value,
-        credentialType: selectedType.value.name,
-        data: dataPayload,
-      })
+    const payload = {
+      name: draftCredentialName.value.trim(),
+      data: compactCredentialData(draftCredentialData.value),
     }
 
-    isModalOpen.value = false
-    isEditMode.value = false
-    editingCredentialId.value = null
-    newCredentialData.value = {}
-    newCredentialName.value = ''
-    selectedType.value = null
-    resetModalState()
+    let saved: CredentialSummary
+
+    if (modalMode.value === 'edit') {
+      if (!editingCredentialId.value) throw new Error('Missing credential id for update.')
+      const response = await updateCredential(editingCredentialId.value, payload)
+      saved = response.data
+    } else if (modalMode.value === 'rotate') {
+      if (!editingCredentialId.value) throw new Error('Missing credential id for rotation.')
+      const response = await rotateCredential(editingCredentialId.value, payload)
+      saved = response.data
+    } else {
+      const response = await createCredential({
+        name: payload.name,
+        credentialType: selectedType.value.name,
+        data: payload.data,
+      })
+      saved = response.data
+    }
+
     await fetchCredentials()
-  } catch (err: any) {
-    modalError.value = err?.response?.data || err?.message || 'Failed to save credential.'
+    const successMessage =
+      modalMode.value === 'rotate'
+        ? 'Credential rotated. Re-test or reconnect it before production use.'
+        : modalMode.value === 'edit'
+          ? 'Credential updated.'
+          : 'Credential saved.'
+    modalSuccess.value = successMessage
+
+    const shouldConnect = action === 'connect' && credentialSupportsOAuthConnect(selectedType.value)
+    closeModal()
+
+    if (shouldConnect) {
+      await connectCredential(saved)
+      return
+    }
+
+    pageNotice.value = successMessage
+  } catch (error: any) {
+    modalError.value = error?.response?.data || error?.message || 'Failed to save credential.'
   } finally {
     saveLoading.value = false
   }
 }
 
-async function testSavedCredential(id: string) {
-  rowTestLoading.value = {
-    ...rowTestLoading.value,
-    [id]: true,
-  }
+async function testSavedCredential(credential: CredentialSummary) {
+  setRowLoading(credential.id, 'test')
+  pageError.value = null
+  pageNotice.value = null
 
   try {
-    const res = await testSavedCredentialById(id)
-    const valid = !!res.data?.valid
-    rowTestResult.value = {
-      ...rowTestResult.value,
-      [id]: {
-        status: valid ? 'valid' : 'invalid',
-        message: valid
-          ? 'Credential runtime test passed.'
-          : 'Credential runtime test returned invalid.',
-      },
-    }
-  } catch (err: any) {
-    rowTestResult.value = {
-      ...rowTestResult.value,
-      [id]: {
-        status: 'error',
-        message: err?.response?.data || err?.message || 'Credential runtime test failed.',
-      },
-    }
+    const response = await testSavedCredentialById(credential.id)
+    await fetchCredentials()
+    pageNotice.value = response.data.message
+  } catch (error: any) {
+    pageError.value = error?.response?.data || error?.message || 'Credential validation failed.'
   } finally {
-    rowTestLoading.value = {
-      ...rowTestLoading.value,
-      [id]: false,
-    }
+    setRowLoading(credential.id, null)
   }
 }
 
-async function deleteCredential(id: string) {
-  const confirmed = window.confirm('Delete this credential?')
+async function deleteCredential(credential: CredentialSummary) {
+  const confirmed = window.confirm(`Delete credential \"${credential.name}\"?`)
   if (!confirmed) return
 
+  setRowLoading(credential.id, 'delete')
+  pageError.value = null
+  pageNotice.value = null
+
   try {
-    await deleteCredentialById(id)
-    credentials.value = credentials.value.filter((c) => c.id !== id)
-    delete rowTestResult.value[id]
-    delete rowTestLoading.value[id]
-  } catch (err) {
-    console.error('Failed to delete credential', err)
+    await deleteCredentialById(credential.id)
+    credentials.value = credentials.value.filter((entry) => entry.id !== credential.id)
+    pageNotice.value = `${credential.name} deleted.`
+  } catch (error: any) {
+    pageError.value = error?.response?.data || error?.message || 'Failed to delete credential.'
+  } finally {
+    setRowLoading(credential.id, null)
   }
 }
+
+function updateDraftField(property: NodeProperty, value: unknown) {
+  draftCredentialData.value = {
+    ...draftCredentialData.value,
+    [property.name]: value,
+  }
+  draftValidation.value = null
+  modalSuccess.value = null
+}
+
+function credentialCardTitle(credential: CredentialSummary) {
+  const type = credentialTypeMap.value.get(credential.credentialType) || null
+  return `${credential.name}`
+}
+
+function returnToWorkflow() {
+  if (!requestedReturnTo.value) return
+  router.push(requestedReturnTo.value)
+}
+
+watch(
+  () => route.fullPath,
+  () => {
+    const intentKey = `${requestedCredentialType.value}:${requestedReturnTo.value || ''}:${requestedNodeName.value || ''}`
+    if (!requestedCredentialType.value || credentialTypes.value.length === 0) return
+    if (routedIntentHandled.value === intentKey) return
+
+    routedIntentHandled.value = intentKey
+    openCreateModal(requestedCredentialType.value)
+    pageNotice.value = requestedNodeName.value
+      ? `Create a ${typeLabel(requestedCredentialType.value)} credential for ${requestedNodeName.value}, then return to keep binding the node.`
+      : `Create a ${typeLabel(requestedCredentialType.value)} credential, then return to continue.`
+  },
+)
+
+onMounted(async () => {
+  await Promise.all([fetchCredentials(), fetchCredentialTypes()])
+})
 </script>
 
 <template>
-  <div class="h-full bg-slate-50/50 overflow-auto p-6 md:p-10 text-slate-900">
-    <div class="max-w-6xl mx-auto">
-      <div class="flex flex-col md:flex-row md:items-end justify-between mb-10 gap-6">
-        <div>
-          <h1 class="text-4xl font-extrabold text-slate-900 tracking-tight">Credentials</h1>
-          <p class="text-slate-500 text-lg mt-2 font-medium">Securely managed keys and OAuth tokens for your integrations.</p>
+  <div class="min-h-full bg-slate-50 p-6 text-slate-900 md:p-10">
+    <div class="mx-auto max-w-7xl space-y-8">
+      <section class="rounded-[28px] border border-slate-200 bg-white p-8 shadow-sm shadow-slate-200/50">
+        <div class="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+          <div class="max-w-3xl space-y-3">
+            <div class="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-bold uppercase tracking-[0.22em] text-slate-500">
+              <Shield class="h-3.5 w-3.5" />
+              Credential Management
+            </div>
+            <div>
+              <h1 class="text-4xl font-black tracking-tight text-slate-950">Credential Inventory and Access</h1>
+              <p class="mt-3 text-base text-slate-600 md:text-lg">
+                Manage tokens, database access, and OAuth connections with validation state,
+                usage telemetry, and reusable workflow bindings.
+              </p>
+            </div>
+          </div>
+
+          <div class="flex flex-wrap gap-3">
+            <button
+              type="button"
+              class="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+              @click="fetchCredentials"
+            >
+              <RefreshCcw class="h-4 w-4" />
+              Refresh
+            </button>
+            <button
+              type="button"
+              class="inline-flex items-center gap-2 rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-slate-950/10 transition hover:-translate-y-0.5 hover:bg-slate-800"
+              @click="openCreateModal()"
+            >
+              <Plus class="h-4 w-4" />
+              New Credential
+            </button>
+          </div>
         </div>
 
-        <button
-          @click="openCreateModal"
-          class="bg-brand-500 hover:bg-brand-600 text-white px-6 py-3.5 rounded-2xl flex items-center gap-2.5 shadow-xl shadow-brand-500/20 transition-all hover:-translate-y-1 active:translate-y-0 font-bold"
-        >
-          <Plus class="w-5 h-5" /> Add Credential
-        </button>
-      </div>
-
-      <div class="flex flex-col md:flex-row gap-6 mb-8 items-center">
-        <div class="flex gap-2 overflow-x-auto pb-2 w-full md:w-auto">
+        <div v-if="requestedReturnTo" class="mt-6 flex flex-col gap-4 rounded-2xl border border-brand-200 bg-brand-50 px-5 py-4 text-sm text-brand-900 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p class="font-semibold">Workflow setup handoff</p>
+            <p class="mt-1 text-brand-800/80">
+              {{ pageNotice || 'Create the credential, then return to finish binding it in the editor.' }}
+            </p>
+          </div>
           <button
-            v-for="cat in categories"
-            :key="cat"
-            @click="activeCategory = cat"
-            :class="[
-              activeCategory === cat ? 'bg-slate-900 text-white shadow-lg' : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200',
-              'px-5 py-2.5 rounded-xl text-sm font-bold transition-all whitespace-nowrap'
-            ]"
+            type="button"
+            class="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 font-semibold text-brand-900 shadow-sm transition hover:bg-brand-100"
+            @click="returnToWorkflow"
           >
-            {{ cat }}
+            Back To Workflow
+            <ArrowRight class="h-4 w-4" />
           </button>
         </div>
 
-        <div class="flex-1 relative group w-full md:w-auto">
-          <Search class="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-brand-500 transition-colors" />
-          <input
-            v-model="searchTerm"
-            type="text"
-            placeholder="Search credentials..."
-            class="w-full pl-12 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500 transition-all font-medium"
-          />
-        </div>
-      </div>
+        <div class="mt-6 grid gap-4 md:grid-cols-[minmax(0,1fr)_auto_auto]">
+          <label class="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+            <Search class="h-4 w-4 text-slate-400" />
+            <input
+              v-model="searchTerm"
+              type="text"
+              placeholder="Search credentials, types, or validation notes"
+              class="w-full bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
+            />
+          </label>
 
-      <div class="bg-white/80 backdrop-blur-md border border-slate-200 rounded-3xl overflow-hidden shadow-sm">
-        <table class="w-full text-left border-collapse">
-          <thead>
-            <tr class="bg-slate-50/50 border-b border-slate-100">
-              <th class="px-8 py-5 text-xs font-bold text-slate-400 uppercase tracking-widest">Name</th>
-              <th class="px-8 py-5 text-xs font-bold text-slate-400 uppercase tracking-widest">Type</th>
-              <th class="px-8 py-5 text-xs font-bold text-slate-400 uppercase tracking-widest">Status</th>
-              <th class="px-8 py-5 text-xs font-bold text-slate-400 uppercase tracking-widest">Last Used</th>
-              <th class="px-8 py-5 text-xs font-bold text-slate-400 uppercase tracking-widest text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-slate-100">
-            <tr v-for="cred in filteredCredentials" :key="cred.id" class="hover:bg-slate-50/50 transition-colors group">
-              <td class="px-8 py-6">
-                <div class="flex items-center gap-4">
-                  <div class="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-500 group-hover:bg-brand-50 group-hover:text-brand-600 transition-colors">
-                    <Key v-if="cred.credentialType !== 'Database'" class="w-5 h-5" />
-                    <Shield v-else class="w-5 h-5" />
-                  </div>
-                  <span class="font-bold text-slate-800 group-hover:text-brand-600 transition-colors">{{ cred.name }}</span>
-                </div>
-              </td>
-              <td class="px-8 py-6">
-                <span class="text-sm font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-lg">{{ cred.credentialType }}</span>
-              </td>
-              <td class="px-8 py-6">
-                <div class="flex items-center gap-2" :title="credentialRuntimeStatus(cred.id).title">
-                  <div
-                    class="w-2 h-2 rounded-full"
-                    :class="credentialRuntimeStatus(cred.id).dotClass"
-                  />
+          <select
+            v-model="authFilter"
+            class="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 outline-none transition focus:border-brand-500"
+          >
+            <option value="all">All auth modes</option>
+            <option value="oauth">OAuth2</option>
+            <option value="token">Token</option>
+            <option value="database">Database</option>
+            <option value="custom">Custom</option>
+          </select>
+
+          <select
+            v-model="statusFilter"
+            class="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 outline-none transition focus:border-brand-500"
+          >
+            <option value="all">All statuses</option>
+            <option value="validated">Validated / Connected</option>
+            <option value="attention">Needs attention</option>
+            <option value="untested">Untested</option>
+          </select>
+        </div>
+
+        <div v-if="pageError" class="mt-6 flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <XCircle class="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{{ pageError }}</span>
+        </div>
+        <div v-else-if="pageNotice" class="mt-6 flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+          <CheckCircle2 class="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{{ pageNotice }}</span>
+        </div>
+      </section>
+
+      <section class="grid gap-4 lg:grid-cols-5">
+        <button
+          v-for="quickStart in quickStarts"
+          :key="quickStart.credentialType"
+          type="button"
+          class="group rounded-[24px] border border-slate-200 bg-white p-5 text-left shadow-sm shadow-slate-200/50 transition hover:-translate-y-1 hover:border-slate-300 hover:shadow-lg hover:shadow-slate-300/30"
+          @click="openCreateModal(quickStart.credentialType)"
+        >
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <p class="text-sm font-semibold text-slate-500">{{ quickStart.title }}</p>
+              <h2 class="mt-1 text-lg font-black text-slate-950">{{ typeLabel(quickStart.credentialType) }}</h2>
+            </div>
+            <span class="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">
+              {{ authKindLabel(quickStart.type) }}
+            </span>
+          </div>
+          <p class="mt-4 text-sm leading-6 text-slate-600">{{ quickStart.summary }}</p>
+          <p class="mt-3 text-xs font-medium uppercase tracking-[0.18em] text-slate-400">
+            {{ quickStart.highlight }}
+          </p>
+          <div class="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-slate-900">
+            {{ credentialSupportsOAuthConnect(quickStart.type) ? 'Save And Connect' : 'Create Credential' }}
+            <ArrowRight class="h-4 w-4 transition group-hover:translate-x-1" />
+          </div>
+        </button>
+      </section>
+
+      <section class="space-y-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-xl font-black text-slate-950">Saved Credentials</h2>
+            <p class="mt-1 text-sm text-slate-500">
+              {{ filteredCredentials.length }} of {{ credentials.length }} credential{{ credentials.length === 1 ? '' : 's' }} visible.
+            </p>
+          </div>
+        </div>
+
+        <div v-if="credentialsLoading" class="flex items-center gap-3 rounded-[24px] border border-slate-200 bg-white px-5 py-6 text-sm text-slate-500 shadow-sm shadow-slate-200/40">
+          <Loader2 class="h-4 w-4 animate-spin" />
+          Loading credentials...
+        </div>
+
+        <div v-else-if="filteredCredentials.length === 0" class="rounded-[24px] border border-dashed border-slate-300 bg-white px-6 py-16 text-center shadow-sm shadow-slate-200/40">
+          <KeyRound class="mx-auto h-8 w-8 text-slate-300" />
+          <h3 class="mt-4 text-lg font-bold text-slate-900">No credentials match this view.</h3>
+          <p class="mt-2 text-sm text-slate-500">
+            Adjust the filters or create a new credential to start binding integrations.
+          </p>
+        </div>
+
+        <div v-else class="grid gap-4 xl:grid-cols-2">
+          <article
+            v-for="credential in filteredCredentials"
+            :key="credential.id"
+            class="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm shadow-slate-200/40"
+          >
+            <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div class="space-y-3">
+                <div class="flex flex-wrap items-center gap-2">
+                  <h3 class="text-lg font-black text-slate-950">{{ credentialCardTitle(credential) }}</h3>
                   <span
-                    class="text-sm font-bold capitalize"
-                    :class="credentialRuntimeStatus(cred.id).textClass"
+                    class="rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em]"
+                    :class="credentialStatusPresentation(credential, credentialTypeMap.get(credential.credentialType) || null).badgeClass"
                   >
-                    {{ credentialRuntimeStatus(cred.id).label }}
+                    {{ credentialStatusPresentation(credential, credentialTypeMap.get(credential.credentialType) || null).label }}
+                  </span>
+                  <span class="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">
+                    {{ authKindLabel(credentialTypeMap.get(credential.credentialType) || null) }}
                   </span>
                 </div>
-              </td>
-              <td class="px-8 py-6">
-                <span class="text-sm font-medium text-slate-400" :title="credentialLastUsedTitle(cred)">
-                  {{ credentialLastUsedLabel(cred) }}
-                </span>
-              </td>
-              <td class="px-8 py-6 text-right">
-                <div class="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button
-                    @click="testSavedCredential(cred.id)"
-                    :disabled="rowTestLoading[cred.id]"
-                    class="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <Loader2 v-if="rowTestLoading[cred.id]" class="w-4 h-4 animate-spin" />
-                    <FlaskConical v-else class="w-4 h-4" />
-                  </button>
-                  <button @click="openEditModal(cred)" class="p-2 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-all"><Edit2 class="w-4 h-4" /></button>
-                  <button @click="deleteCredential(cred.id)" class="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"><Trash2 class="w-4 h-4" /></button>
+                <div>
+                  <p class="text-sm font-semibold text-slate-700">{{ typeLabel(credential.credentialType) }}</p>
+                  <p class="mt-1 text-sm text-slate-500">
+                    {{ credentialStatusPresentation(credential, credentialTypeMap.get(credential.credentialType) || null).detail }}
+                  </p>
                 </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+              </div>
 
-      <div class="mt-8 bg-brand-50 border border-brand-100 rounded-2xl p-6 flex gap-4 items-start">
-        <div class="w-10 h-10 bg-brand-100 rounded-xl flex items-center justify-center text-brand-600 shrink-0">
-          <Lock class="w-5 h-5" />
+              <div class="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                  :disabled="rowActionState(credential.id, 'test')"
+                  @click="testSavedCredential(credential)"
+                >
+                  <Loader2 v-if="rowActionState(credential.id, 'test')" class="h-4 w-4 animate-spin" />
+                  <FlaskConical v-else class="h-4 w-4" />
+                  Test
+                </button>
+                <button
+                  v-if="credentialSupportsOAuthConnect(credentialTypeMap.get(credential.credentialType) || null)"
+                  type="button"
+                  class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                  :disabled="rowActionState(credential.id, 'connect')"
+                  @click="connectCredential(credential)"
+                >
+                  <Loader2 v-if="rowActionState(credential.id, 'connect')" class="h-4 w-4 animate-spin" />
+                  <PlugZap v-else class="h-4 w-4" />
+                  Connect
+                </button>
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                  @click="openEditModal(credential, 'edit')"
+                >
+                  <Pencil class="h-4 w-4" />
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                  @click="openEditModal(credential, 'rotate')"
+                >
+                  <Shuffle class="h-4 w-4" />
+                  Rotate
+                </button>
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-600 transition hover:border-red-300 hover:bg-red-50"
+                  :disabled="rowActionState(credential.id, 'delete')"
+                  @click="deleteCredential(credential)"
+                >
+                  <Loader2 v-if="rowActionState(credential.id, 'delete')" class="h-4 w-4 animate-spin" />
+                  <Trash2 v-else class="h-4 w-4" />
+                  Delete
+                </button>
+              </div>
+            </div>
+
+            <dl class="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div class="rounded-2xl bg-slate-50 px-4 py-3">
+                <dt class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Last Tested</dt>
+                <dd class="mt-2 text-sm font-semibold text-slate-900">
+                  {{ formatRelativeTime(credential.lastTestedAt, 'Not tested') }}
+                </dd>
+                <p class="mt-1 text-xs text-slate-500">{{ formatDateTime(credential.lastTestedAt, 'Not tested') }}</p>
+              </div>
+              <div class="rounded-2xl bg-slate-50 px-4 py-3">
+                <dt class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Last Used</dt>
+                <dd class="mt-2 text-sm font-semibold text-slate-900">
+                  {{ formatRelativeTime(credential.lastUsedAt, 'Never used') }}
+                </dd>
+                <p class="mt-1 text-xs text-slate-500">{{ formatDateTime(credential.lastUsedAt, 'Never used') }}</p>
+              </div>
+              <div class="rounded-2xl bg-slate-50 px-4 py-3">
+                <dt class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Usage Count</dt>
+                <dd class="mt-2 text-sm font-semibold text-slate-900">{{ credential.usageCount }}</dd>
+                <p class="mt-1 text-xs text-slate-500">Incremented when the runtime resolves the credential.</p>
+              </div>
+              <div class="rounded-2xl bg-slate-50 px-4 py-3">
+                <dt class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Rotated</dt>
+                <dd class="mt-2 text-sm font-semibold text-slate-900">
+                  {{ formatRelativeTime(credential.rotatedAt, 'Not rotated') }}
+                </dd>
+                <p class="mt-1 text-xs text-slate-500">{{ formatDateTime(credential.rotatedAt, 'Not rotated') }}</p>
+              </div>
+            </dl>
+          </article>
         </div>
-        <div>
-          <h4 class="font-bold text-brand-900">Bank-grade security</h4>
-          <p class="text-sm text-brand-700/80 mt-1 font-medium leading-relaxed">All credentials are encrypted using AES-256-GCM before being stored. Your secrets never leave the server in plain text.</p>
-        </div>
-      </div>
+      </section>
     </div>
 
-    <div v-if="isModalOpen" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div class="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
-        <div class="px-8 py-6 border-b border-slate-100 flex items-center justify-between">
-          <h2 class="text-2xl font-black text-slate-900">
-            {{ isEditMode ? 'Edit Credential' : 'Add Credential' }}
-          </h2>
-          <button @click="isModalOpen = false" class="p-2 text-slate-400 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 rounded-xl transition-colors">
-            <X class="w-5 h-5" />
+    <div v-if="isModalOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm">
+      <div class="max-h-[92vh] w-full max-w-4xl overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-2xl shadow-slate-950/20">
+        <div class="flex items-start justify-between border-b border-slate-100 px-7 py-6">
+          <div class="space-y-2">
+            <div class="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
+              <Shield class="h-3.5 w-3.5" />
+              {{ isRotateMode ? 'Rotate Credential' : isEditMode ? 'Edit Credential' : 'Create Credential' }}
+            </div>
+            <div>
+              <h2 class="text-2xl font-black text-slate-950">
+                {{ selectedType ? selectedType.displayName : 'Choose a credential type' }}
+              </h2>
+              <p class="mt-1 text-sm text-slate-500">
+                <span v-if="isCreateMode">Create a reusable credential and bind it across workflows.</span>
+                <span v-else-if="isRotateMode">Leave any field blank to keep the stored value. Rotation clears the last validation state.</span>
+                <span v-else>Leave any field blank to preserve the stored value, then re-test after changes.</span>
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            class="rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+            @click="closeModal"
+          >
+            <X class="h-5 w-5" />
           </button>
         </div>
 
-        <div class="p-8 overflow-y-auto flex-1 bg-slate-50/50">
-          <div v-if="!selectedType" class="space-y-4">
-            <label class="block text-sm font-bold text-slate-700">Select Credential Type</label>
-            <div class="grid grid-cols-2 gap-4">
+        <div class="grid max-h-[calc(92vh-164px)] gap-0 overflow-auto lg:grid-cols-[280px_minmax(0,1fr)]">
+          <aside class="border-b border-slate-100 bg-slate-50 p-5 lg:border-b-0 lg:border-r">
+            <div class="mb-4 flex items-center justify-between">
+              <h3 class="text-sm font-black uppercase tracking-[0.18em] text-slate-500">Credential Types</h3>
+              <Loader2 v-if="credentialTypesLoading" class="h-4 w-4 animate-spin text-slate-400" />
+            </div>
+            <div class="space-y-2">
               <button
                 v-for="type in credentialTypes"
                 :key="type.name"
-                @click="chooseType(type)"
-                class="p-4 bg-white border-2 border-slate-100 hover:border-brand-500 rounded-2xl flex flex-col items-start gap-2 text-left transition-all"
+                type="button"
+                class="w-full rounded-2xl border px-4 py-3 text-left transition"
+                :class="selectedTypeName === type.name
+                  ? 'border-slate-950 bg-slate-950 text-white shadow-lg shadow-slate-950/10'
+                  : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'"
+                @click="chooseCredentialType(type.name)"
               >
-                <div class="w-10 h-10 bg-brand-50 text-brand-600 rounded-xl flex items-center justify-center">
-                  <Key class="w-5 h-5" />
+                <div class="flex items-start justify-between gap-3">
+                  <div>
+                    <p class="text-sm font-semibold">{{ type.displayName }}</p>
+                    <p class="mt-1 text-xs" :class="selectedTypeName === type.name ? 'text-slate-300' : 'text-slate-500'">
+                      {{ authKindLabel(type) }}
+                    </p>
+                  </div>
+                  <span
+                    class="rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-[0.18em]"
+                    :class="selectedTypeName === type.name ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-500'"
+                  >
+                    {{ credentialSupportsOAuthConnect(type) ? 'Connect' : 'Manual' }}
+                  </span>
                 </div>
-                <span class="font-bold text-slate-800">{{ type.displayName || type.name }}</span>
               </button>
             </div>
-          </div>
+          </aside>
 
-          <div v-else class="space-y-6">
-            <div class="flex items-center justify-between bg-white p-4 rounded-2xl border border-slate-100">
-              <div class="flex items-center gap-3">
-                <div class="w-10 h-10 bg-brand-50 text-brand-600 rounded-xl flex items-center justify-center">
-                  <Key class="w-5 h-5" />
-                </div>
+          <section class="space-y-6 p-7">
+            <div v-if="!selectedType" class="rounded-[24px] border border-dashed border-slate-300 bg-slate-50 px-6 py-16 text-center text-sm text-slate-500">
+              Choose a credential type to configure the required fields.
+            </div>
+            <template v-else>
+              <div class="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
                 <div>
-                  <h3 class="font-bold text-slate-900">{{ selectedType.displayName || selectedType.name }}</h3>
-                  <button v-if="!isEditMode" @click="changeType" class="text-xs font-bold text-brand-600 hover:text-brand-700">Change Type</button>
+                  <label class="mb-2 block text-sm font-bold text-slate-700">Credential Name</label>
+                  <input
+                    v-model="draftCredentialName"
+                    type="text"
+                    placeholder="e.g. Production OpenAI"
+                    class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-900 outline-none transition focus:border-brand-500"
+                  />
+                </div>
+
+                <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                  <p class="font-semibold text-slate-800">Auth Mode</p>
+                  <p class="mt-1">{{ selectedTypeAuthKind === 'oauth' ? 'OAuth2 connect flow' : selectedTypeAuthKind === 'database' ? 'Database connection' : selectedTypeAuthKind === 'token' ? 'Token / API secret' : 'Custom credential' }}</p>
                 </div>
               </div>
-            </div>
 
-            <div
-              v-if="isEditMode"
-              class="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2"
-            >
-              Leave fields empty to keep their existing values.
-            </div>
-
-            <div v-if="modalError" class="flex items-center gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-              <XCircle class="w-4 h-4" />
-              {{ modalError }}
-            </div>
-            <div v-if="modalSuccess" class="flex items-center gap-2 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
-              <CheckCircle2 class="w-4 h-4" />
-              {{ modalSuccess }}
-            </div>
-
-            <div class="space-y-4">
-              <div>
-                <label class="block text-sm font-bold text-slate-700 mb-2">Credential Name</label>
-                <input
-                  v-model="newCredentialName"
-                  type="text"
-                  placeholder="e.g. Production Database"
-                  class="w-full px-4 py-3 bg-white border border-slate-200 focus:border-brand-500 rounded-xl text-sm font-medium transition-all outline-none"
-                />
+              <div v-if="selectedType.notice" class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                {{ selectedType.notice }}
               </div>
 
-              <div v-for="(prop, idx) in selectedType.properties" :key="idx" class="pt-4 border-t border-slate-100">
-                <label class="block text-sm font-bold text-slate-700 mb-2">{{ prop.displayName }}</label>
-                <input
-                  v-if="prop.type === 'string' || prop.type === 'text'"
-                  v-model="newCredentialData[prop.name]"
-                  :type="prop.type === 'string' && prop.name.toLowerCase().includes('password') ? 'password' : 'text'"
-                  class="w-full px-4 py-3 bg-white border border-slate-200 focus:border-brand-500 rounded-xl text-sm font-medium transition-all outline-none"
-                />
-                <select
-                  v-else-if="prop.type === 'options'"
-                  v-model="newCredentialData[prop.name]"
-                  class="w-full px-4 py-3 bg-white border border-slate-200 focus:border-brand-500 rounded-xl text-sm font-bold text-slate-800 transition-all outline-none"
+              <div v-if="canConnectSelectedType" class="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+                <p class="font-semibold">OAuth redirect URI</p>
+                <p class="mt-1 break-all font-mono text-xs">{{ oauthRedirectUri() }}</p>
+                <p class="mt-2 text-blue-700/80">
+                  Save the credential, then use <span class="font-semibold">Save and Connect</span> to complete the provider authorization flow.
+                </p>
+              </div>
+
+              <div class="grid gap-4 md:grid-cols-2">
+                <div
+                  v-for="property in selectedType.properties"
+                  :key="property.name"
+                  class="rounded-2xl border border-slate-200 bg-white p-4"
                 >
-                  <option v-for="opt in prop.options" :key="opt.value" :value="opt.value">{{ opt.name }}</option>
-                </select>
-                <p v-if="prop.description" class="mt-2 text-xs text-slate-400">{{ prop.description }}</p>
+                  <div class="flex items-start justify-between gap-3">
+                    <div>
+                      <label class="text-sm font-bold text-slate-800">{{ property.displayName }}</label>
+                      <p v-if="property.required" class="mt-1 text-[11px] font-bold uppercase tracking-[0.16em] text-red-500">
+                        Required
+                      </p>
+                    </div>
+                    <span
+                      v-if="isSecretCredentialField(property)"
+                      class="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500"
+                    >
+                      Secret
+                    </span>
+                  </div>
+
+                  <input
+                    v-if="property.type === 'string'"
+                    :value="String(draftCredentialData[property.name] ?? '')"
+                    :type="isSecretCredentialField(property) ? 'password' : 'text'"
+                    class="mt-3 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-brand-500"
+                    :placeholder="!isCreateMode ? 'Leave blank to keep stored value' : ''"
+                    @input="updateDraftField(property, ($event.target as HTMLInputElement).value)"
+                  />
+
+                  <textarea
+                    v-else-if="property.type === 'text'"
+                    :value="String(draftCredentialData[property.name] ?? '')"
+                    rows="4"
+                    class="mt-3 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-brand-500"
+                    :placeholder="!isCreateMode ? 'Leave blank to keep stored value' : ''"
+                    @input="updateDraftField(property, ($event.target as HTMLTextAreaElement).value)"
+                  />
+
+                  <input
+                    v-else-if="property.type === 'number'"
+                    :value="String(draftCredentialData[property.name] ?? '')"
+                    type="number"
+                    class="mt-3 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-brand-500"
+                    :placeholder="!isCreateMode ? 'Leave blank to keep stored value' : ''"
+                    @input="updateDraftField(property, ($event.target as HTMLInputElement).value === '' ? '' : Number(($event.target as HTMLInputElement).value))"
+                  />
+
+                  <label v-else-if="property.type === 'boolean'" class="mt-3 flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700">
+                    <input
+                      :checked="Boolean(draftCredentialData[property.name])"
+                      type="checkbox"
+                      class="h-4 w-4 rounded border-slate-300"
+                      @change="updateDraftField(property, ($event.target as HTMLInputElement).checked)"
+                    />
+                    Enable
+                  </label>
+
+                  <select
+                    v-else-if="property.type === 'options'"
+                    :value="String(draftCredentialData[property.name] ?? '')"
+                    class="mt-3 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-medium text-slate-900 outline-none transition focus:border-brand-500"
+                    @change="updateDraftField(property, ($event.target as HTMLSelectElement).value)"
+                  >
+                    <option value="">Select an option</option>
+                    <option
+                      v-for="option in property.options || []"
+                      :key="String(option.value)"
+                      :value="String(option.value)"
+                    >
+                      {{ option.name }}
+                    </option>
+                  </select>
+
+                  <textarea
+                    v-else
+                    :value="String(draftCredentialData[property.name] ?? '')"
+                    rows="3"
+                    class="mt-3 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-brand-500"
+                    :placeholder="!isCreateMode ? 'Leave blank to keep stored value' : ''"
+                    @input="updateDraftField(property, ($event.target as HTMLTextAreaElement).value)"
+                  />
+
+                  <p v-if="property.description" class="mt-3 text-xs leading-5 text-slate-500">{{ property.description }}</p>
+                </div>
               </div>
-            </div>
-          </div>
+
+              <div v-if="selectedType.documentationUrl" class="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                <div>
+                  <p class="font-semibold text-slate-800">Provider documentation</p>
+                  <p class="mt-1">Open the provider instructions in a new tab while configuring the credential.</p>
+                </div>
+                <a
+                  :href="selectedType.documentationUrl"
+                  target="_blank"
+                  rel="noreferrer"
+                  class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                >
+                  Open Docs
+                  <ExternalLink class="h-4 w-4" />
+                </a>
+              </div>
+
+              <div v-if="modalError" class="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                <XCircle class="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{{ modalError }}</span>
+              </div>
+              <div v-else-if="modalSuccess" class="flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                <CheckCircle2 class="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{{ modalSuccess }}</span>
+              </div>
+            </template>
+          </section>
         </div>
 
-        <div class="px-8 py-6 border-t border-slate-100 bg-white flex justify-end gap-3">
-          <button @click="isModalOpen = false" class="px-6 py-3 font-bold text-slate-500 hover:bg-slate-50 rounded-xl transition-colors">Cancel</button>
-          <button
-            v-if="selectedType && !isEditMode"
-            @click="testCredential"
-            :disabled="testLoading"
-            class="px-6 py-3 font-bold text-slate-700 bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-200 rounded-xl transition-all flex items-center gap-2"
-          >
-            <Loader2 v-if="testLoading" class="w-4 h-4 animate-spin" />
-            <FlaskConical v-else class="w-4 h-4" />
-            Test Credential
-          </button>
-          <button
-            v-if="selectedType"
-            @click="saveCredential"
-            :disabled="!newCredentialName || saveLoading || (!isEditMode && lastTestValid !== true)"
-            class="px-8 py-3 font-bold text-white bg-slate-900 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-800 rounded-xl transition-all shadow-xl shadow-slate-900/10 hover:-translate-y-0.5 active:translate-y-0 flex items-center gap-2"
-          >
-            <Loader2 v-if="saveLoading" class="w-4 h-4 animate-spin" />
-            {{ isEditMode ? 'Update Credential' : 'Save Credential' }}
-          </button>
+        <div class="flex flex-col gap-3 border-t border-slate-100 bg-slate-50 px-7 py-5 md:flex-row md:items-center md:justify-between">
+          <div class="text-sm text-slate-500">
+            <span v-if="draftValidation">Last draft test: {{ draftValidation.message }}</span>
+            <span v-else-if="canConnectSelectedType">OAuth credentials can be saved first, then connected in a popup flow.</span>
+            <span v-else>Test saved credentials after edit or rotation so the validation state stays current.</span>
+          </div>
+
+          <div class="flex flex-wrap justify-end gap-3">
+            <button
+              type="button"
+              class="rounded-2xl px-4 py-3 text-sm font-semibold text-slate-500 transition hover:bg-white hover:text-slate-700"
+              @click="closeModal"
+            >
+              Cancel
+            </button>
+            <button
+              v-if="selectedType && isCreateMode"
+              type="button"
+              class="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              :disabled="testLoading"
+              @click="testDraftCredential"
+            >
+              <Loader2 v-if="testLoading" class="h-4 w-4 animate-spin" />
+              <FlaskConical v-else class="h-4 w-4" />
+              Test Draft
+            </button>
+            <button
+              v-if="selectedType"
+              type="button"
+              class="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              :disabled="saveLoading || !draftCredentialName.trim()"
+              @click="saveCredential('save')"
+            >
+              <Loader2 v-if="saveLoading" class="h-4 w-4 animate-spin" />
+              <Pencil v-else-if="isEditMode" class="h-4 w-4" />
+              <Shuffle v-else-if="isRotateMode" class="h-4 w-4" />
+              <Plus v-else class="h-4 w-4" />
+              {{ isRotateMode ? 'Rotate Credential' : isEditMode ? 'Update Credential' : 'Save Credential' }}
+            </button>
+            <button
+              v-if="selectedType && canConnectSelectedType"
+              type="button"
+              class="inline-flex items-center gap-2 rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-slate-950/10 transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+              :disabled="saveLoading || !draftCredentialName.trim()"
+              @click="saveCredential('connect')"
+            >
+              <Loader2 v-if="saveLoading" class="h-4 w-4 animate-spin" />
+              <PlugZap v-else class="h-4 w-4" />
+              {{ isEditMode || isRotateMode ? 'Save And Connect' : 'Save And Connect' }}
+            </button>
+          </div>
         </div>
       </div>
     </div>
