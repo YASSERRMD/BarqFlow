@@ -23,6 +23,7 @@ const userInitial = computed(() => userName.value.charAt(0).toUpperCase())
 const activeWorkspaceName = computed(() => authStore.activeWorkspace?.name || 'Workspace')
 const activeWorkspaceRole = computed(() => authStore.user?.workspaceRole || 'viewer')
 const isAuthScreen = computed(() => route.path === '/login')
+const isWorkflowEditorRoute = computed(() => route.path.startsWith('/workflow/'))
 
 const navItems = [
   {
@@ -68,15 +69,10 @@ const currentNavigationItem = computed(() => {
 })
 
 const headerTitle = computed(() => {
-  if (route.path.startsWith('/workflow/')) return 'Workflow Designer'
   return currentNavigationItem.value?.pageTitle || 'BarqFlow Platform'
 })
 
 const headerDescription = computed(() => {
-  if (route.path.startsWith('/workflow/')) {
-    return 'Author, validate, and execute production workflows with a structured node detail view.'
-  }
-
   return currentNavigationItem.value?.pageDescription || 'Automation orchestration control plane.'
 })
 
@@ -100,6 +96,14 @@ watch(
 
 <template>
   <div v-if="isAuthScreen" class="min-h-screen bg-mesh-gradient text-slate-900">
+    <RouterView v-slot="{ Component }">
+      <transition name="fade" mode="out-in">
+        <component :is="Component" />
+      </transition>
+    </RouterView>
+  </div>
+
+  <div v-else-if="isWorkflowEditorRoute" class="h-screen w-screen overflow-hidden bg-slate-950 text-slate-900">
     <RouterView v-slot="{ Component }">
       <transition name="fade" mode="out-in">
         <component :is="Component" />

@@ -4,7 +4,7 @@ import { VueFlow, useVueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
-import { History, Loader2, Play, Plus, Save, Tag, X } from 'lucide-vue-next'
+import { ChevronLeft, History, Loader2, Play, Plus, Save, Tag, X } from 'lucide-vue-next'
 
 import CustomNode from '../components/CustomNode.vue'
 import NodeCreator from '../components/NodeCreator.vue'
@@ -1447,33 +1447,83 @@ function onDrop(event: DragEvent) {
 </script>
 
 <template>
-  <div class="flex h-full w-full overflow-hidden bg-transparent">
+  <div class="flex h-screen w-screen overflow-hidden bg-slate-950 text-slate-900">
     <div class="flex min-w-0 flex-1 flex-col overflow-hidden">
-      <section class="border-b border-slate-200/80 bg-white px-4 py-5 shadow-sm md:px-6 lg:px-8">
-        <div class="flex flex-col gap-6 2xl:flex-row 2xl:items-start 2xl:justify-between">
-          <div class="min-w-0 flex-1">
-            <p class="text-[11px] font-black uppercase tracking-[0.24em] text-brand-700">Workflow Designer</p>
-            <input
-              v-model="workflowDraftName"
-              type="text"
-              placeholder="Untitled Workflow"
-              class="mt-3 w-full rounded-[1.4rem] border border-slate-200 bg-slate-50 px-4 py-3 text-2xl font-display font-black text-slate-950 outline-none transition focus:border-brand-400 focus:bg-white"
-            />
-            <p class="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
-              Configure orchestration logic, credential bindings, workflow metadata, and execution behavior from a single authoring surface.
-            </p>
+      <section class="border-b border-slate-800 bg-slate-950/96 px-4 py-4 text-white shadow-[0_24px_60px_rgba(15,23,42,0.35)] backdrop-blur xl:px-6">
+        <div class="flex flex-col gap-4">
+          <div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+            <div class="min-w-0 flex-1">
+              <div class="flex flex-wrap items-center gap-3">
+                <button
+                  class="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:bg-white/10"
+                  @click="router.push('/workflows')"
+                >
+                  <ChevronLeft class="h-4 w-4" />
+                  All workflows
+                </button>
+                <span class="text-[11px] font-black uppercase tracking-[0.26em] text-slate-400">Workflow Studio</span>
+              </div>
 
-            <div class="mt-4 flex flex-wrap gap-2">
+              <div class="mt-3 flex flex-col gap-3 xl:flex-row xl:items-center">
+                <input
+                  v-model="workflowDraftName"
+                  type="text"
+                  placeholder="Untitled Workflow"
+                  class="w-full rounded-[1.25rem] border border-white/10 bg-white/6 px-4 py-3 text-2xl font-display font-black text-white outline-none transition focus:border-sky-400 focus:bg-white/10 xl:max-w-3xl"
+                />
+                <div class="flex flex-wrap gap-2">
+                  <span class="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-slate-300">
+                    {{ editorNodeCount }} nodes
+                  </span>
+                  <span class="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-slate-300">
+                    {{ editorTriggerCount }} triggers
+                  </span>
+                  <span class="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-slate-300">
+                    v{{ editorVersion }}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div class="flex flex-wrap gap-2 xl:justify-end">
+              <button
+                @click="openHistoryInspector"
+                class="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-bold text-slate-100 transition hover:bg-white/10"
+              >
+                <History class="h-4 w-4" />
+                History
+              </button>
+              <button
+                @click="handleSave"
+                class="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white px-4 py-3 text-sm font-bold text-slate-900 transition hover:bg-slate-100"
+              >
+                <Save class="h-4 w-4" />
+                Save
+              </button>
+              <button
+                @click="handleExecute"
+                :disabled="workflowStore.loading || executionInProgress"
+                class="inline-flex items-center gap-2 rounded-2xl bg-sky-500 px-4 py-3 text-sm font-black text-slate-950 transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                <Loader2 v-if="workflowStore.loading || executionInProgress" class="h-4 w-4 animate-spin" />
+                <Play v-else class="h-4 w-4 fill-current" />
+                {{ workflowStore.loading || executionInProgress ? 'Executing…' : 'Run Workflow' }}
+              </button>
+            </div>
+          </div>
+
+          <div class="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+            <div class="flex min-w-0 flex-1 flex-wrap gap-2">
               <span
                 v-for="tagName in workflowTags"
                 :key="tagName"
-                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-600"
+                class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-slate-200"
               >
                 <Tag class="h-3.5 w-3.5" />
                 {{ tagName }}
                 <button
                   type="button"
-                  class="text-slate-400 transition hover:text-red-500"
+                  class="text-slate-400 transition hover:text-red-300"
                   @click="removeWorkflowTag(tagName)"
                 >
                   <X class="h-3.5 w-3.5" />
@@ -1481,24 +1531,24 @@ function onDrop(event: DragEvent) {
               </span>
               <span
                 v-if="workflowTags.length === 0"
-                class="rounded-full border border-dashed border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-400"
+                class="rounded-full border border-dashed border-white/15 px-3 py-1.5 text-xs font-bold text-slate-500"
               >
                 No tags assigned
               </span>
             </div>
 
-            <div class="mt-4 flex flex-col gap-3 xl:flex-row xl:items-start">
-              <div class="flex flex-1 gap-2">
+            <div class="flex w-full flex-col gap-2 xl:w-auto xl:min-w-[30rem]">
+              <div class="flex gap-2">
                 <input
                   v-model="workflowTagInput"
                   type="text"
                   placeholder="Add workflow tag"
-                  class="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-900 outline-none transition focus:border-brand-400 focus:bg-white"
+                  class="w-full rounded-2xl border border-white/10 bg-white/6 px-4 py-2.5 text-sm font-medium text-white outline-none transition focus:border-sky-400 focus:bg-white/10"
                   @keydown.enter.prevent="addWorkflowTag()"
                 />
                 <button
                   @click="addWorkflowTag()"
-                  class="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 transition hover:border-brand-200 hover:text-brand-600"
+                  class="rounded-2xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-bold text-slate-100 transition hover:bg-white/10"
                 >
                   Add Tag
                 </button>
@@ -1508,7 +1558,7 @@ function onDrop(event: DragEvent) {
                   v-for="workspaceTag in availableWorkspaceTags"
                   :key="workspaceTag.id"
                   type="button"
-                  class="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-500 transition hover:border-brand-200 hover:text-brand-600"
+                  class="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-slate-400 transition hover:border-sky-400 hover:text-white"
                   @click="addWorkflowTag(workspaceTag.name)"
                 >
                   {{ workspaceTag.name }}
@@ -1516,54 +1566,11 @@ function onDrop(event: DragEvent) {
               </div>
             </div>
           </div>
-
-          <div class="flex w-full flex-col gap-4 2xl:max-w-[26rem]">
-            <div class="grid gap-3 sm:grid-cols-3">
-              <div class="rounded-[1.35rem] border border-slate-200 bg-slate-50 px-4 py-3">
-                <p class="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">Nodes</p>
-                <p class="mt-2 text-xl font-black text-slate-900">{{ editorNodeCount }}</p>
-              </div>
-              <div class="rounded-[1.35rem] border border-slate-200 bg-slate-50 px-4 py-3">
-                <p class="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">Triggers</p>
-                <p class="mt-2 text-xl font-black text-slate-900">{{ editorTriggerCount }}</p>
-              </div>
-              <div class="rounded-[1.35rem] border border-slate-200 bg-slate-50 px-4 py-3">
-                <p class="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">Version</p>
-                <p class="mt-2 text-xl font-black text-slate-900">v{{ editorVersion }}</p>
-              </div>
-            </div>
-
-            <div class="flex flex-wrap gap-2 2xl:justify-end">
-              <button
-                @click="openHistoryInspector"
-                class="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 transition hover:border-brand-200 hover:text-brand-600"
-              >
-                <History class="h-4 w-4" />
-                History
-              </button>
-              <button
-                @click="handleSave"
-                class="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 transition hover:border-slate-300"
-              >
-                <Save class="h-4 w-4" />
-                Save
-              </button>
-              <button
-                @click="handleExecute"
-                :disabled="workflowStore.loading || executionInProgress"
-                class="inline-flex items-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-black text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
-              >
-                <Loader2 v-if="workflowStore.loading || executionInProgress" class="h-4 w-4 animate-spin" />
-                <Play v-else class="h-4 w-4 fill-current" />
-                {{ workflowStore.loading || executionInProgress ? 'Executing…' : 'Run Workflow' }}
-              </button>
-            </div>
-          </div>
         </div>
       </section>
 
-      <div class="min-h-0 flex-1 bg-slate-100 p-3 md:p-5">
-        <div class="relative h-full overflow-hidden rounded-[2rem] border border-slate-200/80 bg-white shadow-panel">
+      <div class="min-h-0 flex-1 bg-slate-950">
+        <div class="relative h-full overflow-hidden border-t border-slate-800 bg-white shadow-panel">
           <div
             v-if="executionNotice"
             :class="[
