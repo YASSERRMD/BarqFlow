@@ -240,6 +240,7 @@ impl ActiveWorkflowManager {
                         parent_execution_id: None,
                         cancellation_token: None,
                         stop_after_node_id: None,
+                        event_sequence_start: 0,
                     };
 
                     if let Err(err) = runner.run_workflow(ctx).await {

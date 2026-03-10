@@ -260,6 +260,7 @@ async fn handle_webhook(
         parent_execution_id: None,
         cancellation_token: None,
         stop_after_node_id: None,
+        event_sequence_start: 0,
     };
 
     if response_mode.eq_ignore_ascii_case("lastNode") {

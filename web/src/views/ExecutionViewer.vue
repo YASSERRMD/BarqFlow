@@ -1,111 +1,211 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { Clock, CheckCircle2, XCircle, Loader2, Search, RefreshCw, RotateCcw, Square, Trash2, X } from 'lucide-vue-next'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
+  Activity,
+  Clock,
+  Copy,
+  Loader2,
+  RefreshCw,
+  RotateCcw,
+  Search,
+  Square,
+  Trash2,
+  X,
+} from 'lucide-vue-next'
+import {
+  createExecutionEventSource,
   deleteExecution as deleteExecutionRequest,
+  getExecution,
+  getExecutionEvents,
   listExecutions,
   retryExecution as retryExecutionRequest,
   stopExecution as stopExecutionRequest,
 } from '../features/executions/api'
+import type { ExecutionEvent, ExecutionRecord } from '../types/contracts'
+import {
+  extractExecutionEvents,
+  extractExecutionMeta,
+  extractExecutionNodeResults,
+  extractExecutionWaitDetails,
+  isTerminalExecutionEvent,
+  mergeExecutionEvents,
+  resolveExecutionStatusFromEvent,
+} from '../features/executions/helpers'
+import ExecutionStatusBadge from '../features/executions/components/ExecutionStatusBadge.vue'
+import ExecutionTimeline from '../features/executions/components/ExecutionTimeline.vue'
 
-interface ExecutionEntity {
-  id: string
-  workflowId: string
-  status: string
-  data: any
-  startedAt: string
-  stoppedAt?: string | null
-}
-
-const executions = ref<ExecutionEntity[]>([])
-const selectedExecution = ref<ExecutionEntity | null>(null)
+const executions = ref<ExecutionRecord[]>([])
+const selectedExecutionId = ref<string | null>(null)
+const executionEvents = ref<Record<string, ExecutionEvent[]>>({})
 const loading = ref(false)
+const detailsLoading = ref(false)
 const actionLoading = ref(false)
 const error = ref<string | null>(null)
 const query = ref('')
 const statusFilter = ref('all')
+const copiedResumeUrl = ref(false)
+
+let eventSource: EventSource | null = null
+
+const selectedExecution = computed(() => {
+  if (!selectedExecutionId.value) return null
+  return executions.value.find((execution) => execution.id === selectedExecutionId.value) || null
+})
 
 const filteredExecutions = computed(() => {
   const q = query.value.trim().toLowerCase()
-  return executions.value.filter((exec) => {
+  return executions.value.filter((execution) => {
     const matchesStatus =
       statusFilter.value === 'all' ||
-      exec.status.toLowerCase() === statusFilter.value.toLowerCase()
-
+      execution.status.toLowerCase() === statusFilter.value.toLowerCase()
     const matchesQuery =
       q.length === 0 ||
-      exec.id.toLowerCase().includes(q) ||
-      exec.workflowId.toLowerCase().includes(q)
+      execution.id.toLowerCase().includes(q) ||
+      execution.workflowId.toLowerCase().includes(q)
 
     return matchesStatus && matchesQuery
   })
 })
 
-const nodeResults = computed(() => {
-  const data = selectedExecution.value?.data
-  if (!data || typeof data !== 'object' || Array.isArray(data)) return []
-
-  return Object.entries(data)
-    .filter(([_, value]) => value && typeof value === 'object')
-    .map(([nodeName, value]: [string, any]) => ({
-      nodeName,
-      success: value.success,
-      error: value.error,
-      outputsCount: Array.isArray(value.outputs) ? value.outputs.length : 0,
-    }))
+const selectedEvents = computed(() => {
+  if (!selectedExecution.value) return []
+  return mergeExecutionEvents(
+    extractExecutionEvents(selectedExecution.value),
+    executionEvents.value[selectedExecution.value.id] || [],
+  )
 })
+
+const selectedMeta = computed(() => extractExecutionMeta(selectedExecution.value))
+const nodeResults = computed(() => extractExecutionNodeResults(selectedExecution.value))
+const waitDetails = computed(() => extractExecutionWaitDetails(selectedExecution.value))
 
 const executionJson = computed(() => {
   if (!selectedExecution.value) return ''
   return JSON.stringify(selectedExecution.value.data, null, 2)
 })
 
-function formatDuration(exec: ExecutionEntity): string {
-  if (!exec.stoppedAt) return 'Running'
-  const start = new Date(exec.startedAt).getTime()
-  const end = new Date(exec.stoppedAt).getTime()
-  const ms = Math.max(0, end - start)
-
-  if (ms < 1000) return `${ms}ms`
-  return `${(ms / 1000).toFixed(2)}s`
+function stopExecutionStream() {
+  if (eventSource) {
+    eventSource.close()
+    eventSource = null
+  }
 }
 
-function formatRelativeTime(iso: string): string {
-  const date = new Date(iso).getTime()
+function upsertExecution(updated: ExecutionRecord) {
+  const existingIndex = executions.value.findIndex((execution) => execution.id === updated.id)
+  if (existingIndex === -1) {
+    executions.value = [updated, ...executions.value]
+    return
+  }
+
+  executions.value.splice(existingIndex, 1, updated)
+}
+
+async function syncExecution(id: string) {
+  const response = await getExecution(id)
+  upsertExecution(response.data)
+  return response.data
+}
+
+async function loadExecutionEvents(id: string) {
+  const response = await getExecutionEvents(id)
+  executionEvents.value[id] = mergeExecutionEvents(executionEvents.value[id] || [], response.data)
+}
+
+function applyExecutionEvent(executionId: string, event: ExecutionEvent) {
+  executionEvents.value[executionId] = mergeExecutionEvents(
+    executionEvents.value[executionId] || [],
+    [event],
+  )
+
+  const match = executions.value.find((execution) => execution.id === executionId)
+  if (!match) return
+
+  match.status = resolveExecutionStatusFromEvent(event)
+}
+
+function startExecutionStream(executionId: string) {
+  stopExecutionStream()
+  const source = createExecutionEventSource(executionId)
+
+  source.addEventListener('execution', async (rawEvent) => {
+    const parsed = JSON.parse((rawEvent as MessageEvent<string>).data) as ExecutionEvent
+    applyExecutionEvent(executionId, parsed)
+
+    if (isTerminalExecutionEvent(parsed)) {
+      stopExecutionStream()
+      try {
+        await syncExecution(executionId)
+      } catch {
+        // Keep the streamed timeline even if the terminal refresh fails.
+      }
+    }
+  })
+
+  source.onerror = async () => {
+    stopExecutionStream()
+    try {
+      await syncExecution(executionId)
+    } catch {
+      // Preserve the last known state if refresh fails.
+    }
+  }
+
+  eventSource = source
+}
+
+function formatDuration(execution: ExecutionRecord): string {
+  if (!execution.stoppedAt) {
+    return execution.status === 'running' ? 'Live' : 'Open'
+  }
+
+  const startedAt = new Date(execution.startedAt).getTime()
+  const stoppedAt = new Date(execution.stoppedAt).getTime()
+  const durationMs = Math.max(0, stoppedAt - startedAt)
+
+  if (durationMs < 1000) return `${durationMs}ms`
+  return `${(durationMs / 1000).toFixed(2)}s`
+}
+
+function formatRelativeTime(value: string) {
+  const date = new Date(value).getTime()
   const diffSeconds = Math.floor((date - Date.now()) / 1000)
-  const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' })
+  const formatter = new Intl.RelativeTimeFormat('en', { numeric: 'auto' })
 
   const abs = Math.abs(diffSeconds)
-  if (abs < 60) return rtf.format(diffSeconds, 'second')
+  if (abs < 60) return formatter.format(diffSeconds, 'second')
 
-  const diffMinutes = Math.floor(diffSeconds / 60)
-  if (Math.abs(diffMinutes) < 60) return rtf.format(diffMinutes, 'minute')
+  const minutes = Math.floor(diffSeconds / 60)
+  if (Math.abs(minutes) < 60) return formatter.format(minutes, 'minute')
 
-  const diffHours = Math.floor(diffMinutes / 60)
-  if (Math.abs(diffHours) < 24) return rtf.format(diffHours, 'hour')
+  const hours = Math.floor(minutes / 60)
+  if (Math.abs(hours) < 24) return formatter.format(hours, 'hour')
 
-  const diffDays = Math.floor(diffHours / 24)
-  return rtf.format(diffDays, 'day')
+  const days = Math.floor(hours / 24)
+  return formatter.format(days, 'day')
 }
 
-function openExecutionDetails(exec: ExecutionEntity) {
-  selectedExecution.value = exec
-}
-
-function closeExecutionDetails() {
-  selectedExecution.value = null
+function formatTimestamp(value?: string | null) {
+  if (!value) return 'Unknown'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString()
 }
 
 async function fetchExecutions() {
   loading.value = true
   error.value = null
-  try {
-    const res = await listExecutions({ limit: 100 })
-    executions.value = res.data
 
-    if (selectedExecution.value) {
-      selectedExecution.value =
-        res.data.find((e: ExecutionEntity) => e.id === selectedExecution.value?.id) || null
+  try {
+    const response = await listExecutions({ limit: 100 })
+    executions.value = response.data
+
+    if (selectedExecutionId.value) {
+      const stillExists = response.data.some((execution) => execution.id === selectedExecutionId.value)
+      if (!stillExists) {
+        selectedExecutionId.value = null
+        stopExecutionStream()
+      }
     }
   } catch (err: any) {
     error.value = err?.response?.data?.message || err?.message || 'Failed to fetch executions'
@@ -114,12 +214,44 @@ async function fetchExecutions() {
   }
 }
 
+async function openExecutionDetails(execution: ExecutionRecord) {
+  selectedExecutionId.value = execution.id
+  detailsLoading.value = true
+  copiedResumeUrl.value = false
+  error.value = null
+
+  try {
+    const latest = await syncExecution(execution.id)
+    await loadExecutionEvents(execution.id)
+
+    if (latest.status === 'running' || latest.status === 'queued') {
+      startExecutionStream(execution.id)
+    } else {
+      stopExecutionStream()
+    }
+  } catch (err: any) {
+    error.value = err?.response?.data || err?.message || 'Failed to load execution details'
+  } finally {
+    detailsLoading.value = false
+  }
+}
+
+function closeExecutionDetails() {
+  selectedExecutionId.value = null
+  copiedResumeUrl.value = false
+  stopExecutionStream()
+}
+
 async function retryExecution(id: string) {
   actionLoading.value = true
   error.value = null
+
   try {
-    await retryExecutionRequest(id)
+    const response = await retryExecutionRequest(id)
     await fetchExecutions()
+    const nextExecution =
+      executions.value.find((execution) => execution.id === response.data.id) || response.data
+    await openExecutionDetails(nextExecution)
   } catch (err: any) {
     error.value = err?.response?.data || err?.message || 'Failed to retry execution'
   } finally {
@@ -130,9 +262,11 @@ async function retryExecution(id: string) {
 async function stopExecution(id: string) {
   actionLoading.value = true
   error.value = null
+
   try {
     await stopExecutionRequest(id)
-    await fetchExecutions()
+    await syncExecution(id)
+    await loadExecutionEvents(id)
   } catch (err: any) {
     error.value = err?.response?.data || err?.message || 'Failed to stop execution'
   } finally {
@@ -146,11 +280,13 @@ async function deleteExecution(id: string) {
 
   actionLoading.value = true
   error.value = null
+
   try {
     await deleteExecutionRequest(id)
-    executions.value = executions.value.filter((exec) => exec.id !== id)
-    if (selectedExecution.value?.id === id) {
-      selectedExecution.value = null
+    executions.value = executions.value.filter((execution) => execution.id !== id)
+    delete executionEvents.value[id]
+    if (selectedExecutionId.value === id) {
+      closeExecutionDetails()
     }
   } catch (err: any) {
     error.value = err?.response?.data || err?.message || 'Failed to delete execution'
@@ -159,193 +295,359 @@ async function deleteExecution(id: string) {
   }
 }
 
+async function copyResumeUrl() {
+  if (!waitDetails.value?.resumeUrl) return
+  await navigator.clipboard.writeText(waitDetails.value.resumeUrl)
+  copiedResumeUrl.value = true
+  window.setTimeout(() => {
+    copiedResumeUrl.value = false
+  }, 2000)
+}
+
 onMounted(fetchExecutions)
+onBeforeUnmount(stopExecutionStream)
 </script>
 
 <template>
-  <div class="h-full bg-slate-50 overflow-auto p-4 md:p-8">
-    <div class="max-w-6xl mx-auto">
-      <div class="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
+  <div class="h-full overflow-auto bg-slate-50 px-4 py-4 md:px-8 md:py-8">
+    <div class="mx-auto max-w-7xl space-y-6">
+      <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <h1 class="text-2xl font-bold text-slate-900">Execution History</h1>
-          <p class="text-slate-500 text-sm mt-1">
-            Review recent workflow runs and troubleshoot failures.
+          <p class="text-xs font-semibold uppercase tracking-[0.22em] text-brand-600">Runtime</p>
+          <h1 class="mt-2 text-3xl font-bold text-slate-900">Execution History</h1>
+          <p class="mt-2 max-w-2xl text-sm text-slate-500">
+            Inspect workflow runs, follow live execution events, and debug node failures without
+            dropping back to raw logs.
           </p>
         </div>
 
-        <div class="flex items-center gap-3">
+        <div class="flex flex-col gap-3 sm:flex-row">
           <button
-            @click="fetchExecutions"
+            class="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-60"
             :disabled="loading || actionLoading"
-            class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-600 text-sm font-medium hover:bg-slate-50 disabled:opacity-60"
+            @click="fetchExecutions"
           >
-            <RefreshCw class="w-4 h-4" />
+            <RefreshCw class="h-4 w-4" />
             Refresh
           </button>
           <div class="relative">
-            <Search class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <Search class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input
               v-model="query"
               type="text"
-              placeholder="Search by execution or workflow id..."
-              class="pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent w-full md:w-72"
+              placeholder="Search execution or workflow id"
+              class="w-full rounded-2xl border border-slate-200 bg-white py-2.5 pl-9 pr-4 text-sm text-slate-700 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 sm:w-72"
             />
           </div>
           <select
             v-model="statusFilter"
-            class="bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-lg text-sm font-medium"
+            class="rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
           >
-            <option value="all">All</option>
+            <option value="all">All statuses</option>
             <option value="success">Success</option>
             <option value="failed">Failed</option>
             <option value="running">Running</option>
+            <option value="waiting">Waiting</option>
+            <option value="stopped">Stopped</option>
           </select>
         </div>
       </div>
 
       <div
-        v-if="loading"
-        class="bg-white rounded-xl shadow-sm border border-slate-200 p-8 flex items-center gap-3 text-slate-500"
-      >
-        <Loader2 class="w-4 h-4 animate-spin" />
-        Loading executions...
-      </div>
-
-      <div
-        v-else-if="error"
-        class="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 text-sm font-medium"
+        v-if="error"
+        class="rounded-3xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-medium text-red-700"
       >
         {{ error }}
       </div>
 
-      <div
-        v-else-if="filteredExecutions.length === 0"
-        class="bg-white rounded-xl shadow-sm border border-slate-200 p-8 text-slate-500 text-sm"
-      >
-        No executions found.
-      </div>
-
-      <div v-else class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-        <ul class="divide-y divide-slate-100">
-          <li
-            v-for="exec in filteredExecutions"
-            :key="exec.id"
-            class="p-5 hover:bg-slate-50 transition-colors cursor-pointer"
-            @click="openExecutionDetails(exec)"
-          >
+      <div class="grid gap-6 lg:grid-cols-[360px,minmax(0,1fr)]">
+        <section class="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm">
+          <div class="border-b border-slate-100 px-5 py-4">
             <div class="flex items-center justify-between">
-              <div class="flex items-center gap-4">
-                <div
-                  :class="[
-                    'w-10 h-10 rounded-full flex items-center justify-center shrink-0',
-                    exec.status === 'success'
-                      ? 'bg-green-100 text-green-600'
-                      : exec.status === 'running'
-                        ? 'bg-amber-100 text-amber-700'
-                        : 'bg-red-100 text-red-600',
-                  ]"
-                >
-                  <Clock v-if="exec.status === 'running'" class="w-5 h-5" />
-                  <CheckCircle2 v-else-if="exec.status === 'success'" class="w-5 h-5" />
-                  <XCircle v-else class="w-5 h-5" />
+              <div>
+                <h2 class="text-sm font-semibold text-slate-800">Runs</h2>
+                <p class="mt-1 text-xs text-slate-500">{{ filteredExecutions.length }} visible</p>
+              </div>
+              <Activity class="h-4 w-4 text-slate-400" />
+            </div>
+          </div>
+
+          <div
+            v-if="loading"
+            class="flex items-center gap-3 px-5 py-6 text-sm text-slate-500"
+          >
+            <Loader2 class="h-4 w-4 animate-spin" />
+            Loading executions...
+          </div>
+
+          <div
+            v-else-if="filteredExecutions.length === 0"
+            class="px-5 py-8 text-sm text-slate-500"
+          >
+            No executions found.
+          </div>
+
+          <ul v-else class="max-h-[70vh] divide-y divide-slate-100 overflow-auto">
+            <li
+              v-for="execution in filteredExecutions"
+              :key="execution.id"
+              class="cursor-pointer px-5 py-4 transition-colors hover:bg-slate-50"
+              :class="selectedExecutionId === execution.id ? 'bg-brand-50/60' : ''"
+              @click="openExecutionDetails(execution)"
+            >
+              <div class="flex items-start justify-between gap-4">
+                <div class="min-w-0 space-y-2">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <p class="text-sm font-semibold text-slate-800">
+                      Workflow {{ execution.workflowId.slice(0, 8) }}
+                    </p>
+                    <ExecutionStatusBadge :status="execution.status" />
+                  </div>
+                  <p class="font-mono text-[11px] text-slate-400">#{{ execution.id }}</p>
+                  <div class="flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                    <span class="inline-flex items-center gap-1">
+                      <Clock class="h-3.5 w-3.5" />
+                      {{ formatDuration(execution) }}
+                    </span>
+                    <span>{{ formatRelativeTime(execution.startedAt) }}</span>
+                  </div>
                 </div>
 
-                <div>
-                  <h3 class="font-semibold text-slate-800 text-base">Workflow {{ exec.workflowId.slice(0, 8) }}</h3>
-                  <div class="flex items-center text-xs text-slate-500 mt-1 gap-3">
-                    <span class="font-mono text-slate-400">#{{ exec.id.slice(0, 8) }}</span>
-                    <span class="flex items-center gap-1"><Clock class="w-3 h-3" /> {{ formatDuration(exec) }}</span>
+                <div class="flex items-center gap-1">
+                  <button
+                    class="rounded-xl border border-slate-200 p-2 text-slate-500 hover:border-brand-200 hover:text-brand-600 disabled:opacity-60"
+                    :disabled="loading || actionLoading"
+                    title="Retry execution"
+                    @click.stop="retryExecution(execution.id)"
+                  >
+                    <RotateCcw class="h-4 w-4" />
+                  </button>
+                  <button
+                    v-if="execution.status === 'running'"
+                    class="rounded-xl border border-slate-200 p-2 text-slate-500 hover:border-amber-200 hover:text-amber-700 disabled:opacity-60"
+                    :disabled="loading || actionLoading"
+                    title="Stop execution"
+                    @click.stop="stopExecution(execution.id)"
+                  >
+                    <Square class="h-4 w-4" />
+                  </button>
+                  <button
+                    class="rounded-xl border border-slate-200 p-2 text-slate-500 hover:border-red-200 hover:text-red-600 disabled:opacity-60"
+                    :disabled="loading || actionLoading"
+                    title="Delete execution"
+                    @click.stop="deleteExecution(execution.id)"
+                  >
+                    <Trash2 class="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            </li>
+          </ul>
+        </section>
+
+        <section class="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm">
+          <div
+            v-if="!selectedExecution"
+            class="flex h-full min-h-[420px] items-center justify-center px-8 py-10 text-center"
+          >
+            <div class="max-w-md">
+              <p class="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">
+                Execution Inspector
+              </p>
+              <h2 class="mt-3 text-2xl font-semibold text-slate-900">Choose a run to inspect</h2>
+              <p class="mt-2 text-sm text-slate-500">
+                Select an execution from the left to load node results, lifecycle events, wait
+                state metadata, and the persisted payload.
+              </p>
+            </div>
+          </div>
+
+          <div v-else class="space-y-6 p-5 md:p-6">
+            <div class="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 pb-5">
+              <div>
+                <div class="flex flex-wrap items-center gap-3">
+                  <h2 class="text-xl font-semibold text-slate-900">
+                    Execution #{{ selectedExecution.id.slice(0, 8) }}
+                  </h2>
+                  <ExecutionStatusBadge :status="selectedExecution.status" />
+                </div>
+                <p class="mt-2 font-mono text-xs text-slate-400">{{ selectedExecution.id }}</p>
+                <p class="mt-1 text-sm text-slate-500">
+                  Workflow {{ selectedExecution.workflowId }}
+                </p>
+              </div>
+
+              <div class="flex items-center gap-2">
+                <button
+                  class="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+                  :disabled="detailsLoading || actionLoading"
+                  @click="openExecutionDetails(selectedExecution)"
+                >
+                  <RefreshCw class="h-4 w-4" />
+                  Refresh detail
+                </button>
+                <button
+                  class="rounded-2xl border border-slate-200 p-2 text-slate-500 hover:bg-slate-50 hover:text-slate-700"
+                  @click="closeExecutionDetails"
+                >
+                  <X class="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+
+            <div
+              v-if="detailsLoading"
+              class="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500"
+            >
+              <Loader2 class="h-4 w-4 animate-spin" />
+              Loading execution detail...
+            </div>
+
+            <template v-else>
+              <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <div class="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                    Status
+                  </p>
+                  <div class="mt-3">
+                    <ExecutionStatusBadge :status="selectedExecution.status" />
+                  </div>
+                </div>
+
+                <div class="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                    Duration
+                  </p>
+                  <p class="mt-3 text-xl font-semibold text-slate-800">
+                    {{ formatDuration(selectedExecution) }}
+                  </p>
+                </div>
+
+                <div class="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                    Started
+                  </p>
+                  <p class="mt-3 text-sm font-medium text-slate-700">
+                    {{ formatTimestamp(selectedExecution.startedAt) }}
+                  </p>
+                </div>
+
+                <div class="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                    Events
+                  </p>
+                  <p class="mt-3 text-xl font-semibold text-slate-800">
+                    {{ selectedMeta?.eventCount || selectedEvents.length }}
+                  </p>
+                </div>
+              </div>
+
+              <div
+                v-if="waitDetails"
+                class="rounded-[28px] border border-amber-200 bg-amber-50/70 px-5 py-5"
+              >
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p class="text-xs font-semibold uppercase tracking-[0.2em] text-amber-700">
+                      Wait State
+                    </p>
+                    <h3 class="mt-2 text-lg font-semibold text-amber-950">
+                      Waiting at {{ waitDetails.nodeName || 'unknown node' }}
+                    </h3>
+                  </div>
+                  <ExecutionStatusBadge :status="'waiting'" />
+                </div>
+
+                <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <div class="rounded-2xl border border-amber-200 bg-white/80 px-4 py-3">
+                    <p class="text-[11px] uppercase tracking-[0.16em] text-amber-700">Type</p>
+                    <p class="mt-1 text-sm font-medium text-slate-800">
+                      {{ waitDetails.waitType || 'unknown' }}
+                    </p>
+                  </div>
+                  <div class="rounded-2xl border border-amber-200 bg-white/80 px-4 py-3">
+                    <p class="text-[11px] uppercase tracking-[0.16em] text-amber-700">Duration</p>
+                    <p class="mt-1 text-sm font-medium text-slate-800">
+                      {{ waitDetails.durationMs ? `${waitDetails.durationMs}ms` : 'n/a' }}
+                    </p>
+                  </div>
+                  <div class="rounded-2xl border border-amber-200 bg-white/80 px-4 py-3 md:col-span-2">
+                    <div class="flex items-start justify-between gap-3">
+                      <div class="min-w-0">
+                        <p class="text-[11px] uppercase tracking-[0.16em] text-amber-700">
+                          Resume URL
+                        </p>
+                        <p class="mt-1 break-all text-sm font-medium text-slate-800">
+                          {{ waitDetails.resumeUrl || 'n/a' }}
+                        </p>
+                        <p v-if="waitDetails.expiresAt" class="mt-2 text-xs text-slate-500">
+                          Expires {{ formatTimestamp(waitDetails.expiresAt) }}
+                        </p>
+                      </div>
+                      <button
+                        v-if="waitDetails.resumeUrl"
+                        class="inline-flex items-center gap-1 rounded-xl border border-amber-200 bg-white px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-100"
+                        @click="copyResumeUrl"
+                      >
+                        <Copy class="h-3.5 w-3.5" />
+                        {{ copiedResumeUrl ? 'Copied' : 'Copy' }}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              <div class="text-right">
-                <span class="text-sm text-slate-500 block">{{ formatRelativeTime(exec.startedAt) }}</span>
-                <span
-                  :class="[
-                    'inline-block mt-1 text-xs font-semibold px-2 py-0.5 rounded-full',
-                    exec.status === 'success'
-                      ? 'bg-green-50 text-green-700'
-                      : exec.status === 'running'
-                        ? 'bg-amber-50 text-amber-700'
-                        : 'bg-red-50 text-red-700',
-                  ]"
-                >
-                  {{ exec.status }}
-                </span>
-                <div class="mt-2 flex items-center justify-end gap-1">
-                  <button
-                    @click.stop="retryExecution(exec.id)"
-                    :disabled="loading || actionLoading"
-                    class="p-1.5 rounded-md border border-slate-200 text-slate-500 hover:text-brand-600 hover:border-brand-200 disabled:opacity-60"
-                    title="Retry execution"
+              <div v-if="nodeResults.length > 0" class="space-y-3">
+                <div class="flex items-center justify-between">
+                  <h3 class="text-sm font-semibold text-slate-800">Node Results</h3>
+                  <p class="text-xs text-slate-400">{{ nodeResults.length }} nodes</p>
+                </div>
+                <div class="grid gap-3 md:grid-cols-2">
+                  <div
+                    v-for="nodeResult in nodeResults"
+                    :key="nodeResult.nodeName"
+                    class="rounded-[24px] border px-4 py-4"
+                    :class="
+                      nodeResult.success
+                        ? 'border-green-200 bg-green-50/60'
+                        : 'border-red-200 bg-red-50/60'
+                    "
                   >
-                    <RotateCcw class="w-4 h-4" />
-                  </button>
-                  <button
-                    v-if="exec.status === 'running'"
-                    @click.stop="stopExecution(exec.id)"
-                    :disabled="loading || actionLoading"
-                    class="p-1.5 rounded-md border border-slate-200 text-slate-500 hover:text-amber-700 hover:border-amber-200 disabled:opacity-60"
-                    title="Stop execution"
-                  >
-                    <Square class="w-4 h-4" />
-                  </button>
-                  <button
-                    @click.stop="deleteExecution(exec.id)"
-                    :disabled="loading || actionLoading"
-                    class="p-1.5 rounded-md border border-slate-200 text-slate-500 hover:text-red-600 hover:border-red-200 disabled:opacity-60"
-                    title="Delete execution"
-                  >
-                    <Trash2 class="w-4 h-4" />
-                  </button>
+                    <div class="flex items-center justify-between gap-3">
+                      <p class="text-sm font-semibold text-slate-900">{{ nodeResult.nodeName }}</p>
+                      <ExecutionStatusBadge :status="nodeResult.success ? 'success' : 'failed'" />
+                    </div>
+                    <p class="mt-2 text-xs text-slate-600">
+                      {{
+                        nodeResult.success
+                          ? `Outputs: ${nodeResult.outputsCount}`
+                          : nodeResult.error || 'Node execution failed'
+                      }}
+                    </p>
+                  </div>
                 </div>
               </div>
-            </div>
-          </li>
-        </ul>
-      </div>
 
-      <div
-        v-if="selectedExecution"
-        class="mt-6 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden"
-      >
-        <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-          <div>
-            <h2 class="font-semibold text-slate-900">Execution #{{ selectedExecution.id.slice(0, 8) }}</h2>
-            <p class="text-xs text-slate-500 mt-1">Workflow {{ selectedExecution.workflowId }}</p>
-          </div>
-          <button
-            @click="closeExecutionDetails"
-            class="p-2 rounded-lg border border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-50"
-          >
-            <X class="w-4 h-4" />
-          </button>
-        </div>
-
-        <div class="p-5 space-y-4">
-          <div v-if="nodeResults.length > 0" class="space-y-2">
-            <h3 class="text-sm font-semibold text-slate-700">Node results</h3>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div
-                v-for="result in nodeResults"
-                :key="result.nodeName"
-                class="rounded-lg border p-3"
-                :class="result.success ? 'border-green-200 bg-green-50/50' : 'border-red-200 bg-red-50/50'"
-              >
-                <p class="font-medium text-sm text-slate-900">{{ result.nodeName }}</p>
-                <p class="text-xs mt-1" :class="result.success ? 'text-green-700' : 'text-red-700'">
-                  {{ result.success ? `Success (outputs: ${result.outputsCount})` : (result.error || 'Failed') }}
-                </p>
+              <div class="space-y-3">
+                <div class="flex items-center justify-between">
+                  <h3 class="text-sm font-semibold text-slate-800">Event Timeline</h3>
+                  <p class="text-xs text-slate-400">
+                    {{ selectedEvents.length }} event{{ selectedEvents.length === 1 ? '' : 's' }}
+                  </p>
+                </div>
+                <ExecutionTimeline
+                  :events="selectedEvents"
+                  empty-message="This execution has no lifecycle timeline yet."
+                />
               </div>
-            </div>
-          </div>
 
-          <div>
-            <h3 class="text-sm font-semibold text-slate-700 mb-2">Raw execution data</h3>
-            <pre class="bg-slate-900 text-slate-100 text-xs rounded-lg p-4 overflow-auto max-h-80">{{ executionJson }}</pre>
+              <div class="space-y-3">
+                <h3 class="text-sm font-semibold text-slate-800">Raw Execution Data</h3>
+                <pre class="max-h-[380px] overflow-auto rounded-[28px] bg-slate-950 p-4 text-xs text-slate-100">{{ executionJson }}</pre>
+              </div>
+            </template>
           </div>
-        </div>
+        </section>
       </div>
     </div>
   </div>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { VueFlow, useVueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
@@ -13,7 +13,18 @@ import { useWorkflowStore } from '../stores/workflows'
 import { useNodeStore } from '../stores/nodes'
 import { useRoute, useRouter } from 'vue-router'
 import { listCredentials } from '../features/credentials/api'
-import { getExecution } from '../features/executions/api'
+import {
+  createExecutionEventSource,
+  getExecution,
+} from '../features/executions/api'
+import type { ExecutionEvent } from '../types/contracts'
+import {
+  isTerminalExecutionEvent,
+  mergeExecutionEvents,
+  resolveExecutionStatusFromEvent,
+} from '../features/executions/helpers'
+import ExecutionStatusBadge from '../features/executions/components/ExecutionStatusBadge.vue'
+import ExecutionTimeline from '../features/executions/components/ExecutionTimeline.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -28,6 +39,10 @@ const showNodeCreator = ref(false)
 const executionNotice = ref<{ type: 'success' | 'error'; message: string; showCredentialsAction?: boolean } | null>(null)
 const nodeTestState = ref<{ nodeId: string; status: 'running' | 'success' | 'error'; message: string } | null>(null)
 const executionInProgress = ref(false)
+const liveExecutionId = ref<string | null>(null)
+const liveExecutionEvents = ref<ExecutionEvent[]>([])
+
+let executionEventSource: EventSource | null = null
 
 const NODE_CREDENTIAL_REQUIREMENTS: Record<
   string,
@@ -634,6 +649,157 @@ function buildRunDataPayload({
   }
 }
 
+const recentLiveExecutionEvents = computed(() => {
+  return [...liveExecutionEvents.value]
+    .sort((left, right) => right.sequence - left.sequence)
+    .slice(0, 6)
+})
+
+const liveExecutionStatus = computed(() => {
+  const latestEvent = [...liveExecutionEvents.value].sort((left, right) => right.sequence - left.sequence)[0]
+  return latestEvent ? resolveExecutionStatusFromEvent(latestEvent) : null
+})
+
+function stopExecutionEventStream() {
+  if (executionEventSource) {
+    executionEventSource.close()
+    executionEventSource = null
+  }
+}
+
+function syncSelectedNodeReference(node: any) {
+  if (selectedNode.value && String(selectedNode.value.id) === String(node.id)) {
+    selectedNode.value = node
+  }
+}
+
+function findNodeForExecutionEvent(event: ExecutionEvent, targetNodeId?: string) {
+  if (event.nodeId) {
+    const byId = nodes.value.find((node: any) => String(node.id) === String(event.nodeId))
+    if (byId) return byId
+  }
+
+  if (event.nodeName) {
+    const byLabel = nodes.value.find((node: any) => String(node?.data?.label || '') === event.nodeName)
+    if (byLabel) return byLabel
+  }
+
+  if (targetNodeId) {
+    return nodes.value.find((node: any) => String(node.id) === String(targetNodeId)) || null
+  }
+
+  return null
+}
+
+function applyExecutionEventUpdate(event: ExecutionEvent, targetNodeId?: string) {
+  liveExecutionId.value = event.executionId
+  liveExecutionEvents.value = mergeExecutionEvents(liveExecutionEvents.value, [event])
+
+  const matchedNode = findNodeForExecutionEvent(event, targetNodeId)
+  if (matchedNode) {
+    let nextStatus: string | null = null
+    if (event.eventType === 'nodeStarted') nextStatus = 'running'
+    if (event.eventType === 'nodeFinished') {
+      nextStatus = event.data?.success === false ? 'error' : 'success'
+    }
+    if (event.eventType === 'waiting') nextStatus = 'waiting'
+    if (event.eventType === 'failed' || event.eventType === 'stopped') nextStatus = 'error'
+    if (event.eventType === 'completed' && targetNodeId) nextStatus = 'success'
+
+    if (nextStatus) {
+      matchedNode.data.status = nextStatus
+    }
+
+    matchedNode.data.runData = buildRunDataPayload({
+      source: targetNodeId ? 'nodeTest' : 'workflowExecution',
+      status: resolveExecutionStatusFromEvent(event),
+      executionId: event.executionId,
+      preview: event.message,
+      payload: event.data,
+    })
+    syncSelectedNodeReference(matchedNode)
+  }
+
+  if (event.eventType === 'waiting') {
+    executionNotice.value = {
+      type: 'success',
+      message: event.message,
+    }
+  }
+
+  if (event.eventType === 'failed' || event.eventType === 'stopped') {
+    executionNotice.value = {
+      type: 'error',
+      message: event.message,
+      showCredentialsAction: isCredentialErrorMessage(event.message),
+    }
+  }
+}
+
+function isTerminalExecutionStatus(status: any) {
+  return ['success', 'failed', 'error', 'stopped', 'cancelled', 'waiting'].includes(
+    String(status || '').toLowerCase(),
+  )
+}
+
+async function awaitExecutionCompletion(executionId: string, targetNodeId?: string) {
+  const timeoutMs = 120_000
+  stopExecutionEventStream()
+
+  try {
+    await Promise.race([
+      new Promise<void>((resolve, reject) => {
+        const source = createExecutionEventSource(executionId)
+        executionEventSource = source
+        let settled = false
+
+        const finalize = () => {
+          if (settled) return
+          settled = true
+          if (executionEventSource === source) {
+            executionEventSource = null
+          }
+          source.close()
+        }
+
+        source.addEventListener('execution', (rawEvent) => {
+          const parsed = JSON.parse((rawEvent as MessageEvent<string>).data) as ExecutionEvent
+          applyExecutionEventUpdate(parsed, targetNodeId)
+          if (isTerminalExecutionEvent(parsed)) {
+            finalize()
+            resolve()
+          }
+        })
+
+        source.onerror = () => {
+          finalize()
+          reject(new Error('Execution event stream disconnected.'))
+        }
+      }),
+      new Promise<never>((_, reject) => {
+        window.setTimeout(() => reject(new Error('Execution stream timed out after 120 seconds.')), timeoutMs)
+      }),
+    ])
+  } catch (streamError) {
+    stopExecutionEventStream()
+    const startedAt = Date.now()
+    while (Date.now() - startedAt < timeoutMs) {
+      await new Promise((resolve) => setTimeout(resolve, 500))
+      const response = await getExecution(executionId)
+      const latest = response.data
+      applyExecutionResult(latest, targetNodeId)
+      if (isTerminalExecutionStatus(latest?.status)) {
+        return latest
+      }
+    }
+
+    throw streamError
+  }
+
+  const response = await getExecution(executionId)
+  return response.data
+}
+
 function extractNodeError(result: any, nodeLabel?: string): string {
   if (nodeLabel && result?.data?.[nodeLabel]?.error) {
     return String(result.data[nodeLabel].error)
@@ -726,6 +892,7 @@ async function runWorkflow(
   payload: Record<string, any> = {},
   targetNodeId?: string,
 ) {
+  liveExecutionEvents.value = []
   nodes.value.forEach((n) => {
     if (!targetNodeId || String(n.id) === targetNodeId) {
       n.data.status = 'running'
@@ -741,33 +908,11 @@ async function runWorkflow(
     applyExecutionResult(execution, targetNodeId)
     return execution
   }
-
-  const isTerminal = (status: string) =>
-    ['success', 'failed', 'error', 'stopped', 'cancelled', 'crashed', 'waiting'].includes(
-      status.toLowerCase(),
-    )
+  liveExecutionId.value = executionId
 
   executionInProgress.value = true
   try {
-    let latest = execution
-    const startedAt = Date.now()
-    const timeoutMs = 120_000
-
-    while (!isTerminal(String(latest?.status || ''))) {
-      if (Date.now() - startedAt > timeoutMs) {
-        latest = {
-          ...latest,
-          status: 'failed',
-          data: { error: 'Execution polling timed out after 120 seconds.' },
-        }
-        break
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 500))
-      const response = await getExecution(executionId)
-      latest = response.data
-    }
-
+    const latest = await awaitExecutionCompletion(executionId, targetNodeId)
     applyExecutionResult(latest, targetNodeId)
     return latest
   } finally {
@@ -1073,6 +1218,10 @@ onMounted(async () => {
   edges.value = loadedEdges
 })
 
+onBeforeUnmount(() => {
+  stopExecutionEventStream()
+})
+
 onConnect((params) => {
   addEdges([
     {
@@ -1175,6 +1324,33 @@ function onDrop(event: DragEvent) {
         >
           Open Credentials
         </button>
+      </div>
+
+      <div
+        v-if="liveExecutionId || recentLiveExecutionEvents.length > 0"
+        class="pointer-events-auto absolute bottom-24 left-4 z-10 w-[calc(100%-2rem)] max-w-sm overflow-hidden rounded-[26px] border border-slate-200 bg-white/95 shadow-xl backdrop-blur"
+      >
+        <div class="border-b border-slate-100 px-4 py-3">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                Live Execution
+              </p>
+              <p class="mt-1 font-mono text-xs text-slate-500">
+                {{ liveExecutionId || 'pending' }}
+              </p>
+            </div>
+            <ExecutionStatusBadge :status="liveExecutionStatus || 'running'" />
+          </div>
+        </div>
+        <div class="max-h-72 overflow-auto p-4">
+          <ExecutionTimeline
+            :events="recentLiveExecutionEvents"
+            :compact="true"
+            :limit="6"
+            empty-message="Execution events will appear here while the workflow runs."
+          />
+        </div>
       </div>
 
       <div class="absolute bottom-6 right-6 z-10 pointer-events-auto">

@@ -29,6 +29,8 @@ aes-gcm.workspace = true
 base64 = "0.22.1"
 async-trait.workspace = true
 reqwest.workspace = true
+async-stream = "0.3"
+futures-core = "0.3"
 
 [dev-dependencies]
 wiremock.workspace = true

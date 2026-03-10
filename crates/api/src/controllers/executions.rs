@@ -1,20 +1,30 @@
-use crate::auth::Claims;
+use crate::auth::{decode_claims_from_auth_header, decode_jwt_token, Claims};
 use crate::contracts::ExecutionResponse;
+use crate::execution_events::{
+    extract_execution_events, merge_execution_events, with_execution_event_history,
+    ExecutionEventHub, HubExecutionEventReporter,
+};
 use crate::repositories::credential::CredentialRepository;
 use crate::repositories::execution::ExecutionRepository;
 use crate::repositories::workflow::WorkflowRepository;
 use crate::routes::{ActiveExecutionControl, ActiveExecutionManager};
 use crate::subworkflow_executor::RepositorySubWorkflowExecutor;
+use async_stream::stream;
 use axum::http::StatusCode;
 use axum::{
     extract::{Path, Query, State},
+    http::HeaderMap,
+    response::sse::{Event, KeepAlive, Sse},
     routing::{get, post},
     Json, Router,
 };
+use barqflow_core::contracts::{ExecutionEvent, ExecutionEventType, ExecutionStatus};
+use barqflow_core::types::{IDataObject, NodeId, RunId, WorkflowId};
 use barqflow_db::models::ExecutionEntity;
 use chrono::{Duration as ChronoDuration, Utc};
 use serde::Deserialize;
 use std::sync::Arc;
+use std::convert::Infallible;
 use tokio::time::{sleep, Duration, Instant};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -26,11 +36,14 @@ pub struct AppState {
     pub node_registry: Arc<barqflow_registry::registry::NodeRegistry>,
     pub credential_repo: Arc<CredentialRepository>,
     pub active_executions: ActiveExecutionManager,
+    pub execution_events: ExecutionEventHub,
 }
 
 pub fn execution_routes(state: AppState) -> Router {
     Router::new()
         .route("/executions", get(list_executions))
+        .route("/executions/{id}/events", get(get_execution_events))
+        .route("/executions/{id}/events/stream", get(stream_execution_events))
         .route(
             "/executions/{id}",
             get(get_execution).delete(delete_execution),
@@ -63,6 +76,113 @@ pub struct ExecutionListQuery {
 pub struct CreateExecutionRequest {
     pub manual: Option<bool>,
     pub stop_at_node_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExecutionStreamQuery {
+    pub token: Option<String>,
+}
+
+fn is_terminal_contract_status(status: ExecutionStatus) -> bool {
+    matches!(
+        status,
+        ExecutionStatus::Waiting
+            | ExecutionStatus::Success
+            | ExecutionStatus::Failed
+            | ExecutionStatus::Stopped
+            | ExecutionStatus::Cancelled
+    )
+}
+
+fn build_execution_event(
+    execution_id: Uuid,
+    workflow_id: Uuid,
+    run_id: RunId,
+    sequence: u64,
+    event_type: ExecutionEventType,
+    status: ExecutionStatus,
+    message: impl Into<String>,
+    node_id: Option<NodeId>,
+    node_name: Option<String>,
+    data: serde_json::Value,
+) -> ExecutionEvent {
+    ExecutionEvent {
+        execution_id,
+        workflow_id: WorkflowId(workflow_id),
+        run_id,
+        event_type,
+        status,
+        node_id,
+        node_name,
+        message: message.into(),
+        timestamp: Utc::now(),
+        sequence,
+        data: IDataObject::from(data),
+    }
+}
+
+async fn load_execution_event_history(
+    state: &AppState,
+    execution: &ExecutionEntity,
+) -> Vec<ExecutionEvent> {
+    merge_execution_events(
+        extract_execution_events(&execution.data),
+        state.execution_events.snapshot(execution.id).await,
+    )
+}
+
+async fn append_execution_event(state: &AppState, event: ExecutionEvent) {
+    state.execution_events.append(event).await;
+}
+
+async fn persist_execution_with_events(
+    state: &AppState,
+    execution_id: Uuid,
+    status: &str,
+    payload: serde_json::Value,
+) -> Result<ExecutionEntity, (StatusCode, String)> {
+    let existing = state
+        .execution_repo
+        .find_by_id(execution_id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Execution not found".into()))?;
+
+    let history = load_execution_event_history(state, &existing).await;
+    let decorated = with_execution_event_history(payload, &history);
+
+    state
+        .execution_repo
+        .update_status_and_data(execution_id, status, decorated)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Execution not found".into()))
+}
+
+fn authorize_execution_stream(
+    headers: &HeaderMap,
+    token_from_query: Option<&str>,
+) -> Result<Claims, (StatusCode, String)> {
+    let auth_header = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok());
+
+    if let Some(claims) = decode_claims_from_auth_header(auth_header)
+        .map_err(|message| (StatusCode::UNAUTHORIZED, message.to_string()))?
+    {
+        return Ok(claims);
+    }
+
+    if let Some(token) = token_from_query {
+        return decode_jwt_token(token)
+            .map_err(|message| (StatusCode::UNAUTHORIZED, message.to_string()));
+    }
+
+    Err((
+        StatusCode::UNAUTHORIZED,
+        "Missing or invalid authorization header".to_string(),
+    ))
 }
 
 async fn list_executions(
@@ -112,6 +232,87 @@ async fn get_execution(
     Ok(Json(ExecutionResponse::from(exec)))
 }
 
+async fn get_execution_events(
+    _claims: Claims,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<ExecutionEvent>>, (StatusCode, String)> {
+    let execution = state
+        .execution_repo
+        .find_by_id(id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Execution not found".into()))?;
+
+    Ok(Json(load_execution_event_history(&state, &execution).await))
+}
+
+async fn stream_execution_events(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    headers: HeaderMap,
+    Query(query): Query<ExecutionStreamQuery>,
+) -> Result<Sse<impl futures_core::Stream<Item = Result<Event, Infallible>>>, (StatusCode, String)>
+{
+    let _claims = authorize_execution_stream(&headers, query.token.as_deref())?;
+    let execution = state
+        .execution_repo
+        .find_by_id(id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Execution not found".into()))?;
+
+    let snapshot = load_execution_event_history(&state, &execution).await;
+    let is_active = {
+        let active = state.active_executions.read().await;
+        active.contains_key(&id)
+    };
+
+    let mut receiver = if is_active {
+        Some(state.execution_events.subscribe(id).await)
+    } else {
+        None
+    };
+
+    let event_stream = stream! {
+        for execution_event in snapshot {
+            let terminal = is_terminal_contract_status(execution_event.status);
+            yield Ok::<Event, Infallible>(
+                Event::default()
+                    .event("execution")
+                    .json_data(&execution_event)
+                    .unwrap_or_else(|_| Event::default().data("{}"))
+            );
+            if terminal {
+                return;
+            }
+        }
+
+        if let Some(receiver) = receiver.as_mut() {
+            loop {
+                match receiver.recv().await {
+                    Ok(execution_event) => {
+                        let terminal = is_terminal_contract_status(execution_event.status);
+                        yield Ok::<Event, Infallible>(
+                            Event::default()
+                                .event("execution")
+                                .json_data(&execution_event)
+                                .unwrap_or_else(|_| Event::default().data("{}"))
+                        );
+                        if terminal {
+                            break;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        }
+    };
+
+    Ok(Sse::new(event_stream).keep_alive(KeepAlive::default()))
+}
+
 async fn delete_execution(
     _claims: Claims,
     State(state): State<AppState>,
@@ -124,6 +325,7 @@ async fn delete_execution(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     if deleted {
+        state.execution_events.remove(id).await;
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err((StatusCode::NOT_FOUND, "Execution not found".into()))
@@ -200,19 +402,39 @@ async fn stop_execution(
     };
 
     let Some(control) = control else {
-        let updated = state
-            .execution_repo
-            .update_status_and_data(
+        let next_sequence = load_execution_event_history(&state, &execution)
+            .await
+            .last()
+            .map(|event| event.sequence + 1)
+            .unwrap_or(1);
+        append_execution_event(
+            &state,
+            build_execution_event(
                 execution.id,
-                "stopped",
+                execution.workflow_id,
+                RunId(execution.id),
+                next_sequence,
+                ExecutionEventType::Stopped,
+                ExecutionStatus::Stopped,
+                "Execution stopped because it was not active in the runtime registry",
+                None,
+                None,
                 serde_json::json!({
-                    "stopped": true,
                     "reason": "Execution was not active in runtime registry"
                 }),
-            )
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-            .ok_or_else(|| (StatusCode::NOT_FOUND, "Execution not found".into()))?;
+            ),
+        )
+        .await;
+        let updated = persist_execution_with_events(
+            &state,
+            execution.id,
+            "stopped",
+            serde_json::json!({
+                "stopped": true,
+                "reason": "Execution was not active in runtime registry"
+            }),
+        )
+        .await?;
         return Ok(Json(ExecutionResponse::from(updated)));
     };
 
@@ -266,17 +488,45 @@ async fn stop_execution(
 
     let stopped = state
         .execution_repo
-        .update_status_and_data(
-            execution.id,
-            "stopped",
-            serde_json::json!({
-                "stopped": true,
-                "reason": "Stopped by user",
-            }),
-        )
+        .find_by_id(execution.id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Execution not found".into()))?;
+
+    let next_sequence = load_execution_event_history(&state, &stopped)
+        .await
+        .last()
+        .map(|event| event.sequence + 1)
+        .unwrap_or(1);
+    append_execution_event(
+        &state,
+        build_execution_event(
+            execution.id,
+            execution.workflow_id,
+            RunId(execution.id),
+            next_sequence,
+            ExecutionEventType::Stopped,
+            ExecutionStatus::Stopped,
+            "Execution stopped by user",
+            None,
+            None,
+            serde_json::json!({
+                "reason": "Stopped by user"
+            }),
+        ),
+    )
+    .await;
+
+    let stopped = persist_execution_with_events(
+        &state,
+        execution.id,
+        "stopped",
+        serde_json::json!({
+            "stopped": true,
+            "reason": "Stopped by user",
+        }),
+    )
+    .await?;
 
     Ok(Json(ExecutionResponse::from(stopped)))
 }
@@ -465,23 +715,48 @@ async fn resume_execution(
         ))],
     );
     checkpoint.node_data = serde_json::to_value(&resume_input).unwrap_or(serde_json::Value::Null);
-
-    let _ = state
-        .execution_repo
-        .update_status_and_data(
+    let existing_events = load_execution_event_history(&state, &execution).await;
+    let resumed_sequence = existing_events
+        .last()
+        .map(|event| event.sequence + 1)
+        .unwrap_or(1);
+    let resumed_at = Utc::now().to_rfc3339();
+    append_execution_event(
+        &state,
+        build_execution_event(
             execution_id,
-            "running",
+            execution.workflow_id,
+            run_id,
+            resumed_sequence,
+            ExecutionEventType::Resumed,
+            ExecutionStatus::Running,
+            "Execution resumed",
+            None,
+            Some(wait_resume.node_name.clone()),
             serde_json::json!({
-                "resumed": true,
-                "resumedAt": Utc::now().to_rfc3339(),
+                "resumedAt": resumed_at,
+                "resumeToken": resume_token,
             }),
-        )
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        ),
+    )
+    .await;
+    let _ = persist_execution_with_events(
+        &state,
+        execution_id,
+        "running",
+        serde_json::json!({
+            "resumed": true,
+            "resumedAt": resumed_at,
+        }),
+    )
+    .await?;
 
     let runner = WorkflowRunner::new(state.node_registry.clone(), ExecutionConfig::default())
         .with_credential_provider(credential_provider)
-        .with_subworkflow_executor(subworkflow_executor);
+        .with_subworkflow_executor(subworkflow_executor)
+        .with_event_reporter(Arc::new(HubExecutionEventReporter::new(
+            state.execution_events.clone(),
+        )));
 
     let context = WorkflowRunContext {
         run_id,
@@ -492,18 +767,27 @@ async fn resume_execution(
         parent_execution_id: None,
         cancellation_token: None,
         stop_after_node_id: None,
+        event_sequence_start: resumed_sequence,
     };
 
     let result = runner.resume_workflow(context, checkpoint).await;
 
-    let (status, data) = match result {
+    let (status, data, event_type, event_status, message, node_name_for_event) = match result {
         Ok(node_results) => {
             let _ = checkpoint_manager.delete_checkpoint(&run_id).await;
             let _ = state
                 .execution_repo
                 .delete_wait_resume(wait_resume.id)
                 .await;
-            summarize_node_results(node_results)
+            let (status, data) = summarize_node_results(node_results);
+            (
+                status,
+                data,
+                ExecutionEventType::Completed,
+                ExecutionStatus::Success,
+                "Execution completed successfully".to_string(),
+                None,
+            )
         }
         Err(barqflow_core::errors::BarqError::SuspendExecution {
             node_name,
@@ -516,7 +800,14 @@ async fn resume_execution(
             let waiting_data =
                 build_waiting_execution_data(&state, execution_id, node_name.as_str(), wait_config)
                     .await?;
-            ("waiting".to_string(), waiting_data)
+            (
+                "waiting".to_string(),
+                waiting_data,
+                ExecutionEventType::Waiting,
+                ExecutionStatus::Waiting,
+                format!("Execution waiting at '{}'", node_name),
+                Some(node_name),
+            )
         }
         Err(err) => {
             let _ = state
@@ -526,16 +817,39 @@ async fn resume_execution(
             (
                 "failed".to_string(),
                 serde_json::json!({"error": err.to_string()}),
+                ExecutionEventType::Failed,
+                ExecutionStatus::Failed,
+                format!("Execution failed: {}", err),
+                None,
             )
         }
     };
 
-    let updated = state
-        .execution_repo
-        .update_status_and_data(execution_id, status.as_str(), data)
+    let final_sequence = state
+        .execution_events
+        .snapshot(execution_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "Execution not found".into()))?;
+        .last()
+        .map(|event| event.sequence + 1)
+        .unwrap_or(resumed_sequence + 1);
+    append_execution_event(
+        &state,
+        build_execution_event(
+            execution_id,
+            execution.workflow_id,
+            run_id,
+            final_sequence,
+            event_type,
+            event_status,
+            message,
+            None,
+            node_name_for_event,
+            data.clone(),
+        ),
+    )
+    .await;
+
+    let updated = persist_execution_with_events(&state, execution_id, status.as_str(), data).await?;
 
     Ok(Json(ExecutionResponse::from(updated)))
 }
@@ -613,11 +927,46 @@ async fn run_workflow_execution(
         .create(workflow_id, "running", serde_json::Value::Null)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let run_id = RunId(new_exec.id);
+    append_execution_event(
+        state,
+        build_execution_event(
+            new_exec.id,
+            workflow_id,
+            run_id,
+            1,
+            ExecutionEventType::Queued,
+            ExecutionStatus::Queued,
+            "Execution queued",
+            None,
+            None,
+            serde_json::json!({
+                "manual": manual,
+                "workflowName": wf_entity.name,
+                "stopAfterNodeId": stop_after_node_id,
+            }),
+        ),
+    )
+    .await;
+    let new_exec = persist_execution_with_events(
+        state,
+        new_exec.id,
+        "running",
+        serde_json::json!({
+            "queued": true,
+            "manual": manual,
+            "workflowName": wf_entity.name,
+            "stopAfterNodeId": stop_after_node_id,
+        }),
+    )
+    .await?;
 
     let runner = WorkflowRunner::new(state.node_registry.clone(), ExecutionConfig::default())
         .with_credential_provider(credential_provider)
-        .with_subworkflow_executor(subworkflow_executor);
-    let run_id = RunId(new_exec.id);
+        .with_subworkflow_executor(subworkflow_executor)
+        .with_event_reporter(Arc::new(HubExecutionEventReporter::new(
+            state.execution_events.clone(),
+        )));
     let cancellation_token = CancellationToken::new();
     let ctx = WorkflowRunContext {
         run_id,
@@ -628,6 +977,7 @@ async fn run_workflow_execution(
         parent_execution_id: None,
         cancellation_token: Some(cancellation_token.clone()),
         stop_after_node_id,
+        event_sequence_start: 1,
     };
 
     let run_task = tokio::spawn(async move { runner.run_workflow(ctx).await });
@@ -658,13 +1008,29 @@ async fn run_workflow_execution(
             ))),
         };
 
-        {
-            let mut active = state_for_completion.active_executions.write().await;
-            active.remove(&execution_id);
-        }
-
-        let (status, data) = match results {
-            Ok(res) => summarize_node_results(res),
+        let (status, data, event_type, event_status, message, node_name_for_event) = match results {
+            Ok(res) => {
+                let (status, data) = summarize_node_results(res);
+                if status.eq_ignore_ascii_case("success") {
+                    (
+                        status,
+                        data,
+                        ExecutionEventType::Completed,
+                        ExecutionStatus::Success,
+                        "Execution completed successfully".to_string(),
+                        None,
+                    )
+                } else {
+                    (
+                        status,
+                        data,
+                        ExecutionEventType::Failed,
+                        ExecutionStatus::Failed,
+                        "Execution completed with node failures".to_string(),
+                        None,
+                    )
+                }
+            }
             Err(barqflow_core::errors::BarqError::SuspendExecution {
                 node_name,
                 wait_config,
@@ -676,7 +1042,14 @@ async fn run_workflow_execution(
             )
             .await
             {
-                Ok(waiting_data) => ("waiting".to_string(), waiting_data),
+                Ok(waiting_data) => (
+                    "waiting".to_string(),
+                    waiting_data,
+                    ExecutionEventType::Waiting,
+                    ExecutionStatus::Waiting,
+                    format!("Execution waiting at '{}'", node_name),
+                    Some(node_name),
+                ),
                 Err((code, message)) => (
                     "failed".to_string(),
                     serde_json::json!({
@@ -686,6 +1059,10 @@ async fn run_workflow_execution(
                             message
                         )
                     }),
+                    ExecutionEventType::Failed,
+                    ExecutionStatus::Failed,
+                    format!("Execution failed while persisting wait state: {}", message),
+                    None,
                 ),
             },
             Err(barqflow_core::errors::BarqError::ExecutionCancelledError { .. }) => (
@@ -694,17 +1071,48 @@ async fn run_workflow_execution(
                     "stopped": true,
                     "reason": "Execution cancelled",
                 }),
+                ExecutionEventType::Stopped,
+                ExecutionStatus::Stopped,
+                "Execution cancelled".to_string(),
+                None,
             ),
             Err(e) => (
                 "failed".to_string(),
                 serde_json::json!({"error": e.to_string()}),
+                ExecutionEventType::Failed,
+                ExecutionStatus::Failed,
+                format!("Execution failed: {}", e),
+                None,
             ),
         };
+        let next_sequence = state_for_completion
+            .execution_events
+            .snapshot(execution_id)
+            .await
+            .last()
+            .map(|event| event.sequence + 1)
+            .unwrap_or(2);
+        append_execution_event(
+            &state_for_completion,
+            build_execution_event(
+                execution_id,
+                workflow_id,
+                run_id,
+                next_sequence,
+                event_type,
+                event_status,
+                message,
+                None,
+                node_name_for_event,
+                data.clone(),
+            ),
+        )
+        .await;
 
-        let _ = state_for_completion
-            .execution_repo
-            .update_status_and_data(execution_id, status.as_str(), data)
-            .await;
+        let _ = persist_execution_with_events(&state_for_completion, execution_id, status.as_str(), data).await;
+
+        let mut active = state_for_completion.active_executions.write().await;
+        active.remove(&execution_id);
     });
 
     Ok(new_exec)
