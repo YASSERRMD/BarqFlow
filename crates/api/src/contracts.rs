@@ -563,6 +563,59 @@ pub struct ApiKeyCreateResponse {
     pub key: ApiKeyResponse,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtensionPermissionScopeResponse {
+    pub network: Vec<String>,
+    pub credentials: Vec<String>,
+    pub workflow: Vec<String>,
+    pub filesystem: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtensionProvidedAssetsResponse {
+    pub nodes: Vec<String>,
+    pub templates: Vec<String>,
+    pub panels: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtensionBundleResponse {
+    pub id: String,
+    pub name: String,
+    pub vendor: String,
+    pub version: String,
+    pub runtime: String,
+    pub description: String,
+    pub homepage: Option<String>,
+    pub entrypoint: Option<String>,
+    pub capabilities: Vec<String>,
+    pub permissions: ExtensionPermissionScopeResponse,
+    pub provided_assets: ExtensionProvidedAssetsResponse,
+    pub source_path: String,
+    pub digest: String,
+    pub status: String,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiWorkflowDraftResponse {
+    pub generator: String,
+    pub name: String,
+    pub summary: String,
+    pub rationale: Vec<String>,
+    pub warnings: Vec<String>,
+    pub suggested_tags: Vec<String>,
+    pub required_credentials: Vec<String>,
+    pub recommended_extensions: Vec<String>,
+    pub nodes: Value,
+    pub connections: Value,
+    pub settings: Value,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

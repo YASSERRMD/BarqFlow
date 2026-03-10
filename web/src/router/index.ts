@@ -30,6 +30,11 @@ const router = createRouter({
             component: ExecutionViewer
         },
         {
+            path: '/studio',
+            name: 'AutomationStudio',
+            component: () => import('../views/AutomationStudio.vue')
+        },
+        {
             path: '/credentials',
             name: 'Credentials',
             component: () => import('../views/Credentials.vue')

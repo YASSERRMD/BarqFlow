@@ -31,7 +31,10 @@ async-trait.workspace = true
 reqwest.workspace = true
 async-stream = "0.3"
 futures-core = "0.3"
+sha2 = "0.10"
+hex = "0.4"
 
 [dev-dependencies]
 wiremock.workspace = true
 urlencoding = "2"
+tempfile.workspace = true
