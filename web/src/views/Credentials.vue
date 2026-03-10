@@ -19,6 +19,7 @@ import {
   X,
   XCircle,
 } from 'lucide-vue-next'
+import { listSecretProviders } from '../features/governance/api'
 import {
   createCredential,
   deleteCredentialById,
@@ -31,10 +32,13 @@ import {
   updateCredential,
 } from '../features/credentials/api'
 import {
+  buildExternalSecretReferenceEnvelope,
   CREDENTIAL_QUICK_STARTS,
   credentialAuthKind,
   credentialStatusPresentation,
   credentialSupportsOAuthConnect,
+  credentialUsesExternalSecrets,
+  extractExternalSecretReference,
   formatDateTime,
   formatRelativeTime,
   isSecretCredentialField,
@@ -44,6 +48,7 @@ import type {
   CredentialTypeContract,
   CredentialValidationResult,
   NodeProperty,
+  SecretProviderRecord,
 } from '../types/contracts'
 
 const route = useRoute()
@@ -51,8 +56,10 @@ const router = useRouter()
 
 const credentials = ref<CredentialSummary[]>([])
 const credentialTypes = ref<CredentialTypeContract[]>([])
+const secretProviders = ref<SecretProviderRecord[]>([])
 const credentialsLoading = ref(false)
 const credentialTypesLoading = ref(false)
+const secretProvidersLoading = ref(false)
 const pageError = ref<string | null>(null)
 const pageNotice = ref<string | null>(null)
 
@@ -76,6 +83,10 @@ const routedIntentHandled = ref('')
 
 const credentialTypeMap = computed(() => {
   return new Map(credentialTypes.value.map((type) => [type.name, type]))
+})
+
+const secretProviderMap = computed(() => {
+  return new Map(secretProviders.value.map((provider) => [provider.id, provider]))
 })
 
 const selectedType = computed(() => {
@@ -159,6 +170,9 @@ const attentionCredentialCount = computed(
 const totalUsageCount = computed(() =>
   credentials.value.reduce((sum, credential) => sum + credential.usageCount, 0),
 )
+const externalSecretCredentialCount = computed(
+  () => credentials.value.filter((credential) => credentialUsesExternalSecrets(credential)).length,
+)
 
 function oauthRedirectUri(): string {
   return `${window.location.origin}/rest/oauth2-credential/callback`
@@ -222,6 +236,15 @@ function compactCredentialData(raw: Record<string, unknown>) {
   return compacted
 }
 
+function setDraftFieldValue(name: string, value: unknown) {
+  draftCredentialData.value = {
+    ...draftCredentialData.value,
+    [name]: value,
+  }
+  draftValidation.value = null
+  modalSuccess.value = null
+}
+
 function rowActionState(id: string, action: string) {
   return rowLoading.value[id] === action
 }
@@ -240,11 +263,23 @@ function openCreateModal(typeName?: string) {
 
 function openEditModal(credential: CredentialSummary, mode: 'edit' | 'rotate' = 'edit') {
   const matchedType = credentialTypeMap.value.get(credential.credentialType)
+  const externalSecretDrafts = Object.entries(credential.data || {}).reduce<Record<string, unknown>>((acc, [key, value]) => {
+    const ref = extractExternalSecretReference(value)
+    if (ref) {
+      acc[key] = buildExternalSecretReferenceEnvelope(ref)
+    }
+    return acc
+  }, {})
   modalMode.value = mode
   editingCredentialId.value = credential.id
   selectedTypeName.value = credential.credentialType
   draftCredentialName.value = credential.name
-  draftCredentialData.value = matchedType ? buildDraftForType(matchedType, mode) : {}
+  draftCredentialData.value = matchedType
+    ? {
+        ...buildDraftForType(matchedType, mode),
+        ...externalSecretDrafts,
+      }
+    : externalSecretDrafts
   resetModalState()
   isModalOpen.value = true
 }
@@ -294,8 +329,91 @@ async function fetchCredentialTypes() {
   }
 }
 
+async function fetchSecretProviders() {
+  secretProvidersLoading.value = true
+
+  try {
+    const response = await listSecretProviders()
+    secretProviders.value = response.data
+  } catch (error: any) {
+    pageError.value = error?.response?.data || error?.message || 'Failed to load secret providers.'
+  } finally {
+    secretProvidersLoading.value = false
+  }
+}
+
+async function refreshCredentialSurface() {
+  await Promise.all([fetchCredentials(), fetchSecretProviders()])
+}
+
+function secretFieldReference(propertyName: string) {
+  return extractExternalSecretReference(draftCredentialData.value[propertyName])
+}
+
+function secretFieldUsesExternalReference(propertyName: string) {
+  return !!secretFieldReference(propertyName)
+}
+
+function setSecretFieldMode(property: NodeProperty, mode: 'stored' | 'external') {
+  if (mode === 'external') {
+    const current = secretFieldReference(property.name) || {
+      providerId: secretProviders.value[0]?.id || '',
+      path: '',
+      key: property.name,
+    }
+    setDraftFieldValue(property.name, buildExternalSecretReferenceEnvelope(current))
+    return
+  }
+
+  setDraftFieldValue(property.name, '')
+}
+
+function updateExternalSecretReference(
+  property: NodeProperty,
+  patch: Partial<{ providerId: string; path: string; key: string }>,
+) {
+  const current = secretFieldReference(property.name) || {
+    providerId: secretProviders.value[0]?.id || '',
+    path: '',
+    key: property.name,
+  }
+  setDraftFieldValue(
+    property.name,
+    buildExternalSecretReferenceEnvelope({
+      ...current,
+      ...patch,
+    }),
+  )
+}
+
+function validateExternalSecretReferences() {
+  if (!selectedType.value) return null
+
+  for (const property of selectedType.value.properties || []) {
+    const reference = secretFieldReference(property.name)
+    if (!reference) continue
+
+    if (!reference.providerId || !reference.path.trim() || !reference.key.trim()) {
+      return `${property.displayName} external secret reference is incomplete.`
+    }
+
+    if (!secretProviderMap.value.has(reference.providerId)) {
+      return `${property.displayName} references an unknown secret provider.`
+    }
+  }
+
+  return null
+}
+
 async function testDraftCredential() {
   if (!selectedType.value) return
+
+  const externalSecretValidation = validateExternalSecretReferences()
+  if (externalSecretValidation) {
+    modalError.value = externalSecretValidation
+    modalSuccess.value = null
+    return
+  }
 
   testLoading.value = true
   modalError.value = null
@@ -409,6 +527,13 @@ async function saveCredential(action: 'save' | 'connect') {
     return
   }
 
+  const externalSecretValidation = validateExternalSecretReferences()
+  if (externalSecretValidation) {
+    modalError.value = externalSecretValidation
+    modalSuccess.value = null
+    return
+  }
+
   saveLoading.value = true
   modalError.value = null
   modalSuccess.value = null
@@ -499,12 +624,7 @@ async function deleteCredential(credential: CredentialSummary) {
 }
 
 function updateDraftField(property: NodeProperty, value: unknown) {
-  draftCredentialData.value = {
-    ...draftCredentialData.value,
-    [property.name]: value,
-  }
-  draftValidation.value = null
-  modalSuccess.value = null
+  setDraftFieldValue(property.name, value)
 }
 
 function credentialCardTitle(credential: CredentialSummary) {
@@ -533,7 +653,7 @@ watch(
 )
 
 onMounted(async () => {
-  await Promise.all([fetchCredentials(), fetchCredentialTypes()])
+  await Promise.all([fetchCredentials(), fetchCredentialTypes(), fetchSecretProviders()])
 })
 </script>
 
@@ -560,7 +680,7 @@ onMounted(async () => {
             <button
               type="button"
               class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-              @click="fetchCredentials"
+              @click="refreshCredentialSurface"
             >
               <RefreshCcw class="h-4 w-4" />
               Refresh
@@ -577,7 +697,7 @@ onMounted(async () => {
         </div>
       </section>
 
-      <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <div class="rounded-[1.6rem] border border-slate-200/80 bg-white px-5 py-4 shadow-panel">
           <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Total</p>
           <p class="mt-3 text-3xl font-black text-slate-950">{{ totalCredentialCount }}</p>
@@ -597,6 +717,11 @@ onMounted(async () => {
           <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Usage Events</p>
           <p class="mt-3 text-3xl font-black text-slate-950">{{ totalUsageCount }}</p>
           <p class="mt-1 text-sm text-slate-500">Runtime credential resolutions recorded across executions.</p>
+        </div>
+        <div class="rounded-[1.6rem] border border-slate-200/80 bg-white px-5 py-4 shadow-panel">
+          <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">External Secrets</p>
+          <p class="mt-3 text-3xl font-black text-slate-950">{{ externalSecretCredentialCount }}</p>
+          <p class="mt-1 text-sm text-slate-500">Credential records backed by governance-managed secret providers.</p>
         </div>
       </section>
 
@@ -756,6 +881,12 @@ onMounted(async () => {
                       </span>
                       <span class="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">
                         {{ authKindLabel(credentialTypeMap.get(credential.credentialType) || null) }}
+                      </span>
+                      <span
+                        v-if="credentialUsesExternalSecrets(credential)"
+                        class="rounded-full bg-sky-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-sky-700"
+                      >
+                        External secret
                       </span>
                     </div>
                     <div>
@@ -971,8 +1102,96 @@ onMounted(async () => {
                     </span>
                   </div>
 
+                  <div v-if="isSecretCredentialField(property)" class="mt-3 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      class="rounded-full px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.18em] transition"
+                      :class="secretFieldUsesExternalReference(property.name)
+                        ? 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                        : 'bg-slate-950 text-white'"
+                      @click="setSecretFieldMode(property, 'stored')"
+                    >
+                      Stored value
+                    </button>
+                    <button
+                      type="button"
+                      class="rounded-full px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.18em] transition"
+                      :class="secretFieldUsesExternalReference(property.name)
+                        ? 'bg-sky-600 text-white'
+                        : 'bg-slate-100 text-slate-500 hover:bg-slate-200'"
+                      @click="setSecretFieldMode(property, 'external')"
+                    >
+                      Secret provider
+                    </button>
+                  </div>
+
+                  <div
+                    v-if="isSecretCredentialField(property) && secretFieldUsesExternalReference(property.name)"
+                    class="mt-3 space-y-3 rounded-xl border border-sky-200 bg-sky-50/70 p-3"
+                  >
+                    <label class="block">
+                      <span class="mb-2 block text-[11px] font-bold uppercase tracking-[0.16em] text-sky-700">Provider</span>
+                      <select
+                        :value="secretFieldReference(property.name)?.providerId || ''"
+                        class="w-full rounded-xl border border-sky-200 bg-white px-3 py-2.5 text-sm font-medium text-slate-900 outline-none transition focus:border-sky-400"
+                        @change="updateExternalSecretReference(property, { providerId: ($event.target as HTMLSelectElement).value })"
+                      >
+                        <option value="">Select provider</option>
+                        <option
+                          v-for="provider in secretProviders"
+                          :key="provider.id"
+                          :value="provider.id"
+                        >
+                          {{ provider.name }}
+                        </option>
+                      </select>
+                    </label>
+
+                    <label class="block">
+                      <span class="mb-2 block text-[11px] font-bold uppercase tracking-[0.16em] text-sky-700">Secret path</span>
+                      <input
+                        :value="secretFieldReference(property.name)?.path || ''"
+                        type="text"
+                        class="w-full rounded-xl border border-sky-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-sky-400"
+                        placeholder="services/openai/production"
+                        @input="updateExternalSecretReference(property, { path: ($event.target as HTMLInputElement).value })"
+                      />
+                    </label>
+
+                    <label class="block">
+                      <span class="mb-2 block text-[11px] font-bold uppercase tracking-[0.16em] text-sky-700">Secret key</span>
+                      <input
+                        :value="secretFieldReference(property.name)?.key || ''"
+                        type="text"
+                        class="w-full rounded-xl border border-sky-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-sky-400"
+                        placeholder="api_key"
+                        @input="updateExternalSecretReference(property, { key: ($event.target as HTMLInputElement).value })"
+                      />
+                    </label>
+
+                    <div class="rounded-xl border border-sky-200 bg-white px-3 py-3 text-xs leading-5 text-slate-600">
+                      <p v-if="secretProvidersLoading">Loading available secret providers...</p>
+                      <template v-else-if="secretProviders.length > 0">
+                        Runtime resolution is delegated to the selected provider. The credential record stores only the provider id, path, and key reference.
+                      </template>
+                      <template v-else>
+                        No secret providers are configured yet. Add one in Governance before saving this field as an external reference.
+                      </template>
+                    </div>
+
+                    <button
+                      v-if="secretProviders.length === 0"
+                      type="button"
+                      class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                      @click="router.push('/governance')"
+                    >
+                      Open Governance
+                      <ExternalLink class="h-4 w-4" />
+                    </button>
+                  </div>
+
                   <input
-                    v-if="property.type === 'string'"
+                    v-else-if="property.type === 'string'"
                     :value="String(draftCredentialData[property.name] ?? '')"
                     :type="isSecretCredentialField(property) ? 'password' : 'text'"
                     class="mt-3 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-brand-500"

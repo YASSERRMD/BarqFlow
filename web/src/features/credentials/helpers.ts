@@ -11,6 +11,16 @@ export interface CredentialQuickStart {
   highlight: string
 }
 
+export interface ExternalSecretReference {
+  providerId: string
+  path: string
+  key: string
+}
+
+export interface ExternalSecretReferenceEnvelope {
+  __secretRef: ExternalSecretReference
+}
+
 const SECRET_FIELD_HINTS = ['token', 'secret', 'password', 'key', 'clientsecret', 'apikey']
 const DATABASE_TYPE_HINTS = ['postgres', 'mysql', 'redis', 'mongo', 'database']
 const DATABASE_FIELD_HINTS = ['host', 'port', 'database', 'user']
@@ -98,6 +108,41 @@ export function credentialAuthKind(
 
 export function credentialHasOAuthToken(credential: CredentialSummary): boolean {
   return credential?.data?.oauthTokenData !== undefined
+}
+
+export function extractExternalSecretReference(
+  value: unknown,
+): ExternalSecretReference | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+
+  const maybeEnvelope = value as Record<string, unknown>
+  const secretRef = maybeEnvelope.__secretRef
+  if (!secretRef || typeof secretRef !== 'object' || Array.isArray(secretRef)) return null
+
+  const ref = secretRef as Record<string, unknown>
+  return {
+    providerId: String(ref.providerId || ''),
+    path: String(ref.path || ''),
+    key: String(ref.key || ''),
+  }
+}
+
+export function buildExternalSecretReferenceEnvelope(
+  value: Partial<ExternalSecretReference> = {},
+): ExternalSecretReferenceEnvelope {
+  return {
+    __secretRef: {
+      providerId: String(value.providerId || ''),
+      path: String(value.path || ''),
+      key: String(value.key || ''),
+    },
+  }
+}
+
+export function credentialUsesExternalSecrets(
+  credential: CredentialSummary,
+): boolean {
+  return Object.values(credential.data || {}).some((value) => !!extractExternalSecretReference(value))
 }
 
 export function formatRelativeTime(
