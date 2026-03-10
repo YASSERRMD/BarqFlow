@@ -33,6 +33,7 @@ use crate::controllers::{
     nodes::{node_routes, AppState as NodeState},
     oauth2::{oauth2_routes, OAuth2State},
     settings::{settings_routes, AppState as SettingsState},
+    studio::{studio_routes, AppState as StudioState},
     users::{user_routes, AppState as UserState},
     webhooks::{webhook_routes, WebhookRegistry, WebhookState},
     workflows::{workflow_routes, AppState as WfState},
@@ -115,6 +116,12 @@ pub fn create_router(state: AppState) -> Router {
             active_cron_jobs: Arc::clone(&state.active_cron_jobs),
             active_executions: Arc::clone(&state.active_executions),
             operations_runtime: state.operations_runtime.clone(),
+        }))
+        .merge(studio_routes(StudioState {
+            user_repo: Arc::clone(&state.user_repo),
+            workspace_repo: Arc::clone(&state.workspace_repo),
+            api_key_repo: Arc::clone(&state.api_key_repo),
+            node_registry: Arc::clone(&state.node_registry),
         }))
         .merge(health_routes(HealthState {
             webhook_registry: Arc::clone(&state.webhook_registry),

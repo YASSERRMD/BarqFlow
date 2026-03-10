@@ -5,6 +5,7 @@ pub mod identity;
 pub mod nodes;
 pub mod oauth2;
 pub mod settings;
+pub mod studio;
 pub mod users;
 pub mod webhooks;
 pub mod workflows;
