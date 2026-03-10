@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 import {
+  Activity,
   FolderGit2,
   History,
   LogOut,
@@ -44,6 +45,15 @@ const navItems = [
     matches: (path: string) => path.startsWith('/executions'),
     pageTitle: 'Execution Monitor',
     pageDescription: 'Inspect workflow runs, recovery paths, and execution telemetry.',
+  },
+  {
+    name: 'Observability',
+    path: '/observability',
+    icon: Activity,
+    description: 'Latency, failures, and credential posture',
+    matches: (path: string) => path.startsWith('/observability'),
+    pageTitle: 'Observability Command Center',
+    pageDescription: 'Track node latency, workflow bottlenecks, clustered failures, and credential health across the active workspace.',
   },
   {
     name: 'Automation Studio',

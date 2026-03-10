@@ -32,6 +32,7 @@ use crate::controllers::{
     identity::{identity_routes, AppState as IdentityState},
     nodes::{node_routes, AppState as NodeState},
     oauth2::{oauth2_routes, OAuth2State},
+    observability::{observability_routes, AppState as ObservabilityState},
     settings::{settings_routes, AppState as SettingsState},
     studio::{studio_routes, AppState as StudioState},
     users::{user_routes, AppState as UserState},
@@ -116,6 +117,15 @@ pub fn create_router(state: AppState) -> Router {
             active_cron_jobs: Arc::clone(&state.active_cron_jobs),
             active_executions: Arc::clone(&state.active_executions),
             operations_runtime: state.operations_runtime.clone(),
+        }))
+        .merge(observability_routes(ObservabilityState {
+            workflow_repo: Arc::clone(&state.workflow_repo),
+            credential_repo: Arc::clone(&state.credential_repo),
+            execution_repo: Arc::clone(&state.exec_repo),
+            execution_log_repo: Arc::clone(&state.execution_log_repo),
+            user_repo: Arc::clone(&state.user_repo),
+            workspace_repo: Arc::clone(&state.workspace_repo),
+            api_key_repo: Arc::clone(&state.api_key_repo),
         }))
         .merge(studio_routes(StudioState {
             user_repo: Arc::clone(&state.user_repo),

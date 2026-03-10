@@ -1,6 +1,6 @@
 use barqflow_db::models::{ExecutionEntity, WaitResumeEntity};
 use chrono::{DateTime, Utc};
-use sqlx::{PgPool, Result};
+use sqlx::{PgPool, Postgres, QueryBuilder, Result};
 use uuid::Uuid;
 
 pub struct ExecutionRepository {
@@ -49,6 +49,42 @@ impl ExecutionRepository {
         .bind(workflow_id)
         .fetch_all(&self.pool)
         .await
+    }
+
+    pub async fn find_recent_for_workflow_ids(
+        &self,
+        workflow_ids: &[Uuid],
+        since: DateTime<Utc>,
+        limit: usize,
+    ) -> Result<Vec<ExecutionEntity>> {
+        if workflow_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut query_builder = QueryBuilder::<Postgres>::new(
+            r#"
+            SELECT id, workflow_id, status, data, started_at, stopped_at
+            FROM executions
+            WHERE workflow_id IN (
+            "#,
+        );
+
+        let mut separated = query_builder.separated(", ");
+        for workflow_id in workflow_ids {
+            separated.push_bind(workflow_id);
+        }
+        separated.push_unseparated(")");
+
+        query_builder
+            .push(" AND started_at >= ")
+            .push_bind(since)
+            .push(" ORDER BY started_at DESC LIMIT ")
+            .push_bind(limit as i64);
+
+        query_builder
+            .build_query_as::<ExecutionEntity>()
+            .fetch_all(&self.pool)
+            .await
     }
 
     pub async fn create(
