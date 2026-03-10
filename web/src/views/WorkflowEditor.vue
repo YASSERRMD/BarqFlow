@@ -12,7 +12,8 @@ import NodePanel from '../components/NodePanel.vue'
 import { useWorkflowStore } from '../stores/workflows'
 import { useNodeStore } from '../stores/nodes'
 import { useRoute, useRouter } from 'vue-router'
-import api from '../api'
+import { listCredentials } from '../features/credentials/api'
+import { getExecution } from '../features/executions/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -514,7 +515,7 @@ async function ensureRequiredCredentialsPresent(
   }
 
   try {
-    const response = await api.get('/credentials')
+    const response = await listCredentials()
     const availableByType = new Map<string, Set<string>>()
     ;(response.data || []).forEach((cred: any) => {
       const type = String(cred?.credentialType || '')
@@ -700,7 +701,7 @@ async function runWorkflow(
       }
 
       await new Promise((resolve) => setTimeout(resolve, 500))
-      const response = await api.get(`/executions/${executionId}`)
+      const response = await getExecution(executionId)
       latest = response.data
     }
 

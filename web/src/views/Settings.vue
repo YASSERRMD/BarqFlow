@@ -1,15 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { RefreshCw, ShieldCheck, Clock3, Workflow, KeyRound } from 'lucide-vue-next'
-import api from '../api'
-
-interface RuntimeSettings {
-  serverTime: string
-  environment: string
-  nodeTypesCount: number
-  credentialTypesCount: number
-  encryptionKeyConfigured: boolean
-}
+import { getRuntimeSettings, type RuntimeSettings } from '../features/settings/api'
 
 const runtime = ref<RuntimeSettings | null>(null)
 const loading = ref(false)
@@ -24,7 +16,7 @@ async function fetchRuntimeSettings() {
   loading.value = true
   error.value = null
   try {
-    const response = await api.get('/settings/runtime')
+    const response = await getRuntimeSettings()
     runtime.value = response.data
   } catch (err: any) {
     error.value = err?.response?.data || err?.message || 'Failed to load runtime settings'

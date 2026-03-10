@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { X, Play, Trash2, Info, ExternalLink, Settings2 } from 'lucide-vue-next'
 import { useNodeStore } from '../stores/nodes'
-import api from '../api'
+import { listCredentials } from '../features/credentials/api'
 
 const nodeStore = useNodeStore()
 
@@ -333,9 +333,7 @@ async function loadCredentialOptions() {
   try {
     await Promise.all(
       nodeCredentialRefs.value.map(async (refInfo: any) => {
-        const response = await api.get('/credentials', {
-          params: { type: refInfo.credentialType },
-        })
+        const response = await listCredentials({ type: refInfo.credentialType })
         credentialOptions.value[refInfo.credentialType] = response.data || []
       }),
     )
