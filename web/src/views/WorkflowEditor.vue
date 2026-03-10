@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { VueFlow, useVueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
-import { Plus, Play, Save, Loader2 } from 'lucide-vue-next'
+import { History, Loader2, Play, Plus, Save, Tag, X } from 'lucide-vue-next'
 
 import CustomNode from '../components/CustomNode.vue'
 import NodeCreator from '../components/NodeCreator.vue'
@@ -17,7 +17,7 @@ import {
   createExecutionEventSource,
   getExecution,
 } from '../features/executions/api'
-import type { ExecutionEvent } from '../types/contracts'
+import type { ExecutionEvent, WorkflowHistoryDiff, WorkflowHistoryEntry } from '../types/contracts'
 import {
   isTerminalExecutionEvent,
   mergeExecutionEvents,
@@ -25,6 +25,7 @@ import {
 } from '../features/executions/helpers'
 import ExecutionStatusBadge from '../features/executions/components/ExecutionStatusBadge.vue'
 import ExecutionTimeline from '../features/executions/components/ExecutionTimeline.vue'
+import WorkflowHistoryPanel from '../features/workflows/components/WorkflowHistoryPanel.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -41,6 +42,15 @@ const nodeTestState = ref<{ nodeId: string; status: 'running' | 'success' | 'err
 const executionInProgress = ref(false)
 const liveExecutionId = ref<string | null>(null)
 const liveExecutionEvents = ref<ExecutionEvent[]>([])
+const workflowDraftName = ref('Untitled Workflow')
+const workflowTags = ref<string[]>([])
+const workflowTagInput = ref('')
+const showHistoryPanel = ref(false)
+const historyLoading = ref(false)
+const historyDiffLoading = ref(false)
+const selectedHistoryFromVersion = ref<number | null>(null)
+const selectedHistoryToVersion = ref<number | null>(null)
+const activeHistoryDiff = ref<WorkflowHistoryDiff | null>(null)
 
 let executionEventSource: EventSource | null = null
 
@@ -344,8 +354,44 @@ function onNodeClick({ node }: any) {
   selectedNode.value = node
 }
 
+function normalizeWorkflowTags(rawTags: string[]): string[] {
+  const next: string[] = []
+  const seen = new Set<string>()
+
+  rawTags.forEach((rawTag) => {
+    const tag = String(rawTag || '').trim()
+    if (!tag) return
+
+    const key = tag.toLowerCase()
+    if (seen.has(key)) return
+
+    seen.add(key)
+    next.push(tag)
+  })
+
+  return next
+}
+
+function syncWorkflowMetadataFromRecord(workflow: any) {
+  if (workflow) {
+    workflowDraftName.value = String(workflow?.name || 'Untitled Workflow')
+    workflowTags.value = normalizeWorkflowTags(
+      Array.isArray(workflow?.tags)
+        ? workflow.tags
+            .map((tag: any) => String(tag?.name || tag || ''))
+            .filter((tag: string) => tag.trim().length > 0)
+        : [],
+    )
+    return
+  }
+
+  workflowDraftName.value = 'Untitled Workflow'
+  workflowTags.value = []
+}
+
 function getCurrentWorkflowName() {
-  return workflowStore.activeWorkflow?.name || 'My New Workflow'
+  const name = workflowDraftName.value.trim()
+  return name.length > 0 ? name : 'Untitled Workflow'
 }
 
 function getCurrentWorkflowId(): string | null {
@@ -358,6 +404,24 @@ function getCurrentWorkflowId(): string | null {
 function openCredentialsPage() {
   router.push('/credentials')
 }
+
+function addWorkflowTag(tagName = workflowTagInput.value) {
+  const normalized = normalizeWorkflowTags([...workflowTags.value, tagName])
+  workflowTags.value = normalized
+  workflowTagInput.value = ''
+}
+
+function removeWorkflowTag(tagName: string) {
+  workflowTags.value = workflowTags.value.filter((tag) => tag !== tagName)
+}
+
+watch(
+  () => workflowStore.activeWorkflow,
+  (workflow) => {
+    syncWorkflowMetadataFromRecord(workflow)
+  },
+  { immediate: true },
+)
 
 function isCredentialErrorMessage(message: string): boolean {
   const text = message.toLowerCase()
@@ -660,6 +724,24 @@ const liveExecutionStatus = computed(() => {
   return latestEvent ? resolveExecutionStatusFromEvent(latestEvent) : null
 })
 
+const currentWorkflowHistory = computed<WorkflowHistoryEntry[]>(() => {
+  const workflowId = getCurrentWorkflowId()
+  if (!workflowId) return []
+  return workflowStore.workflowHistory[workflowId] || []
+})
+
+const availableWorkspaceTags = computed(() => {
+  return workflowStore.workflowTags.filter((tag) => !workflowTags.value.includes(tag.name)).slice(0, 8)
+})
+
+const editorNodeCount = computed(() => nodes.value.length)
+
+const editorTriggerCount = computed(() => {
+  return nodes.value.filter((node: any) => node?.data?.isTrigger).length
+})
+
+const editorVersion = computed(() => workflowStore.activeWorkflow?.summary?.latestVersion || 0)
+
 function stopExecutionEventStream() {
   if (executionEventSource) {
     executionEventSource.close()
@@ -862,6 +944,84 @@ function extractNodeOutputPreview(nodeResult: any): string | null {
   return null
 }
 
+function initializeWorkflowHistorySelection(history: WorkflowHistoryEntry[]) {
+  selectedHistoryToVersion.value = history[0]?.version ?? null
+  selectedHistoryFromVersion.value = history[1]?.version ?? history[0]?.version ?? null
+}
+
+async function refreshWorkflowHistory(workflowId: string, autoCompare = false) {
+  const history = await workflowStore.fetchWorkflowHistory(workflowId)
+
+  const knownVersions = new Set(history.map((entry) => entry.version))
+  if (
+    selectedHistoryFromVersion.value === null ||
+    !knownVersions.has(selectedHistoryFromVersion.value) ||
+    selectedHistoryToVersion.value === null ||
+    !knownVersions.has(selectedHistoryToVersion.value)
+  ) {
+    initializeWorkflowHistorySelection(history)
+  }
+
+  if (
+    autoCompare &&
+    selectedHistoryFromVersion.value !== null &&
+    selectedHistoryToVersion.value !== null &&
+    selectedHistoryFromVersion.value !== selectedHistoryToVersion.value
+  ) {
+    activeHistoryDiff.value = await workflowStore.fetchWorkflowHistoryDiff(
+      workflowId,
+      selectedHistoryFromVersion.value,
+      selectedHistoryToVersion.value,
+    )
+  } else if (history.length < 2) {
+    activeHistoryDiff.value = null
+  }
+
+  return history
+}
+
+async function openHistoryInspector() {
+  let workflowId = getCurrentWorkflowId()
+
+  if (!workflowId) {
+    const saved = await handleSave()
+    workflowId = saved?.id || getCurrentWorkflowId()
+  }
+
+  if (!workflowId) return
+
+  showHistoryPanel.value = true
+  historyLoading.value = true
+  try {
+    await refreshWorkflowHistory(workflowId, true)
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+async function loadWorkflowHistoryDiff() {
+  const workflowId = getCurrentWorkflowId()
+  if (!workflowId) return
+  if (
+    selectedHistoryFromVersion.value === null ||
+    selectedHistoryToVersion.value === null ||
+    selectedHistoryFromVersion.value === selectedHistoryToVersion.value
+  ) {
+    return
+  }
+
+  historyDiffLoading.value = true
+  try {
+    activeHistoryDiff.value = await workflowStore.fetchWorkflowHistoryDiff(
+      workflowId,
+      selectedHistoryFromVersion.value,
+      selectedHistoryToVersion.value,
+    )
+  } finally {
+    historyDiffLoading.value = false
+  }
+}
+
 async function handleSave() {
   const flow = toObject()
   const payloadNodes = flow.nodes.map((n: any) => toWorkflowNode(n))
@@ -876,12 +1036,18 @@ async function handleSave() {
     nodes: payloadNodes,
     connections: payloadConnections,
     settings: workflowStore.activeWorkflow?.settings || {},
+    tags: [...workflowTags.value],
   }
 
   const saved = await workflowStore.saveWorkflow(payload)
+  syncWorkflowMetadataFromRecord(saved)
 
   if (route.params.id === 'new' && saved?.id) {
     await router.replace(`/workflow/${saved.id}`)
+  }
+
+  if (showHistoryPanel.value && saved?.id) {
+    await refreshWorkflowHistory(saved.id, true)
   }
 
   return saved
@@ -1202,8 +1368,11 @@ function handleDeleteNode(nodeId: string) {
 }
 
 onMounted(async () => {
-  await nodeStore.fetchNodeTypes()
-  if (!(route.params.id && route.params.id !== 'new')) return
+  await Promise.all([nodeStore.fetchNodeTypes(), workflowStore.fetchWorkflowTags()])
+  if (!(route.params.id && route.params.id !== 'new')) {
+    syncWorkflowMetadataFromRecord(null)
+    return
+  }
 
   await workflowStore.fetchWorkflow(route.params.id as string)
   const activeWf = workflowStore.activeWorkflow
@@ -1280,37 +1449,120 @@ function onDrop(event: DragEvent) {
 <template>
   <div class="h-full w-full flex overflow-hidden bg-transparent">
     <div class="flex-1 relative overflow-hidden">
-      <div class="absolute top-4 left-4 right-4 flex justify-between items-center z-10 pointer-events-none">
-        <div class="bg-white rounded-lg shadow-sm border border-slate-200 px-4 py-2 flex items-center gap-3 pointer-events-auto">
-          <div>
-            <h1 class="font-bold text-slate-800 text-base leading-tight">{{ getCurrentWorkflowName() }}</h1>
-            <p class="text-xs text-slate-500">Builder mode</p>
-          </div>
-        </div>
+      <div class="absolute top-4 left-4 right-4 z-10 pointer-events-none">
+        <div class="pointer-events-auto rounded-[28px] border border-slate-200 bg-white/95 p-4 shadow-[0_18px_50px_rgba(15,23,42,0.08)] backdrop-blur">
+          <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+            <div class="min-w-0 flex-1">
+              <p class="text-[10px] font-black uppercase tracking-[0.22em] text-brand-600">Builder Mode</p>
+              <input
+                v-model="workflowDraftName"
+                type="text"
+                placeholder="Untitled Workflow"
+                class="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-xl font-display font-black text-slate-950 outline-none transition focus:border-brand-400 focus:bg-white"
+              />
+              <div class="mt-3 flex flex-wrap gap-2">
+                <span
+                  v-for="tagName in workflowTags"
+                  :key="tagName"
+                  class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-600"
+                >
+                  <Tag class="h-3.5 w-3.5" />
+                  {{ tagName }}
+                  <button
+                    type="button"
+                    class="text-slate-400 transition hover:text-red-500"
+                    @click="removeWorkflowTag(tagName)"
+                  >
+                    <X class="h-3.5 w-3.5" />
+                  </button>
+                </span>
+                <span
+                  v-if="workflowTags.length === 0"
+                  class="rounded-full border border-dashed border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-400"
+                >
+                  No tags yet
+                </span>
+              </div>
+              <div class="mt-3 flex flex-col gap-3 md:flex-row">
+                <div class="flex flex-1 gap-2">
+                  <input
+                    v-model="workflowTagInput"
+                    type="text"
+                    placeholder="Add workflow tag"
+                    class="w-full rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm font-medium text-slate-900 outline-none transition focus:border-brand-400 focus:bg-white"
+                    @keydown.enter.prevent="addWorkflowTag()"
+                  />
+                  <button
+                    @click="addWorkflowTag()"
+                    class="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 transition hover:border-brand-200 hover:text-brand-600"
+                  >
+                    Add Tag
+                  </button>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <button
+                    v-for="workspaceTag in availableWorkspaceTags"
+                    :key="workspaceTag.id"
+                    type="button"
+                    class="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-500 transition hover:border-brand-200 hover:text-brand-600"
+                    @click="addWorkflowTag(workspaceTag.name)"
+                  >
+                    {{ workspaceTag.name }}
+                  </button>
+                </div>
+              </div>
+            </div>
 
-        <div class="flex gap-2 pointer-events-auto">
-          <button
-            @click="handleSave"
-            class="bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 px-4 py-2 rounded-lg flex items-center gap-2 transition-colors font-semibold text-sm shadow-sm"
-          >
-            <Save class="w-4 h-4" /> Save
-          </button>
-          <button
-            @click="handleExecute"
-            :disabled="workflowStore.loading || executionInProgress"
-            class="bg-brand-500 hover:bg-brand-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors font-semibold text-sm disabled:opacity-70 shadow-sm"
-          >
-            <Loader2 v-if="workflowStore.loading || executionInProgress" class="w-4 h-4 animate-spin" />
-            <Play v-else class="w-4 h-4 fill-current" />
-            {{ workflowStore.loading || executionInProgress ? 'Executing...' : 'Execute Workflow' }}
-          </button>
+            <div class="flex flex-col gap-3 xl:w-[28rem]">
+              <div class="grid gap-3 sm:grid-cols-3">
+                <div class="rounded-2xl bg-slate-50 px-4 py-3">
+                  <p class="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">Nodes</p>
+                  <p class="mt-2 text-lg font-black text-slate-900">{{ editorNodeCount }}</p>
+                </div>
+                <div class="rounded-2xl bg-slate-50 px-4 py-3">
+                  <p class="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">Triggers</p>
+                  <p class="mt-2 text-lg font-black text-slate-900">{{ editorTriggerCount }}</p>
+                </div>
+                <div class="rounded-2xl bg-slate-50 px-4 py-3">
+                  <p class="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">Version</p>
+                  <p class="mt-2 text-lg font-black text-slate-900">v{{ editorVersion }}</p>
+                </div>
+              </div>
+
+              <div class="flex flex-wrap gap-2 xl:justify-end">
+                <button
+                  @click="openHistoryInspector"
+                  class="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 transition hover:border-brand-200 hover:text-brand-600"
+                >
+                  <History class="h-4 w-4" />
+                  History
+                </button>
+                <button
+                  @click="handleSave"
+                  class="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 transition hover:border-slate-300"
+                >
+                  <Save class="h-4 w-4" />
+                  Save
+                </button>
+                <button
+                  @click="handleExecute"
+                  :disabled="workflowStore.loading || executionInProgress"
+                  class="inline-flex items-center gap-2 rounded-2xl bg-brand-500 px-4 py-3 text-sm font-black text-white transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  <Loader2 v-if="workflowStore.loading || executionInProgress" class="h-4 w-4 animate-spin" />
+                  <Play v-else class="h-4 w-4 fill-current" />
+                  {{ workflowStore.loading || executionInProgress ? 'Executing…' : 'Execute Workflow' }}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
       <div
         v-if="executionNotice"
         :class="[
-          'absolute top-20 left-4 right-4 z-20 p-3 rounded-lg border text-sm font-medium pointer-events-auto',
+          'absolute left-4 right-4 top-44 z-20 rounded-lg border p-3 text-sm font-medium pointer-events-auto',
           executionNotice.type === 'success'
             ? 'bg-green-50 border-green-200 text-green-700'
             : 'bg-red-50 border-red-200 text-red-700',
@@ -1378,6 +1630,20 @@ function onDrop(event: DragEvent) {
           <MiniMap class="!bg-white !border-slate-200 !shadow-sm !rounded-md mr-20 mb-6" />
         </VueFlow>
       </div>
+
+      <WorkflowHistoryPanel
+        :show="showHistoryPanel"
+        :loading="historyLoading"
+        :diff-loading="historyDiffLoading"
+        :history="currentWorkflowHistory"
+        :diff="activeHistoryDiff"
+        :from-version="selectedHistoryFromVersion"
+        :to-version="selectedHistoryToVersion"
+        @close="showHistoryPanel = false"
+        @update:from-version="selectedHistoryFromVersion = $event"
+        @update:to-version="selectedHistoryToVersion = $event"
+        @load-diff="loadWorkflowHistoryDiff"
+      />
     </div>
 
     <NodeCreator :show="showNodeCreator" @close="showNodeCreator = false" @dragstart="onDragStart" />
