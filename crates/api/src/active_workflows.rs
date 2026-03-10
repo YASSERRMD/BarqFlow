@@ -1,6 +1,7 @@
 use crate::controllers::webhooks::{WebhookEndpoint, WebhookRegistry};
 use crate::credentials_provider::RepositoryCredentialProvider;
 use crate::repositories::credential::CredentialRepository;
+use crate::repositories::governance::GovernanceRepository;
 use crate::repositories::workflow::WorkflowRepository;
 use crate::subworkflow_executor::RepositorySubWorkflowExecutor;
 use barqflow_core::schema::{INode, INodeConnections, IWorkflowSettings, WorkflowDef};
@@ -21,6 +22,7 @@ pub type ActiveCronJobs = Arc<RwLock<HashMap<Uuid, Vec<Uuid>>>>;
 pub struct ActiveWorkflowManager {
     pub workflow_repo: Arc<WorkflowRepository>,
     pub credential_repo: Arc<CredentialRepository>,
+    pub governance_repo: Arc<GovernanceRepository>,
     pub node_registry: Arc<NodeRegistry>,
     pub webhook_registry: WebhookRegistry,
     pub job_scheduler: JobScheduler,
@@ -31,6 +33,7 @@ impl ActiveWorkflowManager {
     pub fn new(
         workflow_repo: Arc<WorkflowRepository>,
         credential_repo: Arc<CredentialRepository>,
+        governance_repo: Arc<GovernanceRepository>,
         node_registry: Arc<NodeRegistry>,
         webhook_registry: WebhookRegistry,
         job_scheduler: JobScheduler,
@@ -39,6 +42,7 @@ impl ActiveWorkflowManager {
         Self {
             workflow_repo,
             credential_repo,
+            governance_repo,
             node_registry,
             webhook_registry,
             job_scheduler,
@@ -194,6 +198,7 @@ impl ActiveWorkflowManager {
             let nodes_clone = nodes.clone();
             let node_registry = Arc::clone(&self.node_registry);
             let credential_repo = Arc::clone(&self.credential_repo);
+            let governance_repo = Arc::clone(&self.governance_repo);
             let workflow_repo = Arc::clone(&self.workflow_repo);
 
             let job = Job::new_async(cron_expr.as_str(), move |_uuid, _l| {
@@ -201,6 +206,7 @@ impl ActiveWorkflowManager {
                 let nodes_clone = nodes_clone.clone();
                 let node_registry = Arc::clone(&node_registry);
                 let credential_repo = Arc::clone(&credential_repo);
+                let governance_repo = Arc::clone(&governance_repo);
                 let workflow_repo = Arc::clone(&workflow_repo);
 
                 Box::pin(async move {
@@ -221,11 +227,13 @@ impl ActiveWorkflowManager {
 
                     let credential_provider = Arc::new(RepositoryCredentialProvider::new(
                         Arc::clone(&credential_repo),
+                        Arc::clone(&governance_repo),
                         &nodes_clone,
                     ));
                     let subworkflow_executor = Arc::new(RepositorySubWorkflowExecutor::new(
                         Arc::clone(&workflow_repo),
                         Arc::clone(&credential_repo),
+                        Arc::clone(&governance_repo),
                         Arc::clone(&node_registry),
                     ));
                     let runner = WorkflowRunner::new(node_registry, ExecutionConfig::default())

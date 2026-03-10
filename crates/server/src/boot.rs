@@ -10,6 +10,7 @@ pub async fn run_boot_sequence(
     let manager = ActiveWorkflowManager::new(
         std::sync::Arc::clone(&state.workflow_repo),
         std::sync::Arc::clone(&state.credential_repo),
+        std::sync::Arc::clone(&state.governance_repo),
         std::sync::Arc::clone(&state.node_registry),
         std::sync::Arc::clone(&state.webhook_registry),
         state.job_scheduler.clone(),

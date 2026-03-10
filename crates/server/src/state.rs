@@ -4,8 +4,9 @@ use barqflow_api::execution_events::ExecutionEventHub;
 use barqflow_api::operations::OperationsRuntime;
 use barqflow_api::repositories::{
     api_key::ApiKeyRepository, credential::CredentialRepository, execution::ExecutionRepository,
-    execution_log::ExecutionLogRepository, static_data::StaticDataRepository,
-    workflow::WorkflowRepository, workspace::WorkspaceRepository,
+    execution_log::ExecutionLogRepository, governance::GovernanceRepository,
+    static_data::StaticDataRepository, workflow::WorkflowRepository,
+    workspace::WorkspaceRepository,
 };
 use barqflow_api::routes::ActiveExecutionManager;
 use barqflow_api::AppState as ApiState;
@@ -23,6 +24,7 @@ pub struct AppState {
     pub execution_repo: Arc<ExecutionRepository>,
     pub execution_log_repo: Arc<ExecutionLogRepository>,
     pub credential_repo: Arc<CredentialRepository>,
+    pub governance_repo: Arc<GovernanceRepository>,
     pub static_data_repo: Arc<StaticDataRepository>,
     pub user_repo: Arc<UserRepo>,
     pub workspace_repo: Arc<WorkspaceRepository>,
@@ -60,6 +62,7 @@ impl AppState {
             execution_repo: Arc::new(ExecutionRepository::new(pool.clone())),
             execution_log_repo: Arc::new(ExecutionLogRepository::new(pool.clone())),
             credential_repo: Arc::new(CredentialRepository::new(pool.clone())),
+            governance_repo: Arc::new(GovernanceRepository::new(pool.clone())),
             static_data_repo: Arc::new(StaticDataRepository::new(pool.clone())),
             user_repo: Arc::new(UserRepo::new(pool.clone())),
             workspace_repo: Arc::new(WorkspaceRepository::new(pool.clone())),
@@ -79,6 +82,7 @@ impl AppState {
         ApiState {
             workflow_repo: Arc::clone(&self.workflow_repo),
             credential_repo: Arc::clone(&self.credential_repo),
+            governance_repo: Arc::clone(&self.governance_repo),
             exec_repo: Arc::clone(&self.execution_repo),
             execution_log_repo: Arc::clone(&self.execution_log_repo),
             user_repo: Arc::clone(&self.user_repo),
