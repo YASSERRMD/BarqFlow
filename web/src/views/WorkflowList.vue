@@ -472,12 +472,12 @@ onBeforeUnmount(() => {
         <div class="pointer-events-none absolute inset-y-0 right-0 w-[32rem] bg-[radial-gradient(circle_at_top_right,_rgba(14,165,233,0.18),_transparent_58%),radial-gradient(circle_at_bottom_right,_rgba(15,23,42,0.08),_transparent_52%)]"></div>
         <div class="relative flex flex-col gap-8 xl:flex-row xl:items-end xl:justify-between">
           <div class="max-w-3xl">
-            <p class="text-xs font-black uppercase tracking-[0.28em] text-brand-600">Workflow Command Center</p>
+            <p class="text-xs font-black uppercase tracking-[0.28em] text-brand-600">Workflow Management</p>
             <h1 class="mt-4 text-4xl font-display font-black tracking-tight text-slate-950 md:text-5xl">
-              Manage workflows like a product surface, not a canvas demo.
+              Workflow Catalog and Operations
             </h1>
             <p class="mt-4 max-w-2xl text-base font-medium leading-7 text-slate-600 md:text-lg">
-              Search, tag, import, export, template, and operate every workflow from one place before you even open the editor.
+              Search, organize, import, export, and operate workflows from one operational workspace before opening the editor.
             </p>
           </div>
 
