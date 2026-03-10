@@ -315,14 +315,76 @@ export interface CredentialOAuthConnectResult {
   state: string
 }
 
+export interface WorkspaceSummary {
+  id: string
+  name: string
+  slug: string
+  role: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface WorkspaceMember {
+  membershipId: string
+  userId: string
+  email: string
+  firstName?: string | null
+  lastName?: string | null
+  role: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ApiKeyRecord {
+  id: string
+  name: string
+  keyPrefix: string
+  workspaceId: string
+  userId: string
+  lastUsedAt?: string | null
+  expiresAt?: string | null
+  revokedAt?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ApiKeyCreateResult {
+  apiKey: string
+  key: ApiKeyRecord
+}
+
 export interface UserProfile {
   id: string
   email: string
+  firstName?: string | null
+  lastName?: string | null
   role: string
+  workspaceRole: string
+  activeWorkspace: WorkspaceSummary
+  workspaces: WorkspaceSummary[]
 }
 
 export interface AuthResponse {
   token: string
   userId: string
   user: UserProfile
+}
+
+export interface ChangePasswordRequest {
+  currentPassword: string
+  newPassword: string
+}
+
+export interface CreateWorkspaceRequest {
+  name: string
+}
+
+export interface AddWorkspaceMemberRequest {
+  email: string
+  role: string
+}
+
+export interface CreateApiKeyRequest {
+  name: string
+  expiresAt?: string | null
 }

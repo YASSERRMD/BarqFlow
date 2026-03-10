@@ -1,7 +1,7 @@
 use crate::crypto::CryptoService;
 use barqflow_db::models::CredentialEntity;
 use chrono::Utc;
-use sqlx::{PgPool, Result};
+use sqlx::{PgPool, Postgres, Result, Transaction};
 use uuid::Uuid;
 
 pub struct CredentialRepository {
@@ -11,6 +11,8 @@ pub struct CredentialRepository {
 
 const CREDENTIAL_COLUMNS: &str = r#"
     id,
+    workspace_id,
+    owner_user_id,
     name,
     cred_type,
     data,
@@ -27,8 +29,6 @@ const CREDENTIAL_COLUMNS: &str = r#"
 impl CredentialRepository {
     pub fn new(pool: PgPool) -> Self {
         let crypto = CryptoService::new().unwrap_or_else(|e| {
-            // Panic if crypto fails to load in production, or handle properly.
-            // For BarqFlow, panicking on invalid encryption key prevents corrupted writes.
             panic!("Failed to initialize CryptoService: {}", e);
         });
         Self { pool, crypto }
@@ -45,8 +45,28 @@ impl CredentialRepository {
         .fetch_all(&self.pool)
         .await?;
 
-        for e in &mut entities {
-            self.decrypt_entity_data(e);
+        for entity in &mut entities {
+            self.decrypt_entity_data(entity);
+        }
+
+        Ok(entities)
+    }
+
+    pub async fn find_all_in_workspace(&self, workspace_id: Uuid) -> Result<Vec<CredentialEntity>> {
+        let mut entities = sqlx::query_as::<_, CredentialEntity>(&format!(
+            r#"
+            SELECT {CREDENTIAL_COLUMNS}
+            FROM credentials
+            WHERE workspace_id = $1
+            ORDER BY name ASC
+            "#
+        ))
+        .bind(workspace_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        for entity in &mut entities {
+            self.decrypt_entity_data(entity);
         }
 
         Ok(entities)
@@ -64,8 +84,32 @@ impl CredentialRepository {
         .fetch_optional(&self.pool)
         .await?;
 
-        if let Some(ref mut e) = entity_opt {
-            self.decrypt_entity_data(e);
+        if let Some(ref mut entity) = entity_opt {
+            self.decrypt_entity_data(entity);
+        }
+
+        Ok(entity_opt)
+    }
+
+    pub async fn find_by_id_in_workspace(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+    ) -> Result<Option<CredentialEntity>> {
+        let mut entity_opt = sqlx::query_as::<_, CredentialEntity>(&format!(
+            r#"
+            SELECT {CREDENTIAL_COLUMNS}
+            FROM credentials
+            WHERE id = $1 AND workspace_id = $2
+            "#
+        ))
+        .bind(id)
+        .bind(workspace_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        if let Some(ref mut entity) = entity_opt {
+            self.decrypt_entity_data(entity);
         }
 
         Ok(entity_opt)
@@ -85,8 +129,34 @@ impl CredentialRepository {
         .fetch_optional(&self.pool)
         .await?;
 
-        if let Some(ref mut e) = entity_opt {
-            self.decrypt_entity_data(e);
+        if let Some(ref mut entity) = entity_opt {
+            self.decrypt_entity_data(entity);
+        }
+
+        Ok(entity_opt)
+    }
+
+    pub async fn find_by_name_in_workspace(
+        &self,
+        workspace_id: Uuid,
+        name: &str,
+    ) -> Result<Option<CredentialEntity>> {
+        let mut entity_opt = sqlx::query_as::<_, CredentialEntity>(&format!(
+            r#"
+            SELECT {CREDENTIAL_COLUMNS}
+            FROM credentials
+            WHERE workspace_id = $1 AND name = $2
+            ORDER BY updated_at DESC
+            LIMIT 1
+            "#
+        ))
+        .bind(workspace_id)
+        .bind(name)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        if let Some(ref mut entity) = entity_opt {
+            self.decrypt_entity_data(entity);
         }
 
         Ok(entity_opt)
@@ -105,8 +175,33 @@ impl CredentialRepository {
         .fetch_all(&self.pool)
         .await?;
 
-        for e in &mut entities {
-            self.decrypt_entity_data(e);
+        for entity in &mut entities {
+            self.decrypt_entity_data(entity);
+        }
+
+        Ok(entities)
+    }
+
+    pub async fn find_by_type_in_workspace(
+        &self,
+        workspace_id: Uuid,
+        cred_type: &str,
+    ) -> Result<Vec<CredentialEntity>> {
+        let mut entities = sqlx::query_as::<_, CredentialEntity>(&format!(
+            r#"
+            SELECT {CREDENTIAL_COLUMNS}
+            FROM credentials
+            WHERE workspace_id = $1 AND cred_type = $2
+            ORDER BY name ASC
+            "#
+        ))
+        .bind(workspace_id)
+        .bind(cred_type)
+        .fetch_all(&self.pool)
+        .await?;
+
+        for entity in &mut entities {
+            self.decrypt_entity_data(entity);
         }
 
         Ok(entities)
@@ -126,8 +221,34 @@ impl CredentialRepository {
         .fetch_optional(&self.pool)
         .await?;
 
-        if let Some(ref mut e) = entity_opt {
-            self.decrypt_entity_data(e);
+        if let Some(ref mut entity) = entity_opt {
+            self.decrypt_entity_data(entity);
+        }
+
+        Ok(entity_opt)
+    }
+
+    pub async fn find_latest_by_type_in_workspace(
+        &self,
+        workspace_id: Uuid,
+        cred_type: &str,
+    ) -> Result<Option<CredentialEntity>> {
+        let mut entity_opt = sqlx::query_as::<_, CredentialEntity>(&format!(
+            r#"
+            SELECT {CREDENTIAL_COLUMNS}
+            FROM credentials
+            WHERE workspace_id = $1 AND cred_type = $2
+            ORDER BY updated_at DESC
+            LIMIT 1
+            "#
+        ))
+        .bind(workspace_id)
+        .bind(cred_type)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        if let Some(ref mut entity) = entity_opt {
+            self.decrypt_entity_data(entity);
         }
 
         Ok(entity_opt)
@@ -139,31 +260,29 @@ impl CredentialRepository {
         cred_type: &str,
         data: serde_json::Value,
     ) -> Result<CredentialEntity> {
-        let id = Uuid::new_v4();
-        let now = Utc::now();
+        let mut tx = self.pool.begin().await?;
+        let (workspace_id, owner_user_id) = self.resolve_workspace_context_tx(&mut tx).await?;
+        let entity = self
+            .create_in_tx(&mut tx, workspace_id, owner_user_id, name, cred_type, data)
+            .await?;
+        tx.commit().await?;
+        Ok(entity)
+    }
 
-        // Encrypt the sensitive JSON data into a base64 string
-        let encrypted_base64 = self
-            .crypto
-            .encrypt_value(&data)
-            .map_err(|e| sqlx::Error::Protocol(format!("Encryption error: {}", e)))?;
-        let encrypted_data = serde_json::json!({ "encrypted": encrypted_base64 });
-
-        sqlx::query_as::<_, CredentialEntity>(&format!(
-            r#"
-            INSERT INTO credentials (id, name, cred_type, data, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            RETURNING {CREDENTIAL_COLUMNS}
-            "#
-        ))
-        .bind(id)
-        .bind(name)
-        .bind(cred_type)
-        .bind(encrypted_data)
-        .bind(now)
-        .bind(now)
-        .fetch_one(&self.pool)
-        .await
+    pub async fn create_in_workspace(
+        &self,
+        workspace_id: Uuid,
+        owner_user_id: Option<Uuid>,
+        name: &str,
+        cred_type: &str,
+        data: serde_json::Value,
+    ) -> Result<CredentialEntity> {
+        let mut tx = self.pool.begin().await?;
+        let entity = self
+            .create_in_tx(&mut tx, workspace_id, owner_user_id, name, cred_type, data)
+            .await?;
+        tx.commit().await?;
+        Ok(entity)
     }
 
     pub async fn update(
@@ -172,28 +291,17 @@ impl CredentialRepository {
         name: &str,
         data: serde_json::Value,
     ) -> Result<Option<CredentialEntity>> {
-        let now = Utc::now();
+        self.update_scoped(None, id, name, data).await
+    }
 
-        let encrypted_base64 = self
-            .crypto
-            .encrypt_value(&data)
-            .map_err(|e| sqlx::Error::Protocol(format!("Encryption error: {}", e)))?;
-        let encrypted_data = serde_json::json!({ "encrypted": encrypted_base64 });
-
-        sqlx::query_as::<_, CredentialEntity>(&format!(
-            r#"
-            UPDATE credentials
-            SET name = $1, data = $2, updated_at = $3
-            WHERE id = $4
-            RETURNING {CREDENTIAL_COLUMNS}
-            "#
-        ))
-        .bind(name)
-        .bind(encrypted_data)
-        .bind(now)
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await
+    pub async fn update_in_workspace(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+        name: &str,
+        data: serde_json::Value,
+    ) -> Result<Option<CredentialEntity>> {
+        self.update_scoped(Some(workspace_id), id, name, data).await
     }
 
     pub async fn rotate(
@@ -202,35 +310,17 @@ impl CredentialRepository {
         name: &str,
         data: serde_json::Value,
     ) -> Result<Option<CredentialEntity>> {
-        let now = Utc::now();
+        self.rotate_scoped(None, id, name, data).await
+    }
 
-        let encrypted_base64 = self
-            .crypto
-            .encrypt_value(&data)
-            .map_err(|e| sqlx::Error::Protocol(format!("Encryption error: {}", e)))?;
-        let encrypted_data = serde_json::json!({ "encrypted": encrypted_base64 });
-
-        sqlx::query_as::<_, CredentialEntity>(&format!(
-            r#"
-            UPDATE credentials
-            SET
-                name = $1,
-                data = $2,
-                updated_at = $3,
-                rotated_at = $3,
-                last_tested_at = NULL,
-                last_test_status = NULL,
-                last_test_message = NULL
-            WHERE id = $4
-            RETURNING {CREDENTIAL_COLUMNS}
-            "#
-        ))
-        .bind(name)
-        .bind(encrypted_data)
-        .bind(now)
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await
+    pub async fn rotate_in_workspace(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+        name: &str,
+        data: serde_json::Value,
+    ) -> Result<Option<CredentialEntity>> {
+        self.rotate_scoped(Some(workspace_id), id, name, data).await
     }
 
     pub async fn record_test_result(
@@ -239,76 +329,325 @@ impl CredentialRepository {
         status: &str,
         message: Option<&str>,
     ) -> Result<Option<CredentialEntity>> {
-        let now = Utc::now();
+        self.record_test_result_scoped(None, id, status, message)
+            .await
+    }
 
-        sqlx::query_as::<_, CredentialEntity>(&format!(
-            r#"
-            UPDATE credentials
-            SET
-                last_tested_at = $1,
-                last_test_status = $2,
-                last_test_message = $3
-            WHERE id = $4
-            RETURNING {CREDENTIAL_COLUMNS}
-            "#
-        ))
-        .bind(now)
-        .bind(status)
-        .bind(message)
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await
+    pub async fn record_test_result_in_workspace(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+        status: &str,
+        message: Option<&str>,
+    ) -> Result<Option<CredentialEntity>> {
+        self.record_test_result_scoped(Some(workspace_id), id, status, message)
+            .await
     }
 
     pub async fn clear_test_result(&self, id: Uuid) -> Result<Option<CredentialEntity>> {
+        self.clear_test_result_scoped(None, id).await
+    }
+
+    pub async fn clear_test_result_in_workspace(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+    ) -> Result<Option<CredentialEntity>> {
+        self.clear_test_result_scoped(Some(workspace_id), id).await
+    }
+
+    pub async fn record_usage(&self, id: Uuid) -> Result<bool> {
+        self.record_usage_scoped(None, id).await
+    }
+
+    pub async fn record_usage_in_workspace(&self, workspace_id: Uuid, id: Uuid) -> Result<bool> {
+        self.record_usage_scoped(Some(workspace_id), id).await
+    }
+
+    pub async fn delete(&self, id: Uuid) -> Result<bool> {
+        self.delete_scoped(None, id).await
+    }
+
+    pub async fn delete_in_workspace(&self, workspace_id: Uuid, id: Uuid) -> Result<bool> {
+        self.delete_scoped(Some(workspace_id), id).await
+    }
+
+    async fn create_in_tx(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        workspace_id: Uuid,
+        owner_user_id: Option<Uuid>,
+        name: &str,
+        cred_type: &str,
+        data: serde_json::Value,
+    ) -> Result<CredentialEntity> {
+        let id = Uuid::new_v4();
+        let now = Utc::now();
+        let encrypted_data = self.encrypt_data(data)?;
+
         sqlx::query_as::<_, CredentialEntity>(&format!(
             r#"
-            UPDATE credentials
-            SET
-                last_tested_at = NULL,
-                last_test_status = NULL,
-                last_test_message = NULL
-            WHERE id = $1
+            INSERT INTO credentials (
+                id,
+                workspace_id,
+                owner_user_id,
+                name,
+                cred_type,
+                data,
+                created_at,
+                updated_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING {CREDENTIAL_COLUMNS}
             "#
         ))
         .bind(id)
-        .fetch_optional(&self.pool)
+        .bind(workspace_id)
+        .bind(owner_user_id)
+        .bind(name)
+        .bind(cred_type)
+        .bind(encrypted_data)
+        .bind(now)
+        .bind(now)
+        .fetch_one(&mut **tx)
         .await
     }
 
-    pub async fn record_usage(&self, id: Uuid) -> Result<bool> {
+    async fn update_scoped(
+        &self,
+        workspace_id: Option<Uuid>,
+        id: Uuid,
+        name: &str,
+        data: serde_json::Value,
+    ) -> Result<Option<CredentialEntity>> {
         let now = Utc::now();
+        let encrypted_data = self.encrypt_data(data)?;
+        let sql = if workspace_id.is_some() {
+            format!(
+                r#"
+                UPDATE credentials
+                SET name = $1, data = $2, updated_at = $3
+                WHERE id = $4 AND workspace_id = $5
+                RETURNING {CREDENTIAL_COLUMNS}
+                "#
+            )
+        } else {
+            format!(
+                r#"
+                UPDATE credentials
+                SET name = $1, data = $2, updated_at = $3
+                WHERE id = $4
+                RETURNING {CREDENTIAL_COLUMNS}
+                "#
+            )
+        };
 
-        let result = sqlx::query(
+        let mut query = sqlx::query_as::<_, CredentialEntity>(&sql)
+            .bind(name)
+            .bind(encrypted_data)
+            .bind(now)
+            .bind(id);
+
+        if let Some(workspace_id) = workspace_id {
+            query = query.bind(workspace_id);
+        }
+
+        query.fetch_optional(&self.pool).await
+    }
+
+    async fn rotate_scoped(
+        &self,
+        workspace_id: Option<Uuid>,
+        id: Uuid,
+        name: &str,
+        data: serde_json::Value,
+    ) -> Result<Option<CredentialEntity>> {
+        let now = Utc::now();
+        let encrypted_data = self.encrypt_data(data)?;
+        let sql = if workspace_id.is_some() {
+            format!(
+                r#"
+                UPDATE credentials
+                SET
+                    name = $1,
+                    data = $2,
+                    updated_at = $3,
+                    rotated_at = $3,
+                    last_tested_at = NULL,
+                    last_test_status = NULL,
+                    last_test_message = NULL
+                WHERE id = $4 AND workspace_id = $5
+                RETURNING {CREDENTIAL_COLUMNS}
+                "#
+            )
+        } else {
+            format!(
+                r#"
+                UPDATE credentials
+                SET
+                    name = $1,
+                    data = $2,
+                    updated_at = $3,
+                    rotated_at = $3,
+                    last_tested_at = NULL,
+                    last_test_status = NULL,
+                    last_test_message = NULL
+                WHERE id = $4
+                RETURNING {CREDENTIAL_COLUMNS}
+                "#
+            )
+        };
+
+        let mut query = sqlx::query_as::<_, CredentialEntity>(&sql)
+            .bind(name)
+            .bind(encrypted_data)
+            .bind(now)
+            .bind(id);
+
+        if let Some(workspace_id) = workspace_id {
+            query = query.bind(workspace_id);
+        }
+
+        query.fetch_optional(&self.pool).await
+    }
+
+    async fn record_test_result_scoped(
+        &self,
+        workspace_id: Option<Uuid>,
+        id: Uuid,
+        status: &str,
+        message: Option<&str>,
+    ) -> Result<Option<CredentialEntity>> {
+        let now = Utc::now();
+        let sql = if workspace_id.is_some() {
+            format!(
+                r#"
+                UPDATE credentials
+                SET
+                    last_tested_at = $1,
+                    last_test_status = $2,
+                    last_test_message = $3
+                WHERE id = $4 AND workspace_id = $5
+                RETURNING {CREDENTIAL_COLUMNS}
+                "#
+            )
+        } else {
+            format!(
+                r#"
+                UPDATE credentials
+                SET
+                    last_tested_at = $1,
+                    last_test_status = $2,
+                    last_test_message = $3
+                WHERE id = $4
+                RETURNING {CREDENTIAL_COLUMNS}
+                "#
+            )
+        };
+
+        let mut query = sqlx::query_as::<_, CredentialEntity>(&sql)
+            .bind(now)
+            .bind(status)
+            .bind(message)
+            .bind(id);
+
+        if let Some(workspace_id) = workspace_id {
+            query = query.bind(workspace_id);
+        }
+
+        query.fetch_optional(&self.pool).await
+    }
+
+    async fn clear_test_result_scoped(
+        &self,
+        workspace_id: Option<Uuid>,
+        id: Uuid,
+    ) -> Result<Option<CredentialEntity>> {
+        let sql = if workspace_id.is_some() {
+            format!(
+                r#"
+                UPDATE credentials
+                SET
+                    last_tested_at = NULL,
+                    last_test_status = NULL,
+                    last_test_message = NULL
+                WHERE id = $1 AND workspace_id = $2
+                RETURNING {CREDENTIAL_COLUMNS}
+                "#
+            )
+        } else {
+            format!(
+                r#"
+                UPDATE credentials
+                SET
+                    last_tested_at = NULL,
+                    last_test_status = NULL,
+                    last_test_message = NULL
+                WHERE id = $1
+                RETURNING {CREDENTIAL_COLUMNS}
+                "#
+            )
+        };
+
+        let mut query = sqlx::query_as::<_, CredentialEntity>(&sql).bind(id);
+        if let Some(workspace_id) = workspace_id {
+            query = query.bind(workspace_id);
+        }
+
+        query.fetch_optional(&self.pool).await
+    }
+
+    async fn record_usage_scoped(&self, workspace_id: Option<Uuid>, id: Uuid) -> Result<bool> {
+        let now = Utc::now();
+        let sql = if workspace_id.is_some() {
+            r#"
+            UPDATE credentials
+            SET
+                last_used_at = $1,
+                usage_count = usage_count + 1
+            WHERE id = $2 AND workspace_id = $3
+            "#
+        } else {
             r#"
             UPDATE credentials
             SET
                 last_used_at = $1,
                 usage_count = usage_count + 1
             WHERE id = $2
-            "#,
-        )
-        .bind(now)
-        .bind(id)
-        .execute(&self.pool)
-        .await?;
+            "#
+        };
 
+        let mut query = sqlx::query(sql).bind(now).bind(id);
+        if let Some(workspace_id) = workspace_id {
+            query = query.bind(workspace_id);
+        }
+
+        let result = query.execute(&self.pool).await?;
         Ok(result.rows_affected() > 0)
     }
 
-    pub async fn delete(&self, id: Uuid) -> Result<bool> {
-        let result = sqlx::query(
-            r#"
-            DELETE FROM credentials
-            WHERE id = $1
-            "#,
-        )
-        .bind(id)
-        .execute(&self.pool)
-        .await?;
+    async fn delete_scoped(&self, workspace_id: Option<Uuid>, id: Uuid) -> Result<bool> {
+        let sql = if workspace_id.is_some() {
+            "DELETE FROM credentials WHERE id = $1 AND workspace_id = $2"
+        } else {
+            "DELETE FROM credentials WHERE id = $1"
+        };
 
+        let mut query = sqlx::query(sql).bind(id);
+        if let Some(workspace_id) = workspace_id {
+            query = query.bind(workspace_id);
+        }
+
+        let result = query.execute(&self.pool).await?;
         Ok(result.rows_affected() > 0)
+    }
+
+    fn encrypt_data(&self, data: serde_json::Value) -> Result<serde_json::Value> {
+        let encrypted_base64 = self
+            .crypto
+            .encrypt_value(&data)
+            .map_err(|e| sqlx::Error::Protocol(format!("Encryption error: {}", e)))?;
+        Ok(serde_json::json!({ "encrypted": encrypted_base64 }))
     }
 
     fn decrypt_entity_data(&self, entity: &mut CredentialEntity) {
@@ -317,6 +656,42 @@ impl CredentialRepository {
                 entity.data = dec;
             }
         }
+    }
+
+    async fn resolve_workspace_context_tx(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+    ) -> Result<(Uuid, Option<Uuid>)> {
+        let existing = sqlx::query_as::<_, (Uuid, Option<Uuid>)>(
+            r#"
+            SELECT id, created_by_user_id
+            FROM workspaces
+            ORDER BY created_at ASC
+            LIMIT 1
+            "#,
+        )
+        .fetch_optional(&mut **tx)
+        .await?;
+
+        if let Some(context) = existing {
+            return Ok(context);
+        }
+
+        let workspace_id = Uuid::new_v4();
+        let now = Utc::now();
+        sqlx::query(
+            r#"
+            INSERT INTO workspaces (id, name, slug, created_by_user_id, created_at, updated_at)
+            VALUES ($1, 'Imported Workspace', 'imported-workspace', NULL, $2, $3)
+            "#,
+        )
+        .bind(workspace_id)
+        .bind(now)
+        .bind(now)
+        .execute(&mut **tx)
+        .await?;
+
+        Ok((workspace_id, None))
     }
 }
 
@@ -336,37 +711,35 @@ mod tests {
 
         let secret_payload = json!({ "api_token" : "super-secret-123", "domain" : "api.acme.com" });
 
-        // CREATE
         let created = repo
             .create("My ACME Creds", "acmeApi", secret_payload.clone())
             .await
             .unwrap();
         assert_eq!(created.name, "My ACME Creds");
         assert_eq!(created.cred_type, "acmeApi");
+        assert_ne!(created.workspace_id, Uuid::nil());
 
-        // The returned entity from create/update might still be encrypted because we didn't explicitly decrypt returning clauses,
-        // Wait, the `create` method returns the RAW inserted entity! So created.data has `{"encrypted":"..."}`.
         let is_encrypted = created.data.get("encrypted").is_some();
         assert!(is_encrypted);
         assert!(created.data.get("api_token").is_none());
 
-        // READ (which decrypts automatically)
         let found = repo.find_by_id(created.id).await.unwrap().unwrap();
         assert_eq!(found.data, secret_payload);
 
-        // UPDATE
-        let updated_payload = json!({ "api_token" : "new-token-456" });
-        repo.update(created.id, "Renamed ACME Creds", updated_payload.clone())
-            .await
-            .unwrap();
+        repo.update(
+            created.id,
+            "Renamed ACME Creds",
+            json!({ "api_token" : "new-token-456" }),
+        )
+        .await
+        .unwrap();
 
         let refound = repo.find_by_id(created.id).await.unwrap().unwrap();
         assert_eq!(refound.name, "Renamed ACME Creds");
-        assert_eq!(refound.data, updated_payload);
+        assert_eq!(refound.data, json!({ "api_token" : "new-token-456" }));
         assert_eq!(refound.usage_count, 0);
         assert!(refound.last_tested_at.is_none());
 
-        // DELETE
         repo.delete(created.id).await.unwrap();
         let deleted = repo.find_by_id(created.id).await.unwrap();
         assert!(deleted.is_none());

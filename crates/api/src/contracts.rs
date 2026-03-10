@@ -1,6 +1,8 @@
 use barqflow_core::properties::INodeProperty;
 use barqflow_core::schema::CredentialReference;
-use barqflow_db::models::{CredentialEntity, ExecutionEntity, TagEntity, WorkflowEntity};
+use barqflow_db::models::{
+    ApiKeyEntity, CredentialEntity, ExecutionEntity, TagEntity, WorkflowEntity,
+};
 use barqflow_registry::registry::NodeInfo;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -97,7 +99,11 @@ impl From<WorkflowDocumentEntity> for WorkflowResponse {
             id: value.workflow.id,
             name: value.workflow.name,
             active: value.workflow.active,
-            tags: value.tags.into_iter().map(WorkflowTagResponse::from).collect(),
+            tags: value
+                .tags
+                .into_iter()
+                .map(WorkflowTagResponse::from)
+                .collect(),
             summary: summary.into(),
             nodes: value.workflow.nodes,
             connections: value.workflow.connections,
@@ -318,7 +324,12 @@ impl NodeSchemaResponse {
 pub struct AuthUserResponse {
     pub id: String,
     pub email: String,
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
     pub role: String,
+    pub workspace_role: String,
+    pub active_workspace: WorkspaceSummaryResponse,
+    pub workspaces: Vec<WorkspaceSummaryResponse>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -334,7 +345,12 @@ pub struct AuthResponse {
 pub struct UserProfileResponse {
     pub id: String,
     pub email: String,
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
     pub role: String,
+    pub workspace_role: String,
+    pub active_workspace: WorkspaceSummaryResponse,
+    pub workspaces: Vec<WorkspaceSummaryResponse>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -367,6 +383,69 @@ pub struct CredentialOAuthConnectResponse {
     pub connect_url: String,
     pub redirect_uri: String,
     pub state: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSummaryResponse {
+    pub id: Uuid,
+    pub name: String,
+    pub slug: String,
+    pub role: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceMemberResponse {
+    pub membership_id: Uuid,
+    pub user_id: Uuid,
+    pub email: String,
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
+    pub role: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiKeyResponse {
+    pub id: Uuid,
+    pub name: String,
+    pub key_prefix: String,
+    pub workspace_id: Uuid,
+    pub user_id: Uuid,
+    pub last_used_at: Option<DateTime<Utc>>,
+    pub expires_at: Option<DateTime<Utc>>,
+    pub revoked_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<ApiKeyEntity> for ApiKeyResponse {
+    fn from(value: ApiKeyEntity) -> Self {
+        Self {
+            id: value.id,
+            name: value.name,
+            key_prefix: value.key_prefix,
+            workspace_id: value.workspace_id,
+            user_id: value.user_id,
+            last_used_at: value.last_used_at,
+            expires_at: value.expires_at,
+            revoked_at: value.revoked_at,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiKeyCreateResponse {
+    pub api_key: String,
+    pub key: ApiKeyResponse,
 }
 
 #[cfg(test)]

@@ -18,11 +18,10 @@ const authStore = useAuthStore()
 const mobileNavOpen = ref(false)
 
 const userEmail = computed(() => authStore.user?.email || 'local@workspace')
-const userName = computed(() => {
-  const name = authStore.user?.email?.split('@')[0]
-  return name ? name.charAt(0).toUpperCase() + name.slice(1) : 'Workspace'
-})
+const userName = computed(() => authStore.userName)
 const userInitial = computed(() => userName.value.charAt(0).toUpperCase())
+const activeWorkspaceName = computed(() => authStore.activeWorkspace?.name || 'Workspace')
+const activeWorkspaceRole = computed(() => authStore.user?.workspaceRole || 'viewer')
 const isAuthScreen = computed(() => route.path === '/login')
 
 const navItems = [
@@ -195,7 +194,8 @@ watch(
           <div class="hidden items-center gap-3 sm:flex">
             <div class="rounded-2xl border border-slate-200 bg-white px-4 py-2 shadow-sm">
               <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">Workspace</p>
-              <p class="mt-1 text-sm font-semibold text-slate-900">{{ userEmail }}</p>
+              <p class="mt-1 text-sm font-semibold text-slate-900">{{ activeWorkspaceName }}</p>
+              <p class="text-xs text-slate-500 capitalize">{{ activeWorkspaceRole }}</p>
             </div>
             <button
               class="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"

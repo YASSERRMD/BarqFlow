@@ -1,12 +1,13 @@
-use crate::auth::{decode_claims_from_auth_header, decode_jwt_token, Claims};
+use crate::auth::{require_authenticated_user, require_workspace_role, AuthenticatedUser};
 use crate::contracts::ExecutionResponse;
 use crate::execution_events::{
     extract_execution_events, merge_execution_events, with_execution_event_history,
     ExecutionEventHub, HubExecutionEventReporter,
 };
-use crate::repositories::credential::CredentialRepository;
-use crate::repositories::execution::ExecutionRepository;
-use crate::repositories::workflow::WorkflowRepository;
+use crate::repositories::{
+    api_key::ApiKeyRepository, credential::CredentialRepository, execution::ExecutionRepository,
+    workflow::WorkflowRepository, workspace::WorkspaceRepository,
+};
 use crate::routes::{ActiveExecutionControl, ActiveExecutionManager};
 use crate::subworkflow_executor::RepositorySubWorkflowExecutor;
 use async_stream::stream;
@@ -21,10 +22,11 @@ use axum::{
 use barqflow_core::contracts::{ExecutionEvent, ExecutionEventType, ExecutionStatus};
 use barqflow_core::types::{IDataObject, NodeId, RunId, WorkflowId};
 use barqflow_db::models::ExecutionEntity;
+use barqflow_db::users::UserRepo;
 use chrono::{Duration as ChronoDuration, Utc};
 use serde::Deserialize;
-use std::sync::Arc;
 use std::convert::Infallible;
+use std::sync::Arc;
 use tokio::time::{sleep, Duration, Instant};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -35,6 +37,9 @@ pub struct AppState {
     pub workflow_repo: Arc<WorkflowRepository>,
     pub node_registry: Arc<barqflow_registry::registry::NodeRegistry>,
     pub credential_repo: Arc<CredentialRepository>,
+    pub user_repo: Arc<UserRepo>,
+    pub workspace_repo: Arc<WorkspaceRepository>,
+    pub api_key_repo: Arc<ApiKeyRepository>,
     pub active_executions: ActiveExecutionManager,
     pub execution_events: ExecutionEventHub,
 }
@@ -43,7 +48,10 @@ pub fn execution_routes(state: AppState) -> Router {
     Router::new()
         .route("/executions", get(list_executions))
         .route("/executions/{id}/events", get(get_execution_events))
-        .route("/executions/{id}/events/stream", get(stream_execution_events))
+        .route(
+            "/executions/{id}/events/stream",
+            get(stream_execution_events),
+        )
         .route(
             "/executions/{id}",
             get(get_execution).delete(delete_execution),
@@ -160,37 +168,18 @@ async fn persist_execution_with_events(
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Execution not found".into()))
 }
 
-fn authorize_execution_stream(
-    headers: &HeaderMap,
-    token_from_query: Option<&str>,
-) -> Result<Claims, (StatusCode, String)> {
-    let auth_header = headers
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok());
-
-    if let Some(claims) = decode_claims_from_auth_header(auth_header)
-        .map_err(|message| (StatusCode::UNAUTHORIZED, message.to_string()))?
-    {
-        return Ok(claims);
-    }
-
-    if let Some(token) = token_from_query {
-        return decode_jwt_token(token)
-            .map_err(|message| (StatusCode::UNAUTHORIZED, message.to_string()));
-    }
-
-    Err((
-        StatusCode::UNAUTHORIZED,
-        "Missing or invalid authorization header".to_string(),
-    ))
-}
-
 async fn list_executions(
-    _claims: Claims,
+    headers: HeaderMap,
     State(state): State<AppState>,
     Query(query): Query<ExecutionListQuery>,
 ) -> Result<Json<Vec<ExecutionResponse>>, (StatusCode, String)> {
+    let auth = require_execution_auth(&headers, &state).await?;
+    let workflow_ids = workspace_workflow_ids(&state, auth.workspace_id).await?;
+
     let mut executions = if let Some(workflow_id) = query.workflow_id {
+        if !workflow_ids.contains(&workflow_id) {
+            return Err((StatusCode::NOT_FOUND, "Workflow not found".into()));
+        }
         state
             .execution_repo
             .find_by_workflow_id(workflow_id)
@@ -204,6 +193,8 @@ async fn list_executions(
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
     };
 
+    executions.retain(|execution| workflow_ids.contains(&execution.workflow_id));
+
     if let Some(status) = query.status {
         executions.retain(|e| e.status.eq_ignore_ascii_case(&status));
     }
@@ -213,36 +204,31 @@ async fn list_executions(
     }
 
     Ok(Json(
-        executions.into_iter().map(ExecutionResponse::from).collect(),
+        executions
+            .into_iter()
+            .map(ExecutionResponse::from)
+            .collect(),
     ))
 }
 
 async fn get_execution(
-    _claims: Claims,
+    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<uuid::Uuid>,
 ) -> Result<Json<ExecutionResponse>, (StatusCode, String)> {
-    let exec = state
-        .execution_repo
-        .find_by_id(id)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "Execution not found".into()))?;
+    let auth = require_execution_auth(&headers, &state).await?;
+    let exec = load_execution_in_workspace(&state, auth.workspace_id, id).await?;
 
     Ok(Json(ExecutionResponse::from(exec)))
 }
 
 async fn get_execution_events(
-    _claims: Claims,
+    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Vec<ExecutionEvent>>, (StatusCode, String)> {
-    let execution = state
-        .execution_repo
-        .find_by_id(id)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "Execution not found".into()))?;
+    let auth = require_execution_auth(&headers, &state).await?;
+    let execution = load_execution_in_workspace(&state, auth.workspace_id, id).await?;
 
     Ok(Json(load_execution_event_history(&state, &execution).await))
 }
@@ -254,14 +240,29 @@ async fn stream_execution_events(
     Query(query): Query<ExecutionStreamQuery>,
 ) -> Result<Sse<impl futures_core::Stream<Item = Result<Event, Infallible>>>, (StatusCode, String)>
 {
-    let _claims = authorize_execution_stream(&headers, query.token.as_deref())?;
-    let execution = state
-        .execution_repo
-        .find_by_id(id)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "Execution not found".into()))?;
+    if let Some(token) = query.token.as_deref() {
+        let mut auth_headers = HeaderMap::new();
+        let header_value = format!("Bearer {}", token)
+            .parse()
+            .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid token".to_string()))?;
+        auth_headers.insert(axum::http::header::AUTHORIZATION, header_value);
+        let auth = require_execution_auth(&auth_headers, &state).await?;
+        let execution = load_execution_in_workspace(&state, auth.workspace_id, id).await?;
+        return stream_known_execution(state, id, execution).await;
+    }
 
+    let auth = require_execution_auth(&headers, &state).await?;
+    let execution = load_execution_in_workspace(&state, auth.workspace_id, id).await?;
+
+    stream_known_execution(state, id, execution).await
+}
+
+async fn stream_known_execution(
+    state: AppState,
+    id: Uuid,
+    execution: ExecutionEntity,
+) -> Result<Sse<impl futures_core::Stream<Item = Result<Event, Infallible>>>, (StatusCode, String)>
+{
     let snapshot = load_execution_event_history(&state, &execution).await;
     let is_active = {
         let active = state.active_executions.read().await;
@@ -309,15 +310,17 @@ async fn stream_execution_events(
             }
         }
     };
-
     Ok(Sse::new(event_stream).keep_alive(KeepAlive::default()))
 }
 
 async fn delete_execution(
-    _claims: Claims,
+    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<uuid::Uuid>,
 ) -> Result<StatusCode, (StatusCode, String)> {
+    let auth = require_execution_auth(&headers, &state).await?;
+    require_workspace_role(&auth, "member")?;
+    load_execution_in_workspace(&state, auth.workspace_id, id).await?;
     let deleted = state
         .execution_repo
         .delete(id)
@@ -333,13 +336,16 @@ async fn delete_execution(
 }
 
 async fn execute_workflow(
-    _claims: Claims,
+    headers: HeaderMap,
     State(state): State<AppState>,
     Path(workflow_id): Path<uuid::Uuid>,
     Json(payload): Json<CreateExecutionRequest>,
 ) -> Result<Json<ExecutionResponse>, (StatusCode, String)> {
+    let auth = require_execution_auth(&headers, &state).await?;
+    require_workspace_role(&auth, "member")?;
     let execution = run_workflow_execution(
         &state,
+        auth.workspace_id,
         workflow_id,
         payload.manual.unwrap_or(true),
         payload.stop_at_node_id,
@@ -349,46 +355,51 @@ async fn execute_workflow(
 }
 
 async fn test_workflow_node(
-    _claims: Claims,
+    headers: HeaderMap,
     State(state): State<AppState>,
     Path((workflow_id, node_id)): Path<(uuid::Uuid, String)>,
     payload: Option<Json<CreateExecutionRequest>>,
 ) -> Result<Json<ExecutionResponse>, (StatusCode, String)> {
+    let auth = require_execution_auth(&headers, &state).await?;
+    require_workspace_role(&auth, "member")?;
     let manual = payload
         .as_ref()
         .and_then(|json| json.manual)
         .unwrap_or(true);
-    let execution = run_workflow_execution(&state, workflow_id, manual, Some(node_id)).await?;
+    let execution = run_workflow_execution(
+        &state,
+        auth.workspace_id,
+        workflow_id,
+        manual,
+        Some(node_id),
+    )
+    .await?;
     Ok(Json(ExecutionResponse::from(execution)))
 }
 
 async fn retry_execution(
-    _claims: Claims,
+    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<ExecutionResponse>, (StatusCode, String)> {
-    let execution = state
-        .execution_repo
-        .find_by_id(id)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "Execution not found".into()))?;
+    let auth = require_execution_auth(&headers, &state).await?;
+    require_workspace_role(&auth, "member")?;
+    let execution = load_execution_in_workspace(&state, auth.workspace_id, id).await?;
 
-    let retried = run_workflow_execution(&state, execution.workflow_id, true, None).await?;
+    let retried =
+        run_workflow_execution(&state, auth.workspace_id, execution.workflow_id, true, None)
+            .await?;
     Ok(Json(ExecutionResponse::from(retried)))
 }
 
 async fn stop_execution(
-    _claims: Claims,
+    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<ExecutionResponse>, (StatusCode, String)> {
-    let execution = state
-        .execution_repo
-        .find_by_id(id)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "Execution not found".into()))?;
+    let auth = require_execution_auth(&headers, &state).await?;
+    require_workspace_role(&auth, "member")?;
+    let execution = load_execution_in_workspace(&state, auth.workspace_id, id).await?;
 
     if !execution.status.eq_ignore_ascii_case("running")
         && !execution.status.eq_ignore_ascii_case("stopping")
@@ -608,11 +619,13 @@ async fn build_waiting_execution_data(
 }
 
 async fn resume_execution(
-    _claims: Claims,
+    headers: HeaderMap,
     State(state): State<AppState>,
     Path((execution_id, resume_token)): Path<(Uuid, String)>,
     payload: Option<Json<serde_json::Value>>,
 ) -> Result<Json<ExecutionResponse>, (StatusCode, String)> {
+    let auth = require_execution_auth(&headers, &state).await?;
+    require_workspace_role(&auth, "member")?;
     use barqflow_core::schema::{INodeExecutionData, ITaskDataConnections};
     use barqflow_core::types::{IDataObject, RunId};
     use barqflow_exec::runner::{ExecutionConfig, WorkflowRunContext, WorkflowRunner};
@@ -636,16 +649,11 @@ async fn resume_execution(
         return Err((StatusCode::GONE, "Resume token expired".into()));
     }
 
-    let execution = state
-        .execution_repo
-        .find_by_id(execution_id)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "Execution not found".into()))?;
+    let execution = load_execution_in_workspace(&state, auth.workspace_id, execution_id).await?;
 
     let wf_entity = state
         .workflow_repo
-        .find_by_id(execution.workflow_id)
+        .find_by_id_in_workspace(auth.workspace_id, execution.workflow_id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Workflow not found".into()))?;
@@ -849,13 +857,15 @@ async fn resume_execution(
     )
     .await;
 
-    let updated = persist_execution_with_events(&state, execution_id, status.as_str(), data).await?;
+    let updated =
+        persist_execution_with_events(&state, execution_id, status.as_str(), data).await?;
 
     Ok(Json(ExecutionResponse::from(updated)))
 }
 
 async fn run_workflow_execution(
     state: &AppState,
+    workspace_id: Uuid,
     workflow_id: Uuid,
     manual: bool,
     stop_after_node_id: Option<String>,
@@ -866,7 +876,7 @@ async fn run_workflow_execution(
     // 1. Fetch workflow
     let wf_entity = state
         .workflow_repo
-        .find_by_id(workflow_id)
+        .find_by_id_in_workspace(workspace_id, workflow_id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Workflow not found".into()))?;
@@ -1109,13 +1119,67 @@ async fn run_workflow_execution(
         )
         .await;
 
-        let _ = persist_execution_with_events(&state_for_completion, execution_id, status.as_str(), data).await;
+        let _ = persist_execution_with_events(
+            &state_for_completion,
+            execution_id,
+            status.as_str(),
+            data,
+        )
+        .await;
 
         let mut active = state_for_completion.active_executions.write().await;
         active.remove(&execution_id);
     });
 
     Ok(new_exec)
+}
+
+async fn require_execution_auth(
+    headers: &HeaderMap,
+    state: &AppState,
+) -> Result<AuthenticatedUser, (StatusCode, String)> {
+    require_authenticated_user(
+        headers,
+        Arc::clone(&state.user_repo),
+        Arc::clone(&state.workspace_repo),
+        Arc::clone(&state.api_key_repo),
+    )
+    .await
+}
+
+async fn workspace_workflow_ids(
+    state: &AppState,
+    workspace_id: Uuid,
+) -> Result<std::collections::HashSet<Uuid>, (StatusCode, String)> {
+    let workflows = state
+        .workflow_repo
+        .find_all_for_workspace(workspace_id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(workflows.into_iter().map(|workflow| workflow.id).collect())
+}
+
+async fn load_execution_in_workspace(
+    state: &AppState,
+    workspace_id: Uuid,
+    execution_id: Uuid,
+) -> Result<ExecutionEntity, (StatusCode, String)> {
+    let execution = state
+        .execution_repo
+        .find_by_id(execution_id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Execution not found".into()))?;
+
+    state
+        .workflow_repo
+        .find_by_id_in_workspace(workspace_id, execution.workflow_id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Execution not found".into()))?;
+
+    Ok(execution)
 }
 
 #[cfg(test)]
