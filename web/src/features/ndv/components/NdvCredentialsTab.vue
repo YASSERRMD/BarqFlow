@@ -7,7 +7,7 @@ const props = defineProps<{
   credentialsError: string | null
   missingRequiredCredentials: string[]
   credentialTypesWithoutSavedOptions: string[]
-  openCredentialsPage: () => void
+  openCredentialsPage: (credentialType?: string, displayName?: string) => void
 }>()
 </script>
 
@@ -44,16 +44,29 @@ const props = defineProps<{
       class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700"
     >
       No saved credentials available for {{ props.credentialTypesWithoutSavedOptions.join(', ') }}.
-      <button type="button" class="ml-1 underline font-semibold" @click="props.openCredentialsPage">
+      <button
+        type="button"
+        class="ml-1 underline font-semibold"
+        @click="props.openCredentialsPage(props.nodeCredentialRefs[0]?.credentialType)"
+      >
         Open Credentials
       </button>
     </div>
 
     <div v-if="props.nodeCredentialRefs.length > 0" class="space-y-4">
       <div v-for="ref in props.nodeCredentialRefs" :key="ref.credentialType">
-        <label class="mb-1.5 block text-sm font-medium text-slate-700">
-          {{ ref.displayName }}
-        </label>
+        <div class="mb-1.5 flex items-center justify-between gap-3">
+          <label class="block text-sm font-medium text-slate-700">
+            {{ ref.displayName }}
+          </label>
+          <button
+            type="button"
+            class="text-xs font-semibold text-brand-700 underline underline-offset-2"
+            @click="props.openCredentialsPage(ref.credentialType, ref.displayName)"
+          >
+            Set up
+          </button>
+        </div>
         <select
           v-model="props.node.data.credentials[ref.credentialType]"
           :disabled="props.credentialsLoading"
@@ -74,6 +87,19 @@ const props = defineProps<{
         >
           This credential is required.
         </p>
+        <div
+          v-if="(props.credentialOptions[ref.credentialType] || []).length === 0"
+          class="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600"
+        >
+          No saved {{ ref.displayName }} credential exists yet.
+          <button
+            type="button"
+            class="ml-1 font-semibold text-brand-700 underline underline-offset-2"
+            @click="props.openCredentialsPage(ref.credentialType, ref.displayName)"
+          >
+            Create one now
+          </button>
+        </div>
       </div>
     </div>
 

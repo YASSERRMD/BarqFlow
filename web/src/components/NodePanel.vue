@@ -576,8 +576,20 @@ function onDeleteNode() {
   emit('delete-node', String(props.node.id))
 }
 
-function openCredentialsPage() {
-  window.location.assign('/credentials')
+function openCredentialsPage(credentialType?: string, displayName?: string) {
+  const params = new URLSearchParams()
+  if (credentialType) {
+    params.set('credentialType', credentialType)
+  }
+
+  const currentPath = `${window.location.pathname}${window.location.search}`
+  params.set('returnTo', currentPath)
+  params.set(
+    'nodeName',
+    String(displayName || props.node?.data?.label || props.node?.data?.name || props.node?.id || 'node'),
+  )
+
+  window.location.assign(`/credentials?${params.toString()}`)
 }
 </script>
 
