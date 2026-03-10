@@ -25,6 +25,29 @@ pub struct WorkflowEntity {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct TagEntity {
+    pub id: Uuid,
+    pub name: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct WorkflowHistorySnapshotEntity {
+    pub id: Uuid,
+    pub workflow_id: Uuid,
+    pub version: i32,
+    pub source: String,
+    pub name: String,
+    pub active: bool,
+    pub tags: serde_json::Value,
+    pub nodes: serde_json::Value,
+    pub connections: serde_json::Value,
+    pub settings: serde_json::Value,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct ExecutionEntity {
     pub id: Uuid,
     pub workflow_id: Uuid,
