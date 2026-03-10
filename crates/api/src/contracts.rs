@@ -250,6 +250,12 @@ pub struct CredentialResponse {
     pub data: Value,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub last_tested_at: Option<DateTime<Utc>>,
+    pub last_test_status: Option<String>,
+    pub last_test_message: Option<String>,
+    pub last_used_at: Option<DateTime<Utc>>,
+    pub usage_count: i64,
+    pub rotated_at: Option<DateTime<Utc>>,
 }
 
 impl CredentialResponse {
@@ -261,6 +267,12 @@ impl CredentialResponse {
             data: masked_data,
             created_at: value.created_at,
             updated_at: value.updated_at,
+            last_tested_at: value.last_tested_at,
+            last_test_status: value.last_test_status,
+            last_test_message: value.last_test_message,
+            last_used_at: value.last_used_at,
+            usage_count: value.usage_count,
+            rotated_at: value.rotated_at,
         }
     }
 }
@@ -339,10 +351,22 @@ pub struct RuntimeSettingsResponse {
 #[serde(rename_all = "camelCase")]
 pub struct CredentialValidationResponse {
     pub valid: bool,
+    pub status: String,
+    pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub credential_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub credential_type: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialOAuthConnectResponse {
+    pub credential_id: Uuid,
+    pub credential_type: String,
+    pub connect_url: String,
+    pub redirect_uri: String,
+    pub state: String,
 }
 
 #[cfg(test)]

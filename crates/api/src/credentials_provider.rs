@@ -6,6 +6,7 @@ use barqflow_core::types::GenericValue;
 use barqflow_exec::context::CredentialProvider;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tracing::warn;
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -84,6 +85,15 @@ impl RepositoryCredentialProvider {
                     credential.name
                 ),
             })?;
+
+        if let Err(error) = self.repo.record_usage(*credential_id).await {
+            warn!(
+                credential_id = %credential_id,
+                node_id,
+                credential_type,
+                "failed to record credential usage: {error}"
+            );
+        }
 
         Ok(object.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
     }

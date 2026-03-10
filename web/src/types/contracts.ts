@@ -276,6 +276,18 @@ export interface CredentialSummary {
   data: Record<string, unknown>
   createdAt: string
   updatedAt: string
+  lastTestedAt?: string | null
+  lastTestStatus?: string | null
+  lastTestMessage?: string | null
+  lastUsedAt?: string | null
+  usageCount: number
+  rotatedAt?: string | null
+}
+
+export interface CredentialAuthenticateContract {
+  in: string
+  name: string
+  value: string
 }
 
 export interface CredentialTypeContract {
@@ -284,6 +296,23 @@ export interface CredentialTypeContract {
   notice?: string | null
   properties: NodeProperty[]
   documentationUrl?: string | null
+  authenticate?: CredentialAuthenticateContract | null
+}
+
+export interface CredentialValidationResult {
+  valid: boolean
+  status: 'valid' | 'invalid' | 'error' | string
+  message: string
+  credentialId?: string | null
+  credentialType?: string | null
+}
+
+export interface CredentialOAuthConnectResult {
+  credentialId: string
+  credentialType: string
+  connectUrl: string
+  redirectUri: string
+  state: string
 }
 
 export interface UserProfile {
