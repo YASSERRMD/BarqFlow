@@ -30,7 +30,7 @@ const lastTestValid = ref<boolean | null>(null)
 const filteredCredentials = computed(() => {
   const query = searchTerm.value.trim().toLowerCase()
   return credentials.value.filter((cred) => {
-    const type = (cred.credential_type || '').toLowerCase()
+    const type = (cred.credentialType || '').toLowerCase()
     const name = (cred.name || '').toLowerCase()
     const matchesCategory =
       activeCategory.value === 'All' ||
@@ -67,7 +67,7 @@ function formatRelativeTime(iso?: string | null): string {
 }
 
 function credentialLastUsedIso(cred: any): string | null {
-  return cred?.last_used_at || cred?.lastUsedAt || cred?.updated_at || cred?.created_at || null
+  return cred?.lastUsedAt || cred?.updatedAt || cred?.createdAt || null
 }
 
 function credentialLastUsedLabel(cred: any): string {
@@ -115,7 +115,7 @@ function openCreateModal() {
 }
 
 function credentialTypeName(cred: any): string {
-  return String(cred?.credential_type || cred?.cred_type || '')
+  return String(cred?.credentialType || '')
 }
 
 async function openEditModal(cred: any) {
@@ -228,7 +228,7 @@ async function testCredential() {
 
   try {
     const res = await api.post('/credentials/test', {
-      cred_type: selectedType.value.name,
+      credentialType: selectedType.value.name,
       data: newCredentialData.value,
     })
 
@@ -274,7 +274,7 @@ async function saveCredential() {
     } else {
       await api.post('/credentials', {
         name: newCredentialName.value,
-        cred_type: selectedType.value.name,
+        credentialType: selectedType.value.name,
         data: dataPayload,
       })
     }
@@ -402,14 +402,14 @@ async function deleteCredential(id: string) {
               <td class="px-8 py-6">
                 <div class="flex items-center gap-4">
                   <div class="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-500 group-hover:bg-brand-50 group-hover:text-brand-600 transition-colors">
-                    <Key v-if="cred.credential_type !== 'Database'" class="w-5 h-5" />
+                    <Key v-if="cred.credentialType !== 'Database'" class="w-5 h-5" />
                     <Shield v-else class="w-5 h-5" />
                   </div>
                   <span class="font-bold text-slate-800 group-hover:text-brand-600 transition-colors">{{ cred.name }}</span>
                 </div>
               </td>
               <td class="px-8 py-6">
-                <span class="text-sm font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-lg">{{ cred.credential_type }}</span>
+                <span class="text-sm font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-lg">{{ cred.credentialType }}</span>
               </td>
               <td class="px-8 py-6">
                 <div class="flex items-center gap-2" :title="credentialRuntimeStatus(cred.id).title">

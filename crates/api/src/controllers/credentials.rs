@@ -1,4 +1,5 @@
 use crate::auth::Claims;
+use crate::contracts::{CredentialResponse, CredentialValidationResponse};
 use crate::repositories::credential::CredentialRepository;
 use axum::http::StatusCode;
 use axum::{
@@ -9,7 +10,7 @@ use axum::{
 use barqflow_core::types::GenericValue;
 use barqflow_db::models::CredentialEntity;
 use barqflow_registry::registry::CredentialRegistry;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::collections::HashMap;
 
 #[derive(Clone)]
@@ -18,28 +19,9 @@ pub struct AppState {
     pub credential_registry: std::sync::Arc<CredentialRegistry>,
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct CredentialResponse {
-    pub id: uuid::Uuid,
-    pub name: String,
-    pub cred_type: String,
-    pub credential_type: String,
-    pub data: serde_json::Value,
-    pub created_at: chrono::DateTime<chrono::Utc>,
-    pub updated_at: chrono::DateTime<chrono::Utc>,
-}
-
 impl From<CredentialEntity> for CredentialResponse {
     fn from(value: CredentialEntity) -> Self {
-        Self {
-            id: value.id,
-            name: value.name,
-            cred_type: value.cred_type.clone(),
-            credential_type: value.cred_type,
-            data: mask_credential_data(&value.data),
-            created_at: value.created_at,
-            updated_at: value.updated_at,
-        }
+        CredentialResponse::from_masked_entity(value.clone(), mask_credential_data(&value.data))
     }
 }
 
@@ -69,9 +51,11 @@ pub fn credential_routes(state: AppState) -> Router {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateCredentialRequest {
     pub name: String,
-    pub cred_type: String,
+    #[serde(alias = "cred_type")]
+    pub credential_type: String,
     pub data: serde_json::Value,
 }
 
@@ -82,8 +66,10 @@ pub struct UpdateCredentialRequest {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TestCredentialRequest {
-    pub cred_type: String,
+    #[serde(alias = "cred_type")]
+    pub credential_type: String,
     pub data: std::collections::HashMap<String, barqflow_core::types::GenericValue>,
 }
 
@@ -136,7 +122,7 @@ async fn create_credential(
 ) -> Result<Json<CredentialResponse>, (StatusCode, String)> {
     let new_cred = state
         .credential_repo
-        .create(&payload.name, &payload.cred_type, payload.data)
+        .create(&payload.name, &payload.credential_type, payload.data)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
@@ -278,19 +264,22 @@ async fn test_credential(
     _claims: Claims,
     State(state): State<AppState>,
     Json(payload): Json<TestCredentialRequest>,
-) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let is_valid = validate_credential_data(&state, &payload.cred_type, &payload.data).await?;
+) -> Result<Json<CredentialValidationResponse>, (StatusCode, String)> {
+    let is_valid =
+        validate_credential_data(&state, &payload.credential_type, &payload.data).await?;
 
-    Ok(Json(serde_json::json!({
-        "valid": is_valid
-    })))
+    Ok(Json(CredentialValidationResponse {
+        valid: is_valid,
+        credential_id: None,
+        credential_type: None,
+    }))
 }
 
 async fn test_saved_credential(
     _claims: Claims,
     State(state): State<AppState>,
     Path(id): Path<uuid::Uuid>,
-) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+) -> Result<Json<CredentialValidationResponse>, (StatusCode, String)> {
     let credential = state
         .credential_repo
         .find_by_id(id)
@@ -301,11 +290,11 @@ async fn test_saved_credential(
     let data_map = credential_data_to_map(&credential.data)?;
     let is_valid = validate_credential_data(&state, &credential.cred_type, &data_map).await?;
 
-    Ok(Json(serde_json::json!({
-        "valid": is_valid,
-        "credentialId": credential.id,
-        "credentialType": credential.cred_type,
-    })))
+    Ok(Json(CredentialValidationResponse {
+        valid: is_valid,
+        credential_id: Some(credential.id),
+        credential_type: Some(credential.cred_type),
+    }))
 }
 
 async fn delete_credential(

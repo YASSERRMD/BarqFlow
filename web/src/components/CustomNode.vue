@@ -14,7 +14,7 @@ const visuals = computed(() => {
 
 // Correct text presentation: Top line should be the Node Description/Display Name, bottom line is generic execution or subtitle
 const primaryLabel = computed(() => {
-  return props.data.schema?.display_name || props.data.label || 'Unknown Node';
+  return props.data.schema?.displayName || props.data.schema?.display_name || props.data.label || 'Unknown Node';
 })
 </script>
 

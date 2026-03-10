@@ -16,7 +16,7 @@ const isLogin = ref(true)
 async function handleSubmit() {
   const payload = isLogin.value 
     ? { email: email.value, password: password.value }
-    : { email: email.value, password: password.value, first_name: firstName.value, last_name: lastName.value };
+    : { email: email.value, password: password.value, firstName: firstName.value, lastName: lastName.value };
 
   const success = isLogin.value 
     ? await authStore.login(payload)

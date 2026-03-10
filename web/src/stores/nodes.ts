@@ -1,10 +1,11 @@
 import { defineStore } from 'pinia';
 
 import api from '../api';
+import type { NodeCatalogEntry, NodeSchemaContract } from '../types/contracts';
 
 export const useNodeStore = defineStore('nodes', {
     state: () => ({
-        nodeTypes: [] as any[],
+        nodeTypes: [] as NodeCatalogEntry[],
         isLoading: false,
         error: null as string | null,
     }),
@@ -14,11 +15,11 @@ export const useNodeStore = defineStore('nodes', {
             this.isLoading = true;
             this.error = null;
             try {
-                const response = await api.get('/nodes');
-                this.nodeTypes = response.data.map((node: any) => {
+                const response = await api.get<NodeSchemaContract[]>('/nodes');
+                this.nodeTypes = response.data.map((node) => {
                     let category = 'Core';
                     const name = node.name || '';
-                    if (node.is_trigger || name.toLowerCase().includes('trigger') || name.includes('webhook') || name.includes('manual')) {
+                    if (node.isTrigger || name.toLowerCase().includes('trigger') || name.includes('webhook') || name.includes('manual')) {
                         category = 'Triggers';
                     } else if (name.startsWith('barqflow-nodes') && !name.includes('trigger') && !name.includes('webhook') && !name.includes('wait') && !name.includes('executeWorkflow')) {
                         category = 'Integrations';
@@ -27,11 +28,11 @@ export const useNodeStore = defineStore('nodes', {
                     }
 
                     return {
-                        name: node.display_name || node.name,
+                        name: node.displayName || node.name,
                         type: node.name,
-                        kind: node.is_trigger ? 'trigger' : (category === 'Data & Logic' ? 'manipulation' : 'action'),
+                        kind: node.isTrigger ? 'trigger' : (category === 'Data & Logic' ? 'manipulation' : 'action'),
                         description: node.description,
-                        isTrigger: !!node.is_trigger,
+                        isTrigger: !!node.isTrigger,
                         schema: node,
                         category
                     };

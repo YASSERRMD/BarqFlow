@@ -1,26 +1,15 @@
+use crate::contracts::NodeSchemaResponse;
 use axum::{extract::State, response::IntoResponse, routing::get, Json, Router};
 use barqflow_core::properties::INodeProperty;
 use barqflow_core::schema::CredentialReference;
 use barqflow_nodes::is_node_ui_exposed;
 use barqflow_registry::registry::NodeRegistry;
-use serde::Serialize;
 use serde_json::Value;
 use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct AppState {
     pub node_registry: Arc<NodeRegistry>,
-}
-
-#[derive(Serialize)]
-pub struct NodeSchema {
-    pub name: String,
-    pub display_name: String,
-    pub description: String,
-    pub is_trigger: bool,
-    pub properties: Vec<INodeProperty>,
-    pub credentials: Vec<CredentialReference>,
-    pub defaults: Option<Value>,
 }
 
 pub fn node_routes(state: AppState) -> Router {
@@ -30,7 +19,7 @@ pub fn node_routes(state: AppState) -> Router {
 }
 
 async fn list_node_schemas(State(state): State<AppState>) -> impl IntoResponse {
-    let mut schemas = Vec::new();
+    let mut schemas: Vec<NodeSchemaResponse> = Vec::new();
 
     let names = state.node_registry.get_all_node_names();
     for name in names {
@@ -41,17 +30,15 @@ async fn list_node_schemas(State(state): State<AppState>) -> impl IntoResponse {
         if let Some(info) = state.node_registry.get_latest_node(&name) {
             let node_name = info.name.clone();
             let properties = info.properties.properties.clone();
-            schemas.push(NodeSchema {
-                name: node_name.clone(),
-                display_name: info.display_name,
-                description: info.description,
-                is_trigger: info.is_trigger,
-                defaults: build_defaults(&properties),
-                properties,
-                credentials: node_credential_references(&node_name),
-            });
+            schemas.push(NodeSchemaResponse::from_node_info(
+                info,
+                node_credential_references(&node_name),
+                build_defaults(&properties),
+            ));
         }
     }
+
+    schemas.sort_by(|left, right| left.display_name.cmp(&right.display_name));
 
     Json(schemas)
 }
@@ -249,7 +236,7 @@ fn node_credential_references(node_name: &str) -> Vec<CredentialReference> {
     }
 }
 
-fn build_defaults(properties: &[INodeProperty]) -> Option<Value> {
+fn build_defaults(properties: &[INodeProperty]) -> Value {
     let mut defaults = serde_json::Map::new();
 
     for property in properties {
@@ -258,11 +245,7 @@ fn build_defaults(properties: &[INodeProperty]) -> Option<Value> {
         }
     }
 
-    if defaults.is_empty() {
-        None
-    } else {
-        Some(Value::Object(defaults))
-    }
+    Value::Object(defaults)
 }
 
 #[cfg(test)]
@@ -292,16 +275,16 @@ mod tests {
             build_prop("retry", Some(serde_json::json!(3))),
         ];
 
-        let defaults = build_defaults(&props).expect("defaults should be present");
+        let defaults = build_defaults(&props);
         assert_eq!(defaults["method"], "GET");
         assert_eq!(defaults["retry"], 3);
         assert!(defaults.get("url").is_none());
     }
 
     #[test]
-    fn build_defaults_returns_none_when_no_defaults_exist() {
+    fn build_defaults_returns_empty_object_when_no_defaults_exist() {
         let props = vec![build_prop("url", None), build_prop("body", None)];
-        assert!(build_defaults(&props).is_none());
+        assert_eq!(build_defaults(&props), Value::Object(serde_json::Map::new()));
     }
 
     #[test]

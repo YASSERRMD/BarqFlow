@@ -1,22 +1,13 @@
 use crate::auth::Claims;
+use crate::contracts::RuntimeSettingsResponse;
 use axum::{extract::State, routing::get, Json, Router};
 use chrono::Utc;
-use serde::Serialize;
 use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct AppState {
     pub node_registry: Arc<barqflow_registry::registry::NodeRegistry>,
     pub credential_registry: Arc<barqflow_registry::registry::CredentialRegistry>,
-}
-
-#[derive(Serialize)]
-pub struct RuntimeSettingsResponse {
-    pub server_time: chrono::DateTime<chrono::Utc>,
-    pub environment: String,
-    pub node_types_count: usize,
-    pub credential_types_count: usize,
-    pub encryption_key_configured: bool,
 }
 
 pub fn settings_routes(state: AppState) -> Router {
