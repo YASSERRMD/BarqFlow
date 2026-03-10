@@ -125,6 +125,58 @@ impl ExecutionRepository {
         Ok(result.rows_affected())
     }
 
+    pub async fn count_prunable_before(&self, before: DateTime<Utc>) -> Result<u64> {
+        let count: i64 = sqlx::query_scalar(
+            r#"
+            SELECT COUNT(*)
+            FROM executions
+            WHERE COALESCE(stopped_at, started_at) < $1
+              AND LOWER(status) IN ('success', 'error', 'failed', 'cancelled', 'stopped', 'crashed')
+            "#,
+        )
+        .bind(before)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(count.max(0) as u64)
+    }
+
+    pub async fn delete_prunable_before(&self, before: DateTime<Utc>) -> Result<u64> {
+        let result = sqlx::query(
+            r#"
+            DELETE FROM executions
+            WHERE COALESCE(stopped_at, started_at) < $1
+              AND LOWER(status) IN ('success', 'error', 'failed', 'cancelled', 'stopped', 'crashed')
+            "#,
+        )
+        .bind(before)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.rows_affected())
+    }
+
+    pub async fn delete_prunable_wait_resumes(&self, before: DateTime<Utc>) -> Result<u64> {
+        let result = sqlx::query(
+            r#"
+            DELETE FROM wait_resumes
+            WHERE execution_id IN (
+                SELECT id
+                FROM executions
+                WHERE COALESCE(stopped_at, started_at) < $1
+                  AND LOWER(status) IN ('success', 'error', 'failed', 'cancelled', 'stopped', 'crashed')
+            )
+               OR expires_at < $1
+               OR COALESCE(resumed_at, expires_at) < $1
+            "#,
+        )
+        .bind(before)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.rows_affected())
+    }
+
     pub async fn delete(&self, id: Uuid) -> Result<bool> {
         let result = sqlx::query(
             r#"

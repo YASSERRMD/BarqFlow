@@ -1,8 +1,9 @@
 use crate::active_workflows::ActiveCronJobs;
 use crate::controllers::webhooks::{WebhookEndpoint, WebhookRegistry};
+use crate::operations::{ExecutionDispatchMode, OperationsRuntime};
 use crate::routes::ActiveExecutionManager;
 use axum::{extract::State, http::StatusCode, routing::get, Json, Router};
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
@@ -12,6 +13,9 @@ pub struct AppState {
     pub webhook_registry: WebhookRegistry,
     pub active_cron_jobs: ActiveCronJobs,
     pub active_executions: ActiveExecutionManager,
+    pub node_registry: std::sync::Arc<barqflow_registry::registry::NodeRegistry>,
+    pub credential_registry: std::sync::Arc<barqflow_registry::registry::CredentialRegistry>,
+    pub operations_runtime: OperationsRuntime,
 }
 
 #[derive(Debug, Serialize)]
@@ -45,9 +49,66 @@ pub struct PollingHealth {
     pub active_count: usize,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeHealthResponse {
+    pub status: String,
+    pub environment: String,
+    pub server_time: DateTime<Utc>,
+    pub dispatch_mode: String,
+    pub active_executions: usize,
+    pub queued_executions: usize,
+    pub worker_concurrency: usize,
+    pub queue_capacity: usize,
+    pub webhook_endpoint_count: usize,
+    pub cron_job_count: usize,
+    pub node_types_count: usize,
+    pub credential_types_count: usize,
+    pub tracing_enabled: bool,
+    pub trace_format: String,
+    pub pruning_enabled: bool,
+    pub retention_days: u64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeMetricsResponse {
+    pub dispatch: RuntimeDispatchMetrics,
+    pub execution_totals: RuntimeExecutionTotals,
+    pub generated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeDispatchMetrics {
+    pub mode: String,
+    pub worker_concurrency: usize,
+    pub queue_capacity: usize,
+    pub queued_count: usize,
+    pub running_count: usize,
+    pub total_enqueued: u64,
+    pub total_started: u64,
+    pub total_finished: u64,
+    pub total_failed_to_dispatch: u64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeExecutionTotals {
+    pub active_executions: usize,
+    pub webhook_endpoint_count: usize,
+    pub webhook_workflow_count: usize,
+    pub cron_workflow_count: usize,
+    pub cron_job_count: usize,
+    pub node_types_count: usize,
+    pub credential_types_count: usize,
+}
+
 pub fn health_routes(state: AppState) -> Router {
     Router::new()
         .route("/health/triggers", get(get_trigger_health))
+        .route("/health/runtime", get(get_runtime_health))
+        .route("/metrics/runtime", get(get_runtime_metrics))
         .with_state(state)
 }
 
@@ -86,10 +147,101 @@ async fn get_trigger_health(
         executions: ExecutionHealth {
             running_count: execution_count,
         },
-        // Polling runtime manager is not wired yet; report explicit zero until integrated.
         polling: PollingHealth { active_count: 0 },
         generated_at: Utc::now().to_rfc3339(),
     }))
+}
+
+async fn get_runtime_health(
+    State(state): State<AppState>,
+) -> Result<Json<RuntimeHealthResponse>, (StatusCode, String)> {
+    let dispatch = state.operations_runtime.dispatch_metrics_snapshot().await;
+    let pruning = state.operations_runtime.pruning_snapshot().await;
+    let telemetry = state.operations_runtime.telemetry_snapshot();
+    let active_executions = state.active_executions.read().await.len();
+    let webhook_endpoint_count = {
+        let registry = state.webhook_registry.read().map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Registry lock poisoned".into(),
+            )
+        })?;
+        registry.len()
+    };
+    let cron_job_count = {
+        let cron_jobs = state.active_cron_jobs.read().await;
+        cron_jobs.values().map(|job_ids| job_ids.len()).sum::<usize>()
+    };
+
+    Ok(Json(RuntimeHealthResponse {
+        status: "ok".to_string(),
+        environment: std::env::var("BARQFLOW_ENV").unwrap_or_else(|_| "development".to_string()),
+        server_time: Utc::now(),
+        dispatch_mode: dispatch_mode_label(dispatch.mode),
+        active_executions,
+        queued_executions: dispatch.queued_count,
+        worker_concurrency: dispatch.worker_concurrency,
+        queue_capacity: dispatch.queue_capacity,
+        webhook_endpoint_count,
+        cron_job_count,
+        node_types_count: state.node_registry.get_all_node_names().len(),
+        credential_types_count: state.credential_registry.get_all_credentials().len(),
+        tracing_enabled: telemetry.enabled,
+        trace_format: telemetry.format,
+        pruning_enabled: pruning.enabled,
+        retention_days: pruning.retention_days,
+    }))
+}
+
+async fn get_runtime_metrics(
+    State(state): State<AppState>,
+) -> Result<Json<RuntimeMetricsResponse>, (StatusCode, String)> {
+    let dispatch = state.operations_runtime.dispatch_metrics_snapshot().await;
+    let (webhook_endpoint_count, webhook_workflow_count) = {
+        let registry = state.webhook_registry.read().map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Registry lock poisoned".into(),
+            )
+        })?;
+        summarize_webhooks(&registry)
+    };
+    let (cron_workflow_count, cron_job_count) = {
+        let cron_jobs = state.active_cron_jobs.read().await;
+        summarize_cron_jobs(&cron_jobs)
+    };
+    let active_executions = state.active_executions.read().await.len();
+
+    Ok(Json(RuntimeMetricsResponse {
+        dispatch: RuntimeDispatchMetrics {
+            mode: dispatch_mode_label(dispatch.mode),
+            worker_concurrency: dispatch.worker_concurrency,
+            queue_capacity: dispatch.queue_capacity,
+            queued_count: dispatch.queued_count,
+            running_count: dispatch.running_count,
+            total_enqueued: dispatch.total_enqueued,
+            total_started: dispatch.total_started,
+            total_finished: dispatch.total_finished,
+            total_failed_to_dispatch: dispatch.total_failed_to_dispatch,
+        },
+        execution_totals: RuntimeExecutionTotals {
+            active_executions,
+            webhook_endpoint_count,
+            webhook_workflow_count,
+            cron_workflow_count,
+            cron_job_count,
+            node_types_count: state.node_registry.get_all_node_names().len(),
+            credential_types_count: state.credential_registry.get_all_credentials().len(),
+        },
+        generated_at: Utc::now(),
+    }))
+}
+
+fn dispatch_mode_label(mode: ExecutionDispatchMode) -> String {
+    match mode {
+        ExecutionDispatchMode::Inline => "inline".to_string(),
+        ExecutionDispatchMode::Queue => "queue".to_string(),
+    }
 }
 
 fn summarize_webhooks(registry: &HashMap<String, WebhookEndpoint>) -> (usize, usize) {
@@ -119,6 +271,25 @@ mod tests {
     };
     use tokio_util::sync::CancellationToken;
     use tower::ServiceExt;
+
+    fn test_state(
+        webhook_registry: WebhookRegistry,
+        active_cron_jobs: ActiveCronJobs,
+        active_executions: ActiveExecutionManager,
+    ) -> AppState {
+        let node_registry = std::sync::Arc::new(barqflow_registry::registry::NodeRegistry::new());
+        let credential_registry =
+            std::sync::Arc::new(barqflow_registry::registry::CredentialRegistry::new());
+
+        AppState {
+            webhook_registry,
+            active_cron_jobs,
+            active_executions,
+            node_registry,
+            credential_registry,
+            operations_runtime: OperationsRuntime::from_env(),
+        }
+    }
 
     #[test]
     fn summarize_webhooks_counts_unique_workflows() {
@@ -196,11 +367,11 @@ mod tests {
             },
         )])));
 
-        let app = health_routes(AppState {
+        let app = health_routes(test_state(
             webhook_registry,
             active_cron_jobs,
             active_executions,
-        });
+        ));
 
         let request = Request::builder()
             .uri("/health/triggers")

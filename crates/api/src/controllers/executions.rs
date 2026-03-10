@@ -1,15 +1,18 @@
 use crate::auth::{require_authenticated_user, require_workspace_role, AuthenticatedUser};
-use crate::contracts::ExecutionResponse;
+use crate::contracts::{ExecutionLogResponse, ExecutionResponse};
 use crate::execution_events::{
     extract_execution_events, merge_execution_events, with_execution_event_history,
-    ExecutionEventHub, HubExecutionEventReporter,
+    ExecutionEventHub,
 };
+use crate::operations::{maybe_run_execution_pruning, OperationsRuntime};
 use crate::repositories::{
     api_key::ApiKeyRepository, credential::CredentialRepository, execution::ExecutionRepository,
-    workflow::WorkflowRepository, workspace::WorkspaceRepository,
+    execution_log::ExecutionLogRepository, workflow::WorkflowRepository,
+    workspace::WorkspaceRepository,
 };
 use crate::routes::{ActiveExecutionControl, ActiveExecutionManager};
 use crate::subworkflow_executor::RepositorySubWorkflowExecutor;
+use async_trait::async_trait;
 use async_stream::stream;
 use axum::http::StatusCode;
 use axum::{
@@ -29,11 +32,13 @@ use std::convert::Infallible;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration, Instant};
 use tokio_util::sync::CancellationToken;
+use tracing::warn;
 use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct AppState {
     pub execution_repo: Arc<ExecutionRepository>,
+    pub execution_log_repo: Arc<ExecutionLogRepository>,
     pub workflow_repo: Arc<WorkflowRepository>,
     pub node_registry: Arc<barqflow_registry::registry::NodeRegistry>,
     pub credential_repo: Arc<CredentialRepository>,
@@ -42,12 +47,14 @@ pub struct AppState {
     pub api_key_repo: Arc<ApiKeyRepository>,
     pub active_executions: ActiveExecutionManager,
     pub execution_events: ExecutionEventHub,
+    pub operations_runtime: OperationsRuntime,
 }
 
 pub fn execution_routes(state: AppState) -> Router {
     Router::new()
         .route("/executions", get(list_executions))
         .route("/executions/{id}/events", get(get_execution_events))
+        .route("/executions/{id}/logs", get(get_execution_logs))
         .route(
             "/executions/{id}/events/stream",
             get(stream_execution_events),
@@ -92,6 +99,12 @@ struct ExecutionStreamQuery {
     pub token: Option<String>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExecutionLogsQuery {
+    pub limit: Option<usize>,
+}
+
 fn is_terminal_contract_status(status: ExecutionStatus) -> bool {
     matches!(
         status,
@@ -101,6 +114,47 @@ fn is_terminal_contract_status(status: ExecutionStatus) -> bool {
             | ExecutionStatus::Stopped
             | ExecutionStatus::Cancelled
     )
+}
+
+fn execution_log_level(event: &ExecutionEvent) -> &'static str {
+    match event.status {
+        ExecutionStatus::Failed => "error",
+        ExecutionStatus::Stopped | ExecutionStatus::Cancelled => "warn",
+        ExecutionStatus::Waiting => "info",
+        ExecutionStatus::Queued | ExecutionStatus::Running | ExecutionStatus::Success => "info",
+    }
+}
+
+fn execution_event_type_label(event_type: ExecutionEventType) -> &'static str {
+    match event_type {
+        ExecutionEventType::Queued => "queued",
+        ExecutionEventType::Started => "started",
+        ExecutionEventType::NodeStarted => "nodeStarted",
+        ExecutionEventType::NodeFinished => "nodeFinished",
+        ExecutionEventType::Waiting => "waiting",
+        ExecutionEventType::Resumed => "resumed",
+        ExecutionEventType::Failed => "failed",
+        ExecutionEventType::Stopped => "stopped",
+        ExecutionEventType::Completed => "completed",
+    }
+}
+
+#[derive(Clone)]
+struct StateBackedExecutionEventReporter {
+    state: AppState,
+}
+
+impl StateBackedExecutionEventReporter {
+    fn new(state: AppState) -> Self {
+        Self { state }
+    }
+}
+
+#[async_trait]
+impl barqflow_exec::runner::ExecutionEventReporter for StateBackedExecutionEventReporter {
+    async fn report(&self, event: ExecutionEvent) {
+        append_execution_event(&self.state, event).await;
+    }
 }
 
 fn build_execution_event(
@@ -141,7 +195,28 @@ async fn load_execution_event_history(
 }
 
 async fn append_execution_event(state: &AppState, event: ExecutionEvent) {
-    state.execution_events.append(event).await;
+    state.execution_events.append(event.clone()).await;
+
+    if let Err(error) = state
+        .execution_log_repo
+        .create(
+            event.execution_id,
+            event.workflow_id.0,
+            execution_log_level(&event),
+            Some(execution_event_type_label(event.event_type)),
+            event.message.as_str(),
+            event.node_id.as_ref().map(|value| value.0.as_str()),
+            event.node_name.as_deref(),
+            serde_json::to_value(&event.data).unwrap_or(serde_json::Value::Null),
+        )
+        .await
+    {
+        warn!(
+            execution_id = %event.execution_id,
+            error = %error,
+            "Failed to persist execution log entry"
+        );
+    }
 }
 
 async fn persist_execution_with_events(
@@ -231,6 +306,29 @@ async fn get_execution_events(
     let execution = load_execution_in_workspace(&state, auth.workspace_id, id).await?;
 
     Ok(Json(load_execution_event_history(&state, &execution).await))
+}
+
+async fn get_execution_logs(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Query(query): Query<ExecutionLogsQuery>,
+) -> Result<Json<Vec<ExecutionLogResponse>>, (StatusCode, String)> {
+    let auth = require_execution_auth(&headers, &state).await?;
+    let execution = load_execution_in_workspace(&state, auth.workspace_id, id).await?;
+    let limit = query.limit.unwrap_or(500).clamp(1, 1000);
+
+    let logs = state
+        .execution_log_repo
+        .list_for_execution(execution.id, limit)
+        .await
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+
+    Ok(Json(
+        logs.into_iter()
+            .map(ExecutionLogResponse::from)
+            .collect(),
+    ))
 }
 
 async fn stream_execution_events(
@@ -762,8 +860,8 @@ async fn resume_execution(
     let runner = WorkflowRunner::new(state.node_registry.clone(), ExecutionConfig::default())
         .with_credential_provider(credential_provider)
         .with_subworkflow_executor(subworkflow_executor)
-        .with_event_reporter(Arc::new(HubExecutionEventReporter::new(
-            state.execution_events.clone(),
+        .with_event_reporter(Arc::new(StateBackedExecutionEventReporter::new(
+            state.clone(),
         )));
 
     let context = WorkflowRunContext {
@@ -870,10 +968,16 @@ async fn run_workflow_execution(
     manual: bool,
     stop_after_node_id: Option<String>,
 ) -> Result<ExecutionEntity, (StatusCode, String)> {
-    use barqflow_core::types::RunId;
-    use barqflow_exec::runner::{ExecutionConfig, WorkflowRunContext, WorkflowRunner};
+    if let Err(error) = maybe_run_execution_pruning(
+        &state.operations_runtime,
+        &state.execution_repo,
+        &state.execution_log_repo,
+    )
+    .await
+    {
+        warn!(error = %error, "Execution pruning run failed");
+    }
 
-    // 1. Fetch workflow
     let wf_entity = state
         .workflow_repo
         .find_by_id_in_workspace(workspace_id, workflow_id)
@@ -902,26 +1006,17 @@ async fn run_workflow_execution(
         }
     }
 
+    state
+        .operations_runtime
+        .register_dispatch()
+        .await
+        .map_err(|message| (StatusCode::SERVICE_UNAVAILABLE, message))?;
+
     let connections: std::collections::HashMap<String, barqflow_core::schema::INodeConnections> =
         serde_json::from_value(wf_entity.connections.clone()).unwrap_or_default();
 
     let settings: barqflow_core::schema::IWorkflowSettings =
         serde_json::from_value(wf_entity.settings.clone()).unwrap_or_default();
-
-    let credential_provider = Arc::new(
-        crate::credentials_provider::RepositoryCredentialProvider::new(
-            Arc::clone(&state.credential_repo),
-            &nodes,
-        ),
-    );
-    let subworkflow_executor = Arc::new(
-        RepositorySubWorkflowExecutor::new(
-            Arc::clone(&state.workflow_repo),
-            Arc::clone(&state.credential_repo),
-            Arc::clone(&state.node_registry),
-        )
-        .with_execution_repo(Arc::clone(&state.execution_repo)),
-    );
 
     let core_wf = barqflow_core::schema::WorkflowDef {
         id: barqflow_core::types::WorkflowId(wf_entity.id),
@@ -931,10 +1026,9 @@ async fn run_workflow_execution(
         active: wf_entity.active,
         settings,
     };
-    // Save initial state
     let new_exec = state
         .execution_repo
-        .create(workflow_id, "running", serde_json::Value::Null)
+        .create(workflow_id, "queued", serde_json::Value::Null)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let run_id = RunId(new_exec.id);
@@ -952,8 +1046,8 @@ async fn run_workflow_execution(
             None,
             serde_json::json!({
                 "manual": manual,
-                "workflowName": wf_entity.name,
-                "stopAfterNodeId": stop_after_node_id,
+                "workflowName": wf_entity.name.clone(),
+                "stopAfterNodeId": stop_after_node_id.clone(),
             }),
         ),
     )
@@ -961,12 +1055,113 @@ async fn run_workflow_execution(
     let new_exec = persist_execution_with_events(
         state,
         new_exec.id,
-        "running",
+        "queued",
         serde_json::json!({
             "queued": true,
             "manual": manual,
             "workflowName": wf_entity.name,
-            "stopAfterNodeId": stop_after_node_id,
+            "stopAfterNodeId": stop_after_node_id.clone(),
+        }),
+    )
+    .await?;
+
+    let execution_id = new_exec.id;
+    let state_for_dispatch = state.clone();
+    tokio::spawn(async move {
+        let permit = state_for_dispatch.operations_runtime.acquire_worker_permit().await;
+        state_for_dispatch.operations_runtime.mark_started().await;
+
+        if let Err((status_code, message)) = start_dispatched_execution(
+            state_for_dispatch.clone(),
+            execution_id,
+            core_wf,
+            manual,
+            stop_after_node_id,
+            permit,
+        )
+        .await
+        {
+            let next_sequence = state_for_dispatch
+                .execution_events
+                .snapshot(execution_id)
+                .await
+                .last()
+                .map(|event| event.sequence + 1)
+                .unwrap_or(2);
+            append_execution_event(
+                &state_for_dispatch,
+                build_execution_event(
+                    execution_id,
+                    workflow_id,
+                    RunId(execution_id),
+                    next_sequence,
+                    ExecutionEventType::Failed,
+                    ExecutionStatus::Failed,
+                    format!("Execution failed before start: {}", message),
+                    None,
+                    None,
+                    serde_json::json!({
+                        "error": message,
+                        "statusCode": status_code.as_u16(),
+                    }),
+                ),
+            )
+            .await;
+
+            let _ = persist_execution_with_events(
+                &state_for_dispatch,
+                execution_id,
+                "failed",
+                serde_json::json!({
+                    "error": message,
+                    "statusCode": status_code.as_u16(),
+                }),
+            )
+            .await;
+
+            state_for_dispatch.operations_runtime.mark_finished().await;
+        }
+    });
+
+    Ok(new_exec)
+}
+
+async fn start_dispatched_execution(
+    state: AppState,
+    execution_id: Uuid,
+    workflow: barqflow_core::schema::WorkflowDef,
+    manual: bool,
+    stop_after_node_id: Option<String>,
+    worker_permit: Option<tokio::sync::OwnedSemaphorePermit>,
+) -> Result<(), (StatusCode, String)> {
+    use barqflow_core::types::RunId;
+    use barqflow_exec::runner::{ExecutionConfig, WorkflowRunContext, WorkflowRunner};
+
+    let credential_provider = Arc::new(
+        crate::credentials_provider::RepositoryCredentialProvider::new(
+            Arc::clone(&state.credential_repo),
+            &workflow.nodes,
+        ),
+    );
+    let subworkflow_executor = Arc::new(
+        RepositorySubWorkflowExecutor::new(
+            Arc::clone(&state.workflow_repo),
+            Arc::clone(&state.credential_repo),
+            Arc::clone(&state.node_registry),
+        )
+        .with_execution_repo(Arc::clone(&state.execution_repo)),
+    );
+    let run_id = RunId(execution_id);
+
+    let _ = persist_execution_with_events(
+        &state,
+        execution_id,
+        "running",
+        serde_json::json!({
+            "queued": false,
+            "manual": manual,
+            "workflowName": workflow.name.clone(),
+            "stopAfterNodeId": stop_after_node_id.clone(),
         }),
     )
     .await?;
@@ -974,16 +1169,16 @@ async fn run_workflow_execution(
     let runner = WorkflowRunner::new(state.node_registry.clone(), ExecutionConfig::default())
         .with_credential_provider(credential_provider)
         .with_subworkflow_executor(subworkflow_executor)
-        .with_event_reporter(Arc::new(HubExecutionEventReporter::new(
-            state.execution_events.clone(),
+        .with_event_reporter(Arc::new(StateBackedExecutionEventReporter::new(
+            state.clone(),
         )));
     let cancellation_token = CancellationToken::new();
     let ctx = WorkflowRunContext {
         run_id,
-        workflow: core_wf,
+        workflow: workflow.clone(),
         static_data: None,
         manual,
-        execution_id: Some(new_exec.id),
+        execution_id: Some(execution_id),
         parent_execution_id: None,
         cancellation_token: Some(cancellation_token.clone()),
         stop_after_node_id,
@@ -994,7 +1189,7 @@ async fn run_workflow_execution(
     {
         let mut active = state.active_executions.write().await;
         active.insert(
-            new_exec.id,
+            execution_id,
             ActiveExecutionControl {
                 cancellation_token,
                 abort_handle: run_task.abort_handle(),
@@ -1003,7 +1198,6 @@ async fn run_workflow_execution(
     }
 
     let state_for_completion = state.clone();
-    let execution_id = new_exec.id;
     tokio::spawn(async move {
         let results = match run_task.await {
             Ok(result) => result,
@@ -1106,7 +1300,7 @@ async fn run_workflow_execution(
             &state_for_completion,
             build_execution_event(
                 execution_id,
-                workflow_id,
+                workflow.id.0,
                 run_id,
                 next_sequence,
                 event_type,
@@ -1129,9 +1323,11 @@ async fn run_workflow_execution(
 
         let mut active = state_for_completion.active_executions.write().await;
         active.remove(&execution_id);
+        state_for_completion.operations_runtime.mark_finished().await;
+        drop(worker_permit);
     });
 
-    Ok(new_exec)
+    Ok(())
 }
 
 async fn require_execution_auth(

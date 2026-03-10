@@ -1,7 +1,9 @@
 use crate::execution_events::ExecutionEventHub;
+use crate::operations::OperationsRuntime;
 use crate::repositories::{
     api_key::ApiKeyRepository, credential::CredentialRepository, execution::ExecutionRepository,
-    workflow::WorkflowRepository, workspace::WorkspaceRepository,
+    execution_log::ExecutionLogRepository, workflow::WorkflowRepository,
+    workspace::WorkspaceRepository,
 };
 use axum::Router;
 use barqflow_db::users::UserRepo;
@@ -20,6 +22,7 @@ pub struct ActiveExecutionControl {
 
 pub type ActiveExecutionManager = Arc<RwLock<HashMap<Uuid, ActiveExecutionControl>>>;
 use tower_http::services::{ServeDir, ServeFile};
+use tower_http::trace::TraceLayer;
 
 use crate::active_workflows::ActiveCronJobs;
 use crate::controllers::{
@@ -40,6 +43,7 @@ pub struct AppState {
     pub workflow_repo: Arc<WorkflowRepository>,
     pub credential_repo: Arc<CredentialRepository>,
     pub exec_repo: Arc<ExecutionRepository>,
+    pub execution_log_repo: Arc<ExecutionLogRepository>,
     pub user_repo: Arc<UserRepo>,
     pub workspace_repo: Arc<WorkspaceRepository>,
     pub api_key_repo: Arc<ApiKeyRepository>,
@@ -50,6 +54,7 @@ pub struct AppState {
     pub active_executions: ActiveExecutionManager,
     pub active_cron_jobs: ActiveCronJobs,
     pub execution_events: ExecutionEventHub,
+    pub operations_runtime: OperationsRuntime,
 }
 
 pub fn create_router(state: AppState) -> Router {
@@ -77,6 +82,7 @@ pub fn create_router(state: AppState) -> Router {
         }))
         .merge(execution_routes(ExecState {
             execution_repo: Arc::clone(&state.exec_repo),
+            execution_log_repo: Arc::clone(&state.execution_log_repo),
             workflow_repo: Arc::clone(&state.workflow_repo),
             node_registry: Arc::clone(&state.node_registry),
             credential_repo: Arc::clone(&state.credential_repo),
@@ -85,6 +91,7 @@ pub fn create_router(state: AppState) -> Router {
             api_key_repo: Arc::clone(&state.api_key_repo),
             active_executions: Arc::clone(&state.active_executions),
             execution_events: state.execution_events.clone(),
+            operations_runtime: state.operations_runtime.clone(),
         }))
         .merge(credential_routes(CredState {
             credential_repo: Arc::clone(&state.credential_repo),
@@ -99,14 +106,23 @@ pub fn create_router(state: AppState) -> Router {
         .merge(settings_routes(SettingsState {
             node_registry: Arc::clone(&state.node_registry),
             credential_registry: Arc::clone(&state.credential_registry),
+            execution_repo: Arc::clone(&state.exec_repo),
+            execution_log_repo: Arc::clone(&state.execution_log_repo),
             user_repo: Arc::clone(&state.user_repo),
             workspace_repo: Arc::clone(&state.workspace_repo),
             api_key_repo: Arc::clone(&state.api_key_repo),
+            webhook_registry: Arc::clone(&state.webhook_registry),
+            active_cron_jobs: Arc::clone(&state.active_cron_jobs),
+            active_executions: Arc::clone(&state.active_executions),
+            operations_runtime: state.operations_runtime.clone(),
         }))
         .merge(health_routes(HealthState {
             webhook_registry: Arc::clone(&state.webhook_registry),
             active_cron_jobs: Arc::clone(&state.active_cron_jobs),
             active_executions: Arc::clone(&state.active_executions),
+            node_registry: Arc::clone(&state.node_registry),
+            credential_registry: Arc::clone(&state.credential_registry),
+            operations_runtime: state.operations_runtime.clone(),
         }))
         .nest(
             "/nodes",
@@ -128,4 +144,5 @@ pub fn create_router(state: AppState) -> Router {
         .fallback_service(
             ServeDir::new("web/dist").not_found_service(ServeFile::new("web/dist/index.html")),
         )
+        .layer(TraceLayer::new_for_http())
 }
