@@ -538,21 +538,21 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="min-h-full bg-slate-100/80 p-6 text-slate-900 md:p-10">
+  <div class="min-h-full bg-transparent p-4 text-slate-900 md:p-8">
     <div class="mx-auto max-w-7xl space-y-6">
-      <section class="rounded-3xl border border-slate-200 bg-white px-6 py-6 shadow-sm md:px-8">
+      <section class="rounded-[2rem] border border-slate-200/80 bg-white px-6 py-6 shadow-panel md:px-8">
         <div class="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
           <div class="max-w-3xl">
-            <div class="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
+            <div class="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.22em] text-slate-600">
               <Shield class="h-3.5 w-3.5" />
-              Credential Management
+              Credential Governance
             </div>
             <h1 class="mt-3 text-3xl font-black tracking-tight text-slate-950 md:text-4xl">
-              Credential Inventory and Access
+              Credential Operations Center
             </h1>
             <p class="mt-2 text-sm leading-6 text-slate-600 md:text-base">
-              Manage tokens, database connections, and OAuth credentials with clear validation state,
-              usage telemetry, and reusable workflow bindings.
+              Govern OAuth connections, API keys, and database secrets with reusable bindings,
+              validation state, rotation history, and runtime usage visibility.
             </p>
           </div>
 
@@ -578,35 +578,35 @@ onMounted(async () => {
       </section>
 
       <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <div class="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+        <div class="rounded-[1.6rem] border border-slate-200/80 bg-white px-5 py-4 shadow-panel">
           <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Total</p>
           <p class="mt-3 text-3xl font-black text-slate-950">{{ totalCredentialCount }}</p>
-          <p class="mt-1 text-sm text-slate-500">Credentials stored in the workspace.</p>
+          <p class="mt-1 text-sm text-slate-500">Credential records currently available in the workspace.</p>
         </div>
-        <div class="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+        <div class="rounded-[1.6rem] border border-slate-200/80 bg-white px-5 py-4 shadow-panel">
           <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Validated</p>
           <p class="mt-3 text-3xl font-black text-emerald-600">{{ validatedCredentialCount }}</p>
-          <p class="mt-1 text-sm text-slate-500">Credentials ready for production use.</p>
+          <p class="mt-1 text-sm text-slate-500">Credentials in a known good state for production use.</p>
         </div>
-        <div class="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+        <div class="rounded-[1.6rem] border border-slate-200/80 bg-white px-5 py-4 shadow-panel">
           <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Attention</p>
           <p class="mt-3 text-3xl font-black text-amber-600">{{ attentionCredentialCount }}</p>
-          <p class="mt-1 text-sm text-slate-500">Credentials that should be re-tested or fixed.</p>
+          <p class="mt-1 text-sm text-slate-500">Credentials that should be re-tested, reconnected, or rotated.</p>
         </div>
-        <div class="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+        <div class="rounded-[1.6rem] border border-slate-200/80 bg-white px-5 py-4 shadow-panel">
           <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Usage Events</p>
           <p class="mt-3 text-3xl font-black text-slate-950">{{ totalUsageCount }}</p>
-          <p class="mt-1 text-sm text-slate-500">Runtime resolutions recorded across executions.</p>
+          <p class="mt-1 text-sm text-slate-500">Runtime credential resolutions recorded across executions.</p>
         </div>
       </section>
 
-      <section class="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
+      <section class="grid gap-6 xl:grid-cols-[340px_minmax(0,1fr)]">
         <aside class="space-y-6">
           <div
             v-if="requestedReturnTo"
-            class="rounded-2xl border border-brand-200 bg-brand-50 px-5 py-4 text-sm text-brand-900 shadow-sm"
+            class="rounded-[1.6rem] border border-brand-200 bg-brand-50 px-5 py-4 text-sm text-brand-900 shadow-panel"
           >
-            <p class="font-semibold">Workflow setup handoff</p>
+            <p class="font-semibold">Workflow handoff</p>
             <p class="mt-2 leading-6 text-brand-900/80">
               {{ pageNotice || 'Create the credential, then return to finish binding it in the editor.' }}
             </p>
@@ -620,7 +620,7 @@ onMounted(async () => {
             </button>
           </div>
 
-          <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div class="rounded-[1.6rem] border border-slate-200/80 bg-white p-5 shadow-panel">
             <div class="mb-4">
               <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Filters</p>
               <h2 class="mt-2 text-lg font-black text-slate-950">Search and segment credentials</h2>
@@ -668,10 +668,10 @@ onMounted(async () => {
             </div>
           </div>
 
-          <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div class="rounded-[1.6rem] border border-slate-200/80 bg-white p-5 shadow-panel">
             <div class="mb-4">
-              <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Quick Start</p>
-              <h2 class="mt-2 text-lg font-black text-slate-950">Common integrations</h2>
+              <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Integration Presets</p>
+              <h2 class="mt-2 text-lg font-black text-slate-950">Provision common integrations</h2>
             </div>
 
             <div class="space-y-3">
@@ -712,10 +712,10 @@ onMounted(async () => {
             <span>{{ pageNotice }}</span>
           </div>
 
-          <div class="rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div class="rounded-[1.75rem] border border-slate-200/80 bg-white shadow-panel">
             <div class="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 md:flex-row md:items-center md:justify-between">
               <div>
-                <h2 class="text-lg font-black text-slate-950">Saved Credentials</h2>
+                <h2 class="text-lg font-black text-slate-950">Credential Inventory</h2>
                 <p class="mt-1 text-sm text-slate-500">
                   {{ filteredCredentials.length }} of {{ credentials.length }} credential{{ credentials.length === 1 ? '' : 's' }} visible.
                 </p>
@@ -732,9 +732,9 @@ onMounted(async () => {
               class="px-6 py-16 text-center"
             >
               <KeyRound class="mx-auto h-8 w-8 text-slate-300" />
-              <h3 class="mt-4 text-lg font-bold text-slate-900">No credentials match this view.</h3>
+              <h3 class="mt-4 text-lg font-bold text-slate-900">No credentials match the current operating view.</h3>
               <p class="mt-2 text-sm text-slate-500">
-                Adjust the filters or create a new credential to start binding integrations.
+                Adjust the filters or create a new credential record to start binding integrations.
               </p>
             </div>
 
@@ -766,26 +766,26 @@ onMounted(async () => {
                     </div>
 
                     <dl class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                      <div class="rounded-xl bg-slate-50 px-4 py-3">
+                      <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                         <dt class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Last Tested</dt>
                         <dd class="mt-2 text-sm font-semibold text-slate-900">
                           {{ formatRelativeTime(credential.lastTestedAt, 'Not tested') }}
                         </dd>
                         <p class="mt-1 text-xs text-slate-500">{{ formatDateTime(credential.lastTestedAt, 'Not tested') }}</p>
                       </div>
-                      <div class="rounded-xl bg-slate-50 px-4 py-3">
+                      <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                         <dt class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Last Used</dt>
                         <dd class="mt-2 text-sm font-semibold text-slate-900">
                           {{ formatRelativeTime(credential.lastUsedAt, 'Never used') }}
                         </dd>
                         <p class="mt-1 text-xs text-slate-500">{{ formatDateTime(credential.lastUsedAt, 'Never used') }}</p>
                       </div>
-                      <div class="rounded-xl bg-slate-50 px-4 py-3">
+                      <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                         <dt class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Usage Count</dt>
                         <dd class="mt-2 text-sm font-semibold text-slate-900">{{ credential.usageCount }}</dd>
                         <p class="mt-1 text-xs text-slate-500">Incremented when the runtime resolves the credential.</p>
                       </div>
-                      <div class="rounded-xl bg-slate-50 px-4 py-3">
+                      <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                         <dt class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Rotated</dt>
                         <dd class="mt-2 text-sm font-semibold text-slate-900">
                           {{ formatRelativeTime(credential.rotatedAt, 'Not rotated') }}

@@ -458,7 +458,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="h-full overflow-auto bg-transparent px-6 py-8 md:px-10 md:py-10">
+  <div class="h-full overflow-auto bg-transparent px-4 py-5 md:px-8 md:py-8">
     <input
       ref="fileInput"
       type="file"
@@ -468,15 +468,15 @@ onBeforeUnmount(() => {
     />
 
     <div class="mx-auto flex max-w-7xl flex-col gap-8">
-      <section class="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
+      <section class="rounded-[2rem] border border-slate-200/80 bg-white p-6 shadow-panel md:p-8">
         <div class="flex flex-col gap-6 xl:flex-row xl:items-center xl:justify-between">
           <div class="max-w-3xl">
-            <p class="text-[11px] font-black uppercase tracking-[0.24em] text-brand-600">Workflow Management</p>
+            <p class="text-[11px] font-black uppercase tracking-[0.24em] text-brand-700">Workflow Operations</p>
             <h1 class="mt-3 text-3xl font-display font-black tracking-tight text-slate-950 md:text-4xl">
-              Workflow Catalog and Operations
+              Workflow Control Center
             </h1>
             <p class="mt-3 max-w-2xl text-sm font-medium leading-6 text-slate-600 md:text-base">
-              Search, organize, import, export, and operate workflows from one operational workspace before opening the editor.
+              Govern workflow inventory, rollout status, taxonomy, import and export, and template adoption from one operational surface.
             </p>
           </div>
 
@@ -500,37 +500,37 @@ onBeforeUnmount(() => {
               class="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
             >
               <Sparkles class="h-4 w-4" />
-              Templates
+              Blueprint Library
             </button>
           </div>
         </div>
       </section>
 
       <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div class="rounded-[1.6rem] border border-slate-200/80 bg-white p-5 shadow-panel">
           <p class="text-xs font-black uppercase tracking-[0.22em] text-slate-400">Catalog</p>
           <p class="mt-3 text-3xl font-display font-black text-slate-950">{{ totalWorkflowCount }}</p>
-          <p class="mt-1 text-sm font-medium text-slate-500">Workflows loaded in the current view.</p>
+          <p class="mt-1 text-sm font-medium text-slate-500">Workflow records visible in the current operating view.</p>
         </div>
-        <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div class="rounded-[1.6rem] border border-slate-200/80 bg-white p-5 shadow-panel">
           <p class="text-xs font-black uppercase tracking-[0.22em] text-slate-400">Active</p>
           <p class="mt-3 text-3xl font-display font-black text-emerald-600">{{ activeWorkflowCount }}</p>
-          <p class="mt-1 text-sm font-medium text-slate-500">Triggers currently armed and live.</p>
+          <p class="mt-1 text-sm font-medium text-slate-500">Workflows currently enabled for trigger intake.</p>
         </div>
-        <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div class="rounded-[1.6rem] border border-slate-200/80 bg-white p-5 shadow-panel">
           <p class="text-xs font-black uppercase tracking-[0.22em] text-slate-400">Nodes</p>
           <p class="mt-3 text-3xl font-display font-black text-slate-950">{{ totalNodeCount }}</p>
-          <p class="mt-1 text-sm font-medium text-slate-500">Total steps across the loaded workflow set.</p>
+          <p class="mt-1 text-sm font-medium text-slate-500">Total configured steps across the loaded workflow set.</p>
         </div>
-        <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p class="text-xs font-black uppercase tracking-[0.22em] text-slate-400">Templates</p>
+        <div class="rounded-[1.6rem] border border-slate-200/80 bg-white p-5 shadow-panel">
+          <p class="text-xs font-black uppercase tracking-[0.22em] text-slate-400">Blueprints</p>
           <p class="mt-3 text-3xl font-display font-black text-brand-600">{{ workflowStore.workflowTemplates.length }}</p>
-          <p class="mt-1 text-sm font-medium text-slate-500">Starter and intermediate launch blueprints.</p>
+          <p class="mt-1 text-sm font-medium text-slate-500">Curated workflow templates available for rollout.</p>
         </div>
       </section>
 
       <section class="grid gap-6 xl:grid-cols-[1.45fr_0.95fr]">
-        <div class="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div class="rounded-[2rem] border border-slate-200/80 bg-white p-6 shadow-panel">
           <div class="flex items-center justify-between gap-4">
             <div>
               <p class="text-xs font-black uppercase tracking-[0.22em] text-slate-400">Filters</p>
@@ -621,14 +621,14 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div class="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div class="rounded-[2rem] border border-slate-200/80 bg-white p-6 shadow-panel">
           <div class="flex items-center justify-between gap-4">
             <div>
-              <p class="text-xs font-black uppercase tracking-[0.22em] text-slate-400">Tag Studio</p>
-              <h2 class="mt-2 text-2xl font-display font-black text-slate-950">Create and clean workspace tags</h2>
+              <p class="text-xs font-black uppercase tracking-[0.22em] text-slate-400">Taxonomy</p>
+              <h2 class="mt-2 text-2xl font-display font-black text-slate-950">Manage workflow taxonomy</h2>
             </div>
-            <div class="rounded-full bg-amber-50 px-3 py-1 text-[11px] font-black uppercase tracking-[0.18em] text-amber-700">
-              Workspace scoped
+            <div class="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-black uppercase tracking-[0.18em] text-slate-600">
+              Shared across workspace
             </div>
           </div>
 
@@ -678,33 +678,33 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <section class="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+      <section class="rounded-[2rem] border border-slate-200/80 bg-white p-6 shadow-panel">
         <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <p class="text-xs font-black uppercase tracking-[0.22em] text-slate-400">Templates</p>
-            <h2 class="mt-2 text-2xl font-display font-black text-slate-950">Start from templates or blank workflows</h2>
+            <p class="text-xs font-black uppercase tracking-[0.22em] text-slate-400">Blueprint Library</p>
+            <h2 class="mt-2 text-2xl font-display font-black text-slate-950">Start from approved templates or a blank workflow</h2>
           </div>
           <button
             @click="openStarterModal"
             class="inline-flex items-center gap-2 self-start rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-700 transition hover:border-brand-200 hover:text-brand-600 md:self-auto"
           >
             <Wand2 class="h-4 w-4" />
-            Open Template Gallery
+            Open Blueprint Library
           </button>
         </div>
 
         <div class="mt-6 grid gap-4 xl:grid-cols-4">
           <button
             @click="createBlankWorkflow"
-            class="group flex h-full flex-col justify-between rounded-[1.75rem] border border-dashed border-slate-300 bg-slate-50/80 p-6 text-left transition hover:-translate-y-1 hover:border-brand-400 hover:bg-brand-50/60"
+            class="group flex h-full flex-col justify-between rounded-[1.75rem] border border-dashed border-slate-300 bg-slate-50 p-6 text-left transition hover:-translate-y-1 hover:border-brand-300 hover:bg-white"
           >
             <div class="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white text-brand-600 shadow-sm transition group-hover:scale-105">
               <Rocket class="h-6 w-6" />
             </div>
             <div class="mt-8">
-              <p class="text-lg font-display font-black text-slate-900">Blank canvas</p>
+              <p class="text-lg font-display font-black text-slate-900">Blank workflow</p>
               <p class="mt-2 text-sm font-medium leading-6 text-slate-500">
-                Start clean and build from scratch in the editor.
+                Start from an empty workflow definition and configure every step in the designer.
               </p>
             </div>
           </button>
@@ -759,13 +759,13 @@ onBeforeUnmount(() => {
           <p class="font-bold text-slate-500">Loading workflows with the current filters…</p>
         </div>
 
-        <div v-else-if="workflowStore.workflows.length === 0" class="rounded-[2rem] border border-dashed border-slate-300 bg-white/80 p-12 text-center shadow-sm">
+        <div v-else-if="workflowStore.workflows.length === 0" class="rounded-[2rem] border border-dashed border-slate-300 bg-white p-12 text-center shadow-panel">
           <div class="mx-auto inline-flex h-16 w-16 items-center justify-center rounded-[1.5rem] bg-slate-100 text-slate-500">
             <Workflow class="h-8 w-8" />
           </div>
-          <h3 class="mt-6 text-2xl font-display font-black text-slate-950">No workflows match this slice.</h3>
+          <h3 class="mt-6 text-2xl font-display font-black text-slate-950">No workflows match the current operating view.</h3>
           <p class="mx-auto mt-3 max-w-xl text-sm font-medium leading-6 text-slate-500">
-            Change the filters, clear some tags, import a workflow JSON file, or launch a starter template to seed the workspace.
+            Adjust the operating filters, clear tag constraints, import a workflow definition, or open the blueprint library to seed the catalog.
           </p>
           <div class="mt-8 flex flex-wrap items-center justify-center gap-3">
             <button
@@ -784,7 +784,7 @@ onBeforeUnmount(() => {
               @click="openStarterModal"
               class="rounded-2xl bg-brand-500 px-4 py-3 text-sm font-black text-white transition hover:bg-brand-600"
             >
-              Open starters
+              Open blueprints
             </button>
           </div>
         </div>
@@ -793,20 +793,18 @@ onBeforeUnmount(() => {
           <article
             v-for="workflow in workflowStore.workflows"
             :key="workflow.id"
-            class="group relative overflow-hidden rounded-[2rem] border border-slate-200/70 bg-white/95 p-7 shadow-sm transition hover:-translate-y-1 hover:shadow-[0_20px_50px_rgba(15,23,42,0.08)]"
+            class="group relative overflow-hidden rounded-[2rem] border border-slate-200/80 bg-white p-7 shadow-panel transition hover:-translate-y-1 hover:border-slate-300"
           >
-            <div class="pointer-events-none absolute inset-x-0 top-0 h-28 bg-[radial-gradient(circle_at_top_left,_rgba(14,165,233,0.12),_transparent_62%)] opacity-0 transition group-hover:opacity-100"></div>
-
             <div class="relative flex items-start justify-between gap-4">
               <button
                 class="flex flex-1 items-start gap-4 text-left"
                 @click="editWorkflow(workflow.id)"
               >
-                <div class="inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-[1.35rem] bg-slate-100 text-slate-600 transition group-hover:bg-brand-600 group-hover:text-white">
+                <div class="inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-[1.35rem] border border-slate-200 bg-slate-50 text-slate-700 transition group-hover:border-brand-200 group-hover:text-brand-700">
                   <Workflow class="h-7 w-7" />
                 </div>
                 <div class="min-w-0 flex-1">
-                  <h3 class="truncate text-2xl font-display font-black text-slate-950 transition group-hover:text-brand-600">
+                  <h3 class="truncate text-2xl font-display font-black text-slate-950">
                     {{ workflow.name }}
                   </h3>
                   <p class="mt-2 text-sm font-medium leading-6 text-slate-500">
@@ -834,19 +832,19 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="relative mt-6 grid grid-cols-3 gap-3">
-              <div class="rounded-2xl bg-slate-50 p-3">
+              <div class="rounded-2xl border border-slate-200 bg-slate-50 p-3">
                 <p class="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Last Run</p>
                 <p class="mt-2 text-sm font-bold text-slate-700" :title="workflowLastExecutionTitle(workflow)">
                   {{ workflowLastExecutionLabel(workflow) }}
                 </p>
               </div>
-              <div class="rounded-2xl bg-slate-50 p-3">
+              <div class="rounded-2xl border border-slate-200 bg-slate-50 p-3">
                 <p class="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Bindings</p>
                 <p class="mt-2 text-sm font-bold text-slate-700">
                   {{ workflow.summary.credentialBindingCount }} linked
                 </p>
               </div>
-              <div class="rounded-2xl bg-slate-50 p-3">
+              <div class="rounded-2xl border border-slate-200 bg-slate-50 p-3">
                 <p class="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Updated</p>
                 <p class="mt-2 text-sm font-bold text-slate-700" :title="workflowTimestampTitle(workflow)">
                   {{ workflowRelativeUpdatedAt(workflow) }}
@@ -908,13 +906,13 @@ onBeforeUnmount(() => {
       class="fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-slate-950/55 px-4 py-10 backdrop-blur-sm"
       @click.self="closeStarterModal"
     >
-      <div class="w-full max-w-5xl rounded-[2rem] border border-white/20 bg-white p-6 shadow-[0_40px_120px_rgba(15,23,42,0.25)] md:p-8">
+      <div class="w-full max-w-5xl rounded-[2rem] border border-slate-200/80 bg-white p-6 shadow-[0_40px_120px_rgba(15,23,42,0.25)] md:p-8">
         <div class="flex items-start justify-between gap-4">
           <div>
-            <p class="text-xs font-black uppercase tracking-[0.22em] text-brand-600">Workflow Starters</p>
+            <p class="text-xs font-black uppercase tracking-[0.22em] text-brand-700">Workflow Blueprints</p>
             <h3 class="mt-2 text-3xl font-display font-black text-slate-950">Choose how the next workflow starts</h3>
             <p class="mt-3 text-sm font-medium leading-6 text-slate-500">
-              Start blank, instantiate a template, or use the import button for existing JSON.
+              Start from a blank workflow, instantiate a curated blueprint, or import an existing JSON definition.
             </p>
           </div>
           <button
@@ -929,7 +927,7 @@ onBeforeUnmount(() => {
           <div>
             <p class="text-lg font-display font-black text-slate-950">Blank workflow</p>
             <p class="mt-2 text-sm font-medium text-slate-500">
-              Open the editor with a clean canvas and build every node yourself.
+              Open the designer with an empty workflow definition and configure every node explicitly.
             </p>
           </div>
           <button
@@ -946,7 +944,7 @@ onBeforeUnmount(() => {
           <input
             v-model="templateSearch"
             type="text"
-            placeholder="Search templates by name, category, or tag"
+            placeholder="Search blueprints by name, category, or tag"
             class="w-full rounded-2xl border border-slate-200 bg-slate-50 py-3 pl-11 pr-4 text-sm font-medium text-slate-900 outline-none transition focus:border-brand-400 focus:bg-white"
           />
         </div>
