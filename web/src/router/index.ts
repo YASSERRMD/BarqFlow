@@ -35,6 +35,11 @@ const router = createRouter({
             component: () => import('../views/Observability.vue')
         },
         {
+            path: '/governance',
+            name: 'Governance',
+            component: () => import('../views/Governance.vue')
+        },
+        {
             path: '/studio',
             name: 'AutomationStudio',
             component: () => import('../views/AutomationStudio.vue')
