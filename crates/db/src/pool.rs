@@ -22,7 +22,7 @@ pub async fn init_db_pool(database_url: &str, max_connections: u32) -> Result<Pg
 }
 
 /// Automatically runs SQLx migrations located in the migrations directory
-pub async fn run_migrations(pool: &PgPool) -> Result<(), DbError> {
+pub async fn run_migrations(_pool: &PgPool) -> Result<(), DbError> {
     // If we have migrations in crates/db/migrations, sqlx can automatically embed them
     // For testing and scaffolding without migrations folder, we can ignore for now or use migrate! macro
     // sqlx::migrate!("./migrations").run(pool).await?;
