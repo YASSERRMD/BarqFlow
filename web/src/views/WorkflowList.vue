@@ -468,37 +468,36 @@ onBeforeUnmount(() => {
     />
 
     <div class="mx-auto flex max-w-7xl flex-col gap-8">
-      <section class="relative overflow-hidden rounded-[2rem] border border-slate-200/70 bg-white/85 p-8 shadow-[0_30px_80px_rgba(15,23,42,0.08)] backdrop-blur md:p-10">
-        <div class="pointer-events-none absolute inset-y-0 right-0 w-[32rem] bg-[radial-gradient(circle_at_top_right,_rgba(14,165,233,0.18),_transparent_58%),radial-gradient(circle_at_bottom_right,_rgba(15,23,42,0.08),_transparent_52%)]"></div>
-        <div class="relative flex flex-col gap-8 xl:flex-row xl:items-end xl:justify-between">
+      <section class="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
+        <div class="flex flex-col gap-6 xl:flex-row xl:items-center xl:justify-between">
           <div class="max-w-3xl">
-            <p class="text-xs font-black uppercase tracking-[0.28em] text-brand-600">Workflow Management</p>
-            <h1 class="mt-4 text-4xl font-display font-black tracking-tight text-slate-950 md:text-5xl">
+            <p class="text-[11px] font-black uppercase tracking-[0.24em] text-brand-600">Workflow Management</p>
+            <h1 class="mt-3 text-3xl font-display font-black tracking-tight text-slate-950 md:text-4xl">
               Workflow Catalog and Operations
             </h1>
-            <p class="mt-4 max-w-2xl text-base font-medium leading-7 text-slate-600 md:text-lg">
+            <p class="mt-3 max-w-2xl text-sm font-medium leading-6 text-slate-600 md:text-base">
               Search, organize, import, export, and operate workflows from one operational workspace before opening the editor.
             </p>
           </div>
 
-          <div class="grid gap-3 sm:grid-cols-3 xl:w-[28rem]">
+          <div class="flex flex-wrap gap-3 xl:justify-end">
             <button
               @click="openStarterModal"
-              class="inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-brand-500 to-brand-600 px-5 py-4 text-sm font-black text-white shadow-[0_12px_32px_rgba(14,165,233,0.28)] transition hover:-translate-y-0.5 hover:from-brand-600 hover:to-brand-700"
+              class="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-black text-white transition hover:bg-slate-800"
             >
               <Plus class="h-4 w-4" />
               New Workflow
             </button>
             <button
               @click="triggerImportDialog"
-              class="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-5 py-4 text-sm font-bold text-slate-700 transition hover:border-brand-200 hover:text-brand-600"
+              class="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
             >
               <Upload class="h-4 w-4" />
               Import JSON
             </button>
             <button
               @click="showStarterModal = true"
-              class="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-slate-950 px-5 py-4 text-sm font-bold text-white transition hover:bg-slate-900"
+              class="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
             >
               <Sparkles class="h-4 w-4" />
               Templates
@@ -508,30 +507,30 @@ onBeforeUnmount(() => {
       </section>
 
       <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <div class="rounded-[1.75rem] border border-slate-200/70 bg-white/90 p-6 shadow-sm">
+        <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <p class="text-xs font-black uppercase tracking-[0.22em] text-slate-400">Catalog</p>
-          <p class="mt-4 text-4xl font-display font-black text-slate-950">{{ totalWorkflowCount }}</p>
-          <p class="mt-2 text-sm font-medium text-slate-500">Workflows loaded in the current view.</p>
+          <p class="mt-3 text-3xl font-display font-black text-slate-950">{{ totalWorkflowCount }}</p>
+          <p class="mt-1 text-sm font-medium text-slate-500">Workflows loaded in the current view.</p>
         </div>
-        <div class="rounded-[1.75rem] border border-slate-200/70 bg-white/90 p-6 shadow-sm">
+        <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <p class="text-xs font-black uppercase tracking-[0.22em] text-slate-400">Active</p>
-          <p class="mt-4 text-4xl font-display font-black text-emerald-600">{{ activeWorkflowCount }}</p>
-          <p class="mt-2 text-sm font-medium text-slate-500">Triggers currently armed and live.</p>
+          <p class="mt-3 text-3xl font-display font-black text-emerald-600">{{ activeWorkflowCount }}</p>
+          <p class="mt-1 text-sm font-medium text-slate-500">Triggers currently armed and live.</p>
         </div>
-        <div class="rounded-[1.75rem] border border-slate-200/70 bg-white/90 p-6 shadow-sm">
+        <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <p class="text-xs font-black uppercase tracking-[0.22em] text-slate-400">Nodes</p>
-          <p class="mt-4 text-4xl font-display font-black text-slate-950">{{ totalNodeCount }}</p>
-          <p class="mt-2 text-sm font-medium text-slate-500">Total steps across the loaded workflow set.</p>
+          <p class="mt-3 text-3xl font-display font-black text-slate-950">{{ totalNodeCount }}</p>
+          <p class="mt-1 text-sm font-medium text-slate-500">Total steps across the loaded workflow set.</p>
         </div>
-        <div class="rounded-[1.75rem] border border-slate-200/70 bg-white/90 p-6 shadow-sm">
+        <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <p class="text-xs font-black uppercase tracking-[0.22em] text-slate-400">Templates</p>
-          <p class="mt-4 text-4xl font-display font-black text-brand-600">{{ workflowStore.workflowTemplates.length }}</p>
-          <p class="mt-2 text-sm font-medium text-slate-500">Starter and intermediate launch blueprints.</p>
+          <p class="mt-3 text-3xl font-display font-black text-brand-600">{{ workflowStore.workflowTemplates.length }}</p>
+          <p class="mt-1 text-sm font-medium text-slate-500">Starter and intermediate launch blueprints.</p>
         </div>
       </section>
 
       <section class="grid gap-6 xl:grid-cols-[1.45fr_0.95fr]">
-        <div class="rounded-[2rem] border border-slate-200/70 bg-white/90 p-6 shadow-sm">
+        <div class="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <div class="flex items-center justify-between gap-4">
             <div>
               <p class="text-xs font-black uppercase tracking-[0.22em] text-slate-400">Filters</p>
@@ -622,7 +621,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div class="rounded-[2rem] border border-slate-200/70 bg-white/90 p-6 shadow-sm">
+        <div class="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <div class="flex items-center justify-between gap-4">
             <div>
               <p class="text-xs font-black uppercase tracking-[0.22em] text-slate-400">Tag Studio</p>
@@ -679,11 +678,11 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <section class="rounded-[2rem] border border-slate-200/70 bg-white/90 p-6 shadow-sm">
+      <section class="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <p class="text-xs font-black uppercase tracking-[0.22em] text-slate-400">Launchpad</p>
-            <h2 class="mt-2 text-2xl font-display font-black text-slate-950">Quick starters for new workflows</h2>
+            <p class="text-xs font-black uppercase tracking-[0.22em] text-slate-400">Templates</p>
+            <h2 class="mt-2 text-2xl font-display font-black text-slate-950">Start from templates or blank workflows</h2>
           </div>
           <button
             @click="openStarterModal"

@@ -134,6 +134,32 @@ const filteredCredentials = computed(() => {
   })
 })
 
+const totalCredentialCount = computed(() => credentials.value.length)
+const validatedCredentialCount = computed(
+  () =>
+    credentials.value.filter((credential) => {
+      const status = credentialStatusPresentation(
+        credential,
+        credentialTypeMap.value.get(credential.credentialType) || null,
+      ).label
+      return status === 'Validated' || status === 'Connected'
+    }).length,
+)
+const attentionCredentialCount = computed(
+  () =>
+    credentials.value.filter((credential) =>
+      ['Needs Fix', 'Test Error', 'Retest Required'].includes(
+        credentialStatusPresentation(
+          credential,
+          credentialTypeMap.value.get(credential.credentialType) || null,
+        ).label,
+      ),
+    ).length,
+)
+const totalUsageCount = computed(() =>
+  credentials.value.reduce((sum, credential) => sum + credential.usageCount, 0),
+)
+
 function oauthRedirectUri(): string {
   return `${window.location.origin}/rest/oauth2-credential/callback`
 }
@@ -512,28 +538,28 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="min-h-full bg-slate-50 p-6 text-slate-900 md:p-10">
-    <div class="mx-auto max-w-7xl space-y-8">
-      <section class="rounded-[28px] border border-slate-200 bg-white p-8 shadow-sm shadow-slate-200/50">
-        <div class="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-          <div class="max-w-3xl space-y-3">
-            <div class="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-bold uppercase tracking-[0.22em] text-slate-500">
+  <div class="min-h-full bg-slate-100/80 p-6 text-slate-900 md:p-10">
+    <div class="mx-auto max-w-7xl space-y-6">
+      <section class="rounded-3xl border border-slate-200 bg-white px-6 py-6 shadow-sm md:px-8">
+        <div class="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+          <div class="max-w-3xl">
+            <div class="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
               <Shield class="h-3.5 w-3.5" />
               Credential Management
             </div>
-            <div>
-              <h1 class="text-4xl font-black tracking-tight text-slate-950">Credential Inventory and Access</h1>
-              <p class="mt-3 text-base text-slate-600 md:text-lg">
-                Manage tokens, database access, and OAuth connections with validation state,
-                usage telemetry, and reusable workflow bindings.
-              </p>
-            </div>
+            <h1 class="mt-3 text-3xl font-black tracking-tight text-slate-950 md:text-4xl">
+              Credential Inventory and Access
+            </h1>
+            <p class="mt-2 text-sm leading-6 text-slate-600 md:text-base">
+              Manage tokens, database connections, and OAuth credentials with clear validation state,
+              usage telemetry, and reusable workflow bindings.
+            </p>
           </div>
 
           <div class="flex flex-wrap gap-3">
             <button
               type="button"
-              class="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+              class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
               @click="fetchCredentials"
             >
               <RefreshCcw class="h-4 w-4" />
@@ -541,7 +567,7 @@ onMounted(async () => {
             </button>
             <button
               type="button"
-              class="inline-flex items-center gap-2 rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-slate-950/10 transition hover:-translate-y-0.5 hover:bg-slate-800"
+              class="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800"
               @click="openCreateModal()"
             >
               <Plus class="h-4 w-4" />
@@ -549,227 +575,280 @@ onMounted(async () => {
             </button>
           </div>
         </div>
+      </section>
 
-        <div v-if="requestedReturnTo" class="mt-6 flex flex-col gap-4 rounded-2xl border border-brand-200 bg-brand-50 px-5 py-4 text-sm text-brand-900 md:flex-row md:items-center md:justify-between">
-          <div>
+      <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div class="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+          <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Total</p>
+          <p class="mt-3 text-3xl font-black text-slate-950">{{ totalCredentialCount }}</p>
+          <p class="mt-1 text-sm text-slate-500">Credentials stored in the workspace.</p>
+        </div>
+        <div class="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+          <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Validated</p>
+          <p class="mt-3 text-3xl font-black text-emerald-600">{{ validatedCredentialCount }}</p>
+          <p class="mt-1 text-sm text-slate-500">Credentials ready for production use.</p>
+        </div>
+        <div class="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+          <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Attention</p>
+          <p class="mt-3 text-3xl font-black text-amber-600">{{ attentionCredentialCount }}</p>
+          <p class="mt-1 text-sm text-slate-500">Credentials that should be re-tested or fixed.</p>
+        </div>
+        <div class="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+          <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Usage Events</p>
+          <p class="mt-3 text-3xl font-black text-slate-950">{{ totalUsageCount }}</p>
+          <p class="mt-1 text-sm text-slate-500">Runtime resolutions recorded across executions.</p>
+        </div>
+      </section>
+
+      <section class="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
+        <aside class="space-y-6">
+          <div
+            v-if="requestedReturnTo"
+            class="rounded-2xl border border-brand-200 bg-brand-50 px-5 py-4 text-sm text-brand-900 shadow-sm"
+          >
             <p class="font-semibold">Workflow setup handoff</p>
-            <p class="mt-1 text-brand-800/80">
+            <p class="mt-2 leading-6 text-brand-900/80">
               {{ pageNotice || 'Create the credential, then return to finish binding it in the editor.' }}
             </p>
+            <button
+              type="button"
+              class="mt-4 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 font-semibold text-brand-900 transition hover:bg-brand-100"
+              @click="returnToWorkflow"
+            >
+              Back To Workflow
+              <ArrowRight class="h-4 w-4" />
+            </button>
           </div>
-          <button
-            type="button"
-            class="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 font-semibold text-brand-900 shadow-sm transition hover:bg-brand-100"
-            @click="returnToWorkflow"
-          >
-            Back To Workflow
-            <ArrowRight class="h-4 w-4" />
-          </button>
-        </div>
 
-        <div class="mt-6 grid gap-4 md:grid-cols-[minmax(0,1fr)_auto_auto]">
-          <label class="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-            <Search class="h-4 w-4 text-slate-400" />
-            <input
-              v-model="searchTerm"
-              type="text"
-              placeholder="Search credentials, types, or validation notes"
-              class="w-full bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
-            />
-          </label>
-
-          <select
-            v-model="authFilter"
-            class="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 outline-none transition focus:border-brand-500"
-          >
-            <option value="all">All auth modes</option>
-            <option value="oauth">OAuth2</option>
-            <option value="token">Token</option>
-            <option value="database">Database</option>
-            <option value="custom">Custom</option>
-          </select>
-
-          <select
-            v-model="statusFilter"
-            class="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 outline-none transition focus:border-brand-500"
-          >
-            <option value="all">All statuses</option>
-            <option value="validated">Validated / Connected</option>
-            <option value="attention">Needs attention</option>
-            <option value="untested">Untested</option>
-          </select>
-        </div>
-
-        <div v-if="pageError" class="mt-6 flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          <XCircle class="mt-0.5 h-4 w-4 shrink-0" />
-          <span>{{ pageError }}</span>
-        </div>
-        <div v-else-if="pageNotice" class="mt-6 flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-          <CheckCircle2 class="mt-0.5 h-4 w-4 shrink-0" />
-          <span>{{ pageNotice }}</span>
-        </div>
-      </section>
-
-      <section class="grid gap-4 lg:grid-cols-5">
-        <button
-          v-for="quickStart in quickStarts"
-          :key="quickStart.credentialType"
-          type="button"
-          class="group rounded-[24px] border border-slate-200 bg-white p-5 text-left shadow-sm shadow-slate-200/50 transition hover:-translate-y-1 hover:border-slate-300 hover:shadow-lg hover:shadow-slate-300/30"
-          @click="openCreateModal(quickStart.credentialType)"
-        >
-          <div class="flex items-start justify-between gap-3">
-            <div>
-              <p class="text-sm font-semibold text-slate-500">{{ quickStart.title }}</p>
-              <h2 class="mt-1 text-lg font-black text-slate-950">{{ typeLabel(quickStart.credentialType) }}</h2>
+          <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div class="mb-4">
+              <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Filters</p>
+              <h2 class="mt-2 text-lg font-black text-slate-950">Search and segment credentials</h2>
             </div>
-            <span class="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">
-              {{ authKindLabel(quickStart.type) }}
-            </span>
-          </div>
-          <p class="mt-4 text-sm leading-6 text-slate-600">{{ quickStart.summary }}</p>
-          <p class="mt-3 text-xs font-medium uppercase tracking-[0.18em] text-slate-400">
-            {{ quickStart.highlight }}
-          </p>
-          <div class="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-slate-900">
-            {{ credentialSupportsOAuthConnect(quickStart.type) ? 'Save And Connect' : 'Create Credential' }}
-            <ArrowRight class="h-4 w-4 transition group-hover:translate-x-1" />
-          </div>
-        </button>
-      </section>
 
-      <section class="space-y-4">
-        <div class="flex items-center justify-between">
-          <div>
-            <h2 class="text-xl font-black text-slate-950">Saved Credentials</h2>
-            <p class="mt-1 text-sm text-slate-500">
-              {{ filteredCredentials.length }} of {{ credentials.length }} credential{{ credentials.length === 1 ? '' : 's' }} visible.
-            </p>
-          </div>
-        </div>
+            <div class="space-y-4">
+              <label class="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <Search class="h-4 w-4 text-slate-400" />
+                <input
+                  v-model="searchTerm"
+                  type="text"
+                  placeholder="Search credentials or validation notes"
+                  class="w-full bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
+                />
+              </label>
 
-        <div v-if="credentialsLoading" class="flex items-center gap-3 rounded-[24px] border border-slate-200 bg-white px-5 py-6 text-sm text-slate-500 shadow-sm shadow-slate-200/40">
-          <Loader2 class="h-4 w-4 animate-spin" />
-          Loading credentials...
-        </div>
-
-        <div v-else-if="filteredCredentials.length === 0" class="rounded-[24px] border border-dashed border-slate-300 bg-white px-6 py-16 text-center shadow-sm shadow-slate-200/40">
-          <KeyRound class="mx-auto h-8 w-8 text-slate-300" />
-          <h3 class="mt-4 text-lg font-bold text-slate-900">No credentials match this view.</h3>
-          <p class="mt-2 text-sm text-slate-500">
-            Adjust the filters or create a new credential to start binding integrations.
-          </p>
-        </div>
-
-        <div v-else class="grid gap-4 xl:grid-cols-2">
-          <article
-            v-for="credential in filteredCredentials"
-            :key="credential.id"
-            class="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm shadow-slate-200/40"
-          >
-            <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-              <div class="space-y-3">
-                <div class="flex flex-wrap items-center gap-2">
-                  <h3 class="text-lg font-black text-slate-950">{{ credentialCardTitle(credential) }}</h3>
-                  <span
-                    class="rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em]"
-                    :class="credentialStatusPresentation(credential, credentialTypeMap.get(credential.credentialType) || null).badgeClass"
+              <div class="grid gap-4">
+                <label class="block">
+                  <span class="mb-2 block text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Auth Mode</span>
+                  <select
+                    v-model="authFilter"
+                    class="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 outline-none transition focus:border-brand-500"
                   >
-                    {{ credentialStatusPresentation(credential, credentialTypeMap.get(credential.credentialType) || null).label }}
-                  </span>
-                  <span class="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">
-                    {{ authKindLabel(credentialTypeMap.get(credential.credentialType) || null) }}
-                  </span>
-                </div>
-                <div>
-                  <p class="text-sm font-semibold text-slate-700">{{ typeLabel(credential.credentialType) }}</p>
-                  <p class="mt-1 text-sm text-slate-500">
-                    {{ credentialStatusPresentation(credential, credentialTypeMap.get(credential.credentialType) || null).detail }}
-                  </p>
-                </div>
-              </div>
+                    <option value="all">All auth modes</option>
+                    <option value="oauth">OAuth2</option>
+                    <option value="token">Token</option>
+                    <option value="database">Database</option>
+                    <option value="custom">Custom</option>
+                  </select>
+                </label>
 
-              <div class="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-                  :disabled="rowActionState(credential.id, 'test')"
-                  @click="testSavedCredential(credential)"
-                >
-                  <Loader2 v-if="rowActionState(credential.id, 'test')" class="h-4 w-4 animate-spin" />
-                  <FlaskConical v-else class="h-4 w-4" />
-                  Test
-                </button>
-                <button
-                  v-if="credentialSupportsOAuthConnect(credentialTypeMap.get(credential.credentialType) || null)"
-                  type="button"
-                  class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-                  :disabled="rowActionState(credential.id, 'connect')"
-                  @click="connectCredential(credential)"
-                >
-                  <Loader2 v-if="rowActionState(credential.id, 'connect')" class="h-4 w-4 animate-spin" />
-                  <PlugZap v-else class="h-4 w-4" />
-                  Connect
-                </button>
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-                  @click="openEditModal(credential, 'edit')"
-                >
-                  <Pencil class="h-4 w-4" />
-                  Edit
-                </button>
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-                  @click="openEditModal(credential, 'rotate')"
-                >
-                  <Shuffle class="h-4 w-4" />
-                  Rotate
-                </button>
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-600 transition hover:border-red-300 hover:bg-red-50"
-                  :disabled="rowActionState(credential.id, 'delete')"
-                  @click="deleteCredential(credential)"
-                >
-                  <Loader2 v-if="rowActionState(credential.id, 'delete')" class="h-4 w-4 animate-spin" />
-                  <Trash2 v-else class="h-4 w-4" />
-                  Delete
-                </button>
+                <label class="block">
+                  <span class="mb-2 block text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Status</span>
+                  <select
+                    v-model="statusFilter"
+                    class="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 outline-none transition focus:border-brand-500"
+                  >
+                    <option value="all">All statuses</option>
+                    <option value="validated">Validated / Connected</option>
+                    <option value="attention">Needs attention</option>
+                    <option value="untested">Untested</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div class="mb-4">
+              <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Quick Start</p>
+              <h2 class="mt-2 text-lg font-black text-slate-950">Common integrations</h2>
+            </div>
+
+            <div class="space-y-3">
+              <button
+                v-for="quickStart in quickStarts"
+                :key="quickStart.credentialType"
+                type="button"
+                class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left transition hover:border-slate-300 hover:bg-white"
+                @click="openCreateModal(quickStart.credentialType)"
+              >
+                <div class="flex items-start justify-between gap-3">
+                  <div>
+                    <p class="text-sm font-semibold text-slate-900">{{ typeLabel(quickStart.credentialType) }}</p>
+                    <p class="mt-1 text-xs leading-5 text-slate-500">{{ quickStart.summary }}</p>
+                  </div>
+                  <span class="rounded-full bg-white px-2 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">
+                    {{ authKindLabel(quickStart.type) }}
+                  </span>
+                </div>
+              </button>
+            </div>
+          </div>
+        </aside>
+
+        <section class="space-y-4">
+          <div
+            v-if="pageError"
+            class="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 shadow-sm"
+          >
+            <XCircle class="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{{ pageError }}</span>
+          </div>
+          <div
+            v-else-if="pageNotice && !requestedReturnTo"
+            class="flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 shadow-sm"
+          >
+            <CheckCircle2 class="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{{ pageNotice }}</span>
+          </div>
+
+          <div class="rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div class="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 class="text-lg font-black text-slate-950">Saved Credentials</h2>
+                <p class="mt-1 text-sm text-slate-500">
+                  {{ filteredCredentials.length }} of {{ credentials.length }} credential{{ credentials.length === 1 ? '' : 's' }} visible.
+                </p>
               </div>
             </div>
 
-            <dl class="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <div class="rounded-2xl bg-slate-50 px-4 py-3">
-                <dt class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Last Tested</dt>
-                <dd class="mt-2 text-sm font-semibold text-slate-900">
-                  {{ formatRelativeTime(credential.lastTestedAt, 'Not tested') }}
-                </dd>
-                <p class="mt-1 text-xs text-slate-500">{{ formatDateTime(credential.lastTestedAt, 'Not tested') }}</p>
-              </div>
-              <div class="rounded-2xl bg-slate-50 px-4 py-3">
-                <dt class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Last Used</dt>
-                <dd class="mt-2 text-sm font-semibold text-slate-900">
-                  {{ formatRelativeTime(credential.lastUsedAt, 'Never used') }}
-                </dd>
-                <p class="mt-1 text-xs text-slate-500">{{ formatDateTime(credential.lastUsedAt, 'Never used') }}</p>
-              </div>
-              <div class="rounded-2xl bg-slate-50 px-4 py-3">
-                <dt class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Usage Count</dt>
-                <dd class="mt-2 text-sm font-semibold text-slate-900">{{ credential.usageCount }}</dd>
-                <p class="mt-1 text-xs text-slate-500">Incremented when the runtime resolves the credential.</p>
-              </div>
-              <div class="rounded-2xl bg-slate-50 px-4 py-3">
-                <dt class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Rotated</dt>
-                <dd class="mt-2 text-sm font-semibold text-slate-900">
-                  {{ formatRelativeTime(credential.rotatedAt, 'Not rotated') }}
-                </dd>
-                <p class="mt-1 text-xs text-slate-500">{{ formatDateTime(credential.rotatedAt, 'Not rotated') }}</p>
-              </div>
-            </dl>
-          </article>
-        </div>
+            <div v-if="credentialsLoading" class="flex items-center gap-3 px-5 py-6 text-sm text-slate-500">
+              <Loader2 class="h-4 w-4 animate-spin" />
+              Loading credentials...
+            </div>
+
+            <div
+              v-else-if="filteredCredentials.length === 0"
+              class="px-6 py-16 text-center"
+            >
+              <KeyRound class="mx-auto h-8 w-8 text-slate-300" />
+              <h3 class="mt-4 text-lg font-bold text-slate-900">No credentials match this view.</h3>
+              <p class="mt-2 text-sm text-slate-500">
+                Adjust the filters or create a new credential to start binding integrations.
+              </p>
+            </div>
+
+            <div v-else class="divide-y divide-slate-200">
+              <article
+                v-for="credential in filteredCredentials"
+                :key="credential.id"
+                class="px-5 py-5"
+              >
+                <div class="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+                  <div class="min-w-0 space-y-3">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <h3 class="text-lg font-black text-slate-950">{{ credentialCardTitle(credential) }}</h3>
+                      <span
+                        class="rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em]"
+                        :class="credentialStatusPresentation(credential, credentialTypeMap.get(credential.credentialType) || null).badgeClass"
+                      >
+                        {{ credentialStatusPresentation(credential, credentialTypeMap.get(credential.credentialType) || null).label }}
+                      </span>
+                      <span class="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">
+                        {{ authKindLabel(credentialTypeMap.get(credential.credentialType) || null) }}
+                      </span>
+                    </div>
+                    <div>
+                      <p class="text-sm font-semibold text-slate-700">{{ typeLabel(credential.credentialType) }}</p>
+                      <p class="mt-1 max-w-2xl text-sm text-slate-500">
+                        {{ credentialStatusPresentation(credential, credentialTypeMap.get(credential.credentialType) || null).detail }}
+                      </p>
+                    </div>
+
+                    <dl class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                      <div class="rounded-xl bg-slate-50 px-4 py-3">
+                        <dt class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Last Tested</dt>
+                        <dd class="mt-2 text-sm font-semibold text-slate-900">
+                          {{ formatRelativeTime(credential.lastTestedAt, 'Not tested') }}
+                        </dd>
+                        <p class="mt-1 text-xs text-slate-500">{{ formatDateTime(credential.lastTestedAt, 'Not tested') }}</p>
+                      </div>
+                      <div class="rounded-xl bg-slate-50 px-4 py-3">
+                        <dt class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Last Used</dt>
+                        <dd class="mt-2 text-sm font-semibold text-slate-900">
+                          {{ formatRelativeTime(credential.lastUsedAt, 'Never used') }}
+                        </dd>
+                        <p class="mt-1 text-xs text-slate-500">{{ formatDateTime(credential.lastUsedAt, 'Never used') }}</p>
+                      </div>
+                      <div class="rounded-xl bg-slate-50 px-4 py-3">
+                        <dt class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Usage Count</dt>
+                        <dd class="mt-2 text-sm font-semibold text-slate-900">{{ credential.usageCount }}</dd>
+                        <p class="mt-1 text-xs text-slate-500">Incremented when the runtime resolves the credential.</p>
+                      </div>
+                      <div class="rounded-xl bg-slate-50 px-4 py-3">
+                        <dt class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Rotated</dt>
+                        <dd class="mt-2 text-sm font-semibold text-slate-900">
+                          {{ formatRelativeTime(credential.rotatedAt, 'Not rotated') }}
+                        </dd>
+                        <p class="mt-1 text-xs text-slate-500">{{ formatDateTime(credential.rotatedAt, 'Not rotated') }}</p>
+                      </div>
+                    </dl>
+                  </div>
+
+                  <div class="flex flex-wrap gap-2 xl:max-w-[280px] xl:justify-end">
+                    <button
+                      type="button"
+                      class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                      :disabled="rowActionState(credential.id, 'test')"
+                      @click="testSavedCredential(credential)"
+                    >
+                      <Loader2 v-if="rowActionState(credential.id, 'test')" class="h-4 w-4 animate-spin" />
+                      <FlaskConical v-else class="h-4 w-4" />
+                      Test
+                    </button>
+                    <button
+                      v-if="credentialSupportsOAuthConnect(credentialTypeMap.get(credential.credentialType) || null)"
+                      type="button"
+                      class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                      :disabled="rowActionState(credential.id, 'connect')"
+                      @click="connectCredential(credential)"
+                    >
+                      <Loader2 v-if="rowActionState(credential.id, 'connect')" class="h-4 w-4 animate-spin" />
+                      <PlugZap v-else class="h-4 w-4" />
+                      Connect
+                    </button>
+                    <button
+                      type="button"
+                      class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                      @click="openEditModal(credential, 'edit')"
+                    >
+                      <Pencil class="h-4 w-4" />
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                      @click="openEditModal(credential, 'rotate')"
+                    >
+                      <Shuffle class="h-4 w-4" />
+                      Rotate
+                    </button>
+                    <button
+                      type="button"
+                      class="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-600 transition hover:border-red-300 hover:bg-red-50"
+                      :disabled="rowActionState(credential.id, 'delete')"
+                      @click="deleteCredential(credential)"
+                    >
+                      <Loader2 v-if="rowActionState(credential.id, 'delete')" class="h-4 w-4 animate-spin" />
+                      <Trash2 v-else class="h-4 w-4" />
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </article>
+            </div>
+          </div>
+        </section>
       </section>
     </div>
 
