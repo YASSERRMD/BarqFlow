@@ -489,6 +489,102 @@ pub fn register_all_credentials(registry: &CredentialRegistry) {
             documentation_url: Some("https://learn.microsoft.com/en-us/graph/auth/"),
             authenticate_header: Some("Authorization"),
         },
+        TokenCredential {
+            name: "linearApi",
+            display_name: "Linear API",
+            notice: "Used by Linear integration nodes",
+            token_field: "accessToken",
+            token_label: "Access Token",
+            documentation_url: Some(
+                "https://developers.linear.app/docs/graphql/working-with-the-graphql-api",
+            ),
+            authenticate_header: Some("Authorization"),
+        },
+        TokenCredential {
+            name: "mysqlApi",
+            display_name: "MySQL API",
+            notice: "Used by MySQL integration nodes",
+            token_field: "accessToken",
+            token_label: "Access Token",
+            documentation_url: Some("https://dev.mysql.com/doc/"),
+            authenticate_header: Some("Authorization"),
+        },
+        TokenCredential {
+            name: "redisApi",
+            display_name: "Redis API",
+            notice: "Used by Redis integration nodes",
+            token_field: "accessToken",
+            token_label: "Access Token",
+            documentation_url: Some("https://redis.io/docs/latest/"),
+            authenticate_header: Some("Authorization"),
+        },
+        TokenCredential {
+            name: "zendeskApi",
+            display_name: "Zendesk API",
+            notice: "Used by Zendesk integration nodes",
+            token_field: "accessToken",
+            token_label: "Access Token",
+            documentation_url: Some("https://developer.zendesk.com/api-reference/"),
+            authenticate_header: Some("Authorization"),
+        },
+        TokenCredential {
+            name: "salesforceApi",
+            display_name: "Salesforce API",
+            notice: "Used by Salesforce integration nodes",
+            token_field: "accessToken",
+            token_label: "Access Token",
+            documentation_url: Some("https://developer.salesforce.com/docs/apis"),
+            authenticate_header: Some("Authorization"),
+        },
+        TokenCredential {
+            name: "quickbooksApi",
+            display_name: "QuickBooks API",
+            notice: "Used by QuickBooks integration nodes",
+            token_field: "accessToken",
+            token_label: "Access Token",
+            documentation_url: Some("https://developer.intuit.com/app/developer/qbo/docs/develop"),
+            authenticate_header: Some("Authorization"),
+        },
+        TokenCredential {
+            name: "zoomApi",
+            display_name: "Zoom API",
+            notice: "Used by Zoom integration nodes",
+            token_field: "accessToken",
+            token_label: "Access Token",
+            documentation_url: Some("https://developers.zoom.us/docs/api/"),
+            authenticate_header: Some("Authorization"),
+        },
+        TokenCredential {
+            name: "trelloApi",
+            display_name: "Trello API",
+            notice: "Used by Trello integration nodes",
+            token_field: "accessToken",
+            token_label: "Access Token",
+            documentation_url: Some(
+                "https://developer.atlassian.com/cloud/trello/guides/rest-api/authorization/",
+            ),
+            authenticate_header: Some("Authorization"),
+        },
+        TokenCredential {
+            name: "outlookApi",
+            display_name: "Outlook API",
+            notice: "Used by Outlook integration nodes",
+            token_field: "accessToken",
+            token_label: "Access Token",
+            documentation_url: Some(
+                "https://learn.microsoft.com/en-us/graph/outlook-concept-overview",
+            ),
+            authenticate_header: Some("Authorization"),
+        },
+        TokenCredential {
+            name: "paypalApi",
+            display_name: "PayPal API",
+            notice: "Used by PayPal integration nodes",
+            token_field: "accessToken",
+            token_label: "Access Token",
+            documentation_url: Some("https://developer.paypal.com/api/rest/"),
+            authenticate_header: Some("Authorization"),
+        },
     ];
 
     for credential in token_credentials {
@@ -531,5 +627,15 @@ mod tests {
         assert!(registry.get_credential("googleDriveApi").is_some());
         assert!(registry.get_credential("googleSheetsApi").is_some());
         assert!(registry.get_credential("oneDriveApi").is_some());
+        assert!(registry.get_credential("linearApi").is_some());
+        assert!(registry.get_credential("mysqlApi").is_some());
+        assert!(registry.get_credential("redisApi").is_some());
+        assert!(registry.get_credential("zendeskApi").is_some());
+        assert!(registry.get_credential("salesforceApi").is_some());
+        assert!(registry.get_credential("quickbooksApi").is_some());
+        assert!(registry.get_credential("zoomApi").is_some());
+        assert!(registry.get_credential("trelloApi").is_some());
+        assert!(registry.get_credential("outlookApi").is_some());
+        assert!(registry.get_credential("paypalApi").is_some());
     }
 }

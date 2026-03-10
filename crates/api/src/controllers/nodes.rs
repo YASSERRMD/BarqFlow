@@ -168,6 +168,56 @@ fn node_credential_references(node_name: &str) -> Vec<CredentialReference> {
             required: true,
             display_name: "OneDrive API".to_string(),
         }],
+        "barqflow-nodes.linear" => vec![CredentialReference {
+            credential_type: "linearApi".to_string(),
+            required: true,
+            display_name: "Linear API".to_string(),
+        }],
+        "barqflow-nodes.mysql" => vec![CredentialReference {
+            credential_type: "mysqlApi".to_string(),
+            required: true,
+            display_name: "MySQL API".to_string(),
+        }],
+        "barqflow-nodes.redis" => vec![CredentialReference {
+            credential_type: "redisApi".to_string(),
+            required: true,
+            display_name: "Redis API".to_string(),
+        }],
+        "barqflow-nodes.zendesk" => vec![CredentialReference {
+            credential_type: "zendeskApi".to_string(),
+            required: true,
+            display_name: "Zendesk API".to_string(),
+        }],
+        "barqflow-nodes.salesforce" => vec![CredentialReference {
+            credential_type: "salesforceApi".to_string(),
+            required: true,
+            display_name: "Salesforce API".to_string(),
+        }],
+        "barqflow-nodes.quickbooks" => vec![CredentialReference {
+            credential_type: "quickbooksApi".to_string(),
+            required: true,
+            display_name: "QuickBooks API".to_string(),
+        }],
+        "barqflow-nodes.zoom" => vec![CredentialReference {
+            credential_type: "zoomApi".to_string(),
+            required: true,
+            display_name: "Zoom API".to_string(),
+        }],
+        "barqflow-nodes.trello" => vec![CredentialReference {
+            credential_type: "trelloApi".to_string(),
+            required: true,
+            display_name: "Trello API".to_string(),
+        }],
+        "barqflow-nodes.outlook" => vec![CredentialReference {
+            credential_type: "outlookApi".to_string(),
+            required: true,
+            display_name: "Outlook API".to_string(),
+        }],
+        "barqflow-nodes.paypal" => vec![CredentialReference {
+            credential_type: "paypalApi".to_string(),
+            required: true,
+            display_name: "PayPal API".to_string(),
+        }],
         "barqflow-nodes.barqDbInsert"
         | "barqflow-nodes.barqDbSearch"
         | "barqflow-nodes.barqDbDelete" => vec![CredentialReference {
@@ -265,6 +315,16 @@ mod tests {
             ("barqflow-nodes.googleDrive", "googleDriveApi"),
             ("barqflow-nodes.googleSheets", "googleSheetsApi"),
             ("barqflow-nodes.oneDrive", "oneDriveApi"),
+            ("barqflow-nodes.linear", "linearApi"),
+            ("barqflow-nodes.mysql", "mysqlApi"),
+            ("barqflow-nodes.redis", "redisApi"),
+            ("barqflow-nodes.zendesk", "zendeskApi"),
+            ("barqflow-nodes.salesforce", "salesforceApi"),
+            ("barqflow-nodes.quickbooks", "quickbooksApi"),
+            ("barqflow-nodes.zoom", "zoomApi"),
+            ("barqflow-nodes.trello", "trelloApi"),
+            ("barqflow-nodes.outlook", "outlookApi"),
+            ("barqflow-nodes.paypal", "paypalApi"),
         ];
 
         for (node_name, credential_type) in cases {
