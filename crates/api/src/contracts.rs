@@ -900,6 +900,8 @@ pub struct ExtensionBundleResponse {
     pub provided_assets: ExtensionProvidedAssetsResponse,
     pub source_path: String,
     pub digest: String,
+    pub signature_status: String,
+    pub signature_key_id: Option<String>,
     pub status: String,
     pub warnings: Vec<String>,
 }

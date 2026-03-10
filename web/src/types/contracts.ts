@@ -723,6 +723,8 @@ export interface ExtensionBundleRecord {
   providedAssets: ExtensionProvidedAssets
   sourcePath: string
   digest: string
+  signatureStatus: string
+  signatureKeyId?: string | null
   status: 'validated' | 'validatedWithWarnings' | 'needsAttention' | string
   warnings: string[]
 }
