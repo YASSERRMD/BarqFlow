@@ -585,6 +585,46 @@ pub fn register_all_credentials(registry: &CredentialRegistry) {
             documentation_url: Some("https://developer.paypal.com/api/rest/"),
             authenticate_header: Some("Authorization"),
         },
+        TokenCredential {
+            name: "intercomApi",
+            display_name: "Intercom API",
+            notice: "Used by Intercom integration nodes",
+            token_field: "accessToken",
+            token_label: "Access Token",
+            documentation_url: Some(
+                "https://developers.intercom.com/docs/references/rest-api/api.intercom.io",
+            ),
+            authenticate_header: Some("Authorization"),
+        },
+        TokenCredential {
+            name: "xeroApi",
+            display_name: "Xero API",
+            notice: "Used by Xero integration nodes",
+            token_field: "accessToken",
+            token_label: "Access Token",
+            documentation_url: Some(
+                "https://developer.xero.com/documentation/api/accounting/overview",
+            ),
+            authenticate_header: Some("Authorization"),
+        },
+        TokenCredential {
+            name: "mailchimpApi",
+            display_name: "Mailchimp API",
+            notice: "Used by Mailchimp integration nodes",
+            token_field: "apiKey",
+            token_label: "API Key",
+            documentation_url: Some("https://mailchimp.com/developer/marketing/docs/fundamentals/"),
+            authenticate_header: None,
+        },
+        TokenCredential {
+            name: "freshdeskApi",
+            display_name: "Freshdesk API",
+            notice: "Used by Freshdesk integration nodes",
+            token_field: "apiKey",
+            token_label: "API Key",
+            documentation_url: Some("https://developers.freshdesk.com/api/"),
+            authenticate_header: None,
+        },
     ];
 
     for credential in token_credentials {
@@ -637,5 +677,9 @@ mod tests {
         assert!(registry.get_credential("trelloApi").is_some());
         assert!(registry.get_credential("outlookApi").is_some());
         assert!(registry.get_credential("paypalApi").is_some());
+        assert!(registry.get_credential("intercomApi").is_some());
+        assert!(registry.get_credential("xeroApi").is_some());
+        assert!(registry.get_credential("mailchimpApi").is_some());
+        assert!(registry.get_credential("freshdeskApi").is_some());
     }
 }

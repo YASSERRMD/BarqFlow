@@ -218,6 +218,26 @@ fn node_credential_references(node_name: &str) -> Vec<CredentialReference> {
             required: true,
             display_name: "PayPal API".to_string(),
         }],
+        "barqflow-nodes.intercom" => vec![CredentialReference {
+            credential_type: "intercomApi".to_string(),
+            required: true,
+            display_name: "Intercom API".to_string(),
+        }],
+        "barqflow-nodes.xero" => vec![CredentialReference {
+            credential_type: "xeroApi".to_string(),
+            required: true,
+            display_name: "Xero API".to_string(),
+        }],
+        "barqflow-nodes.mailchimp" => vec![CredentialReference {
+            credential_type: "mailchimpApi".to_string(),
+            required: true,
+            display_name: "Mailchimp API".to_string(),
+        }],
+        "barqflow-nodes.freshdesk" => vec![CredentialReference {
+            credential_type: "freshdeskApi".to_string(),
+            required: true,
+            display_name: "Freshdesk API".to_string(),
+        }],
         "barqflow-nodes.barqDbInsert"
         | "barqflow-nodes.barqDbSearch"
         | "barqflow-nodes.barqDbDelete" => vec![CredentialReference {
@@ -325,6 +345,10 @@ mod tests {
             ("barqflow-nodes.trello", "trelloApi"),
             ("barqflow-nodes.outlook", "outlookApi"),
             ("barqflow-nodes.paypal", "paypalApi"),
+            ("barqflow-nodes.intercom", "intercomApi"),
+            ("barqflow-nodes.xero", "xeroApi"),
+            ("barqflow-nodes.mailchimp", "mailchimpApi"),
+            ("barqflow-nodes.freshdesk", "freshdeskApi"),
         ];
 
         for (node_name, credential_type) in cases {
