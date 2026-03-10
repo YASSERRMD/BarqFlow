@@ -237,10 +237,13 @@ function toCanvasNode(inode: any): any {
       isTrigger: !!(typeEntry?.isTrigger || schema?.isTrigger),
       label: inode.name,
       description: typeEntry?.description || schema?.description || '',
+      typeVersion: Number(inode?.typeVersion ?? schema?.typeVersion ?? 1),
+      disabled: !!inode?.disabled,
       status: null,
       schema,
       properties,
       credentials: normalizeNodeCredentials(inode.credentials, String(inode.id)),
+      runData: null,
     },
   }
 }
@@ -260,14 +263,14 @@ function toWorkflowNode(flowNode: any): any {
     id: nodeId,
     name: flowNode?.data?.label || nodeId,
     type: nodeType,
-    typeVersion: 1.0,
+    typeVersion: Number(flowNode?.data?.typeVersion ?? 1),
     position: [
       Number(flowNode?.position?.x ?? 0),
       Number(flowNode?.position?.y ?? 0),
     ],
     parameters: flowNode?.data?.properties || {},
     credentials: credentialBindings,
-    disabled: false,
+    disabled: !!flowNode?.data?.disabled,
   }
 }
 
@@ -563,12 +566,72 @@ function applyExecutionResult(result: any, targetNodeId?: string) {
     const nodeResult = result?.data?.[nodeName]
     if (nodeResult) {
       n.data.status = nodeResult.success ? 'success' : 'error'
+      n.data.runData = buildRunDataPayload({
+        source: targetNodeId ? 'nodeTest' : 'workflowExecution',
+        status: nodeResult.success ? 'success' : 'error',
+        executionId: result?.id || null,
+        preview: extractNodeOutputPreview(nodeResult),
+        payload: nodeResult,
+      })
     } else if (!targetNodeId) {
-      n.data.status = result?.status === 'success' ? 'success' : 'error'
+      n.data.status = normalizeExecutionStatus(result?.status)
     } else if (String(n.id) === targetNodeId) {
-      n.data.status = result?.status === 'success' ? 'success' : 'error'
+      const resolvedStatus = normalizeExecutionStatus(result?.status)
+      n.data.status = resolvedStatus
+      n.data.runData = buildRunDataPayload({
+        source: 'nodeTest',
+        status: resolvedStatus,
+        executionId: result?.id || null,
+        preview: resolvedStatus === 'success' ? null : extractNodeError(result, nodeName),
+        payload: result?.data || null,
+      })
+    }
+
+    if (selectedNode.value && String(selectedNode.value.id) === String(n.id)) {
+      selectedNode.value = n
     }
   })
+}
+
+function normalizeExecutionStatus(status: any): string {
+  const normalized = String(status || '').toLowerCase()
+  if (normalized === 'success') return 'success'
+  if (normalized === 'running') return 'running'
+  if (normalized === 'waiting') return 'waiting'
+  return 'error'
+}
+
+function setNodeRunData(nodeId: string, runData: any) {
+  const match = nodes.value.find((n: any) => String(n.id) === String(nodeId))
+  if (!match) return
+
+  match.data.runData = runData
+  if (selectedNode.value && String(selectedNode.value.id) === String(nodeId)) {
+    selectedNode.value = match
+  }
+}
+
+function buildRunDataPayload({
+  source,
+  status,
+  executionId,
+  preview,
+  payload,
+}: {
+  source: string
+  status: string
+  executionId?: string | null
+  preview?: string | null
+  payload?: any
+}) {
+  return {
+    source,
+    status,
+    executionId: executionId || null,
+    updatedAt: new Date().toISOString(),
+    preview: preview || null,
+    payload: payload ?? null,
+  }
 }
 
 function extractNodeError(result: any, nodeLabel?: string): string {
@@ -794,6 +857,15 @@ async function handleTestNode(node: any) {
     status: 'running',
     message: `Testing '${node.data.label}'...`,
   }
+  setNodeRunData(
+    String(node.id),
+    buildRunDataPayload({
+      source: 'nodeTest',
+      status: 'running',
+      preview: `Testing '${node.data.label}'...`,
+      payload: null,
+    }),
+  )
 
   let workflowId = getCurrentWorkflowId()
   if (!workflowId) {
@@ -807,6 +879,15 @@ async function handleTestNode(node: any) {
       status: 'error',
       message: 'Save workflow first before testing this step.',
     }
+    setNodeRunData(
+      String(node.id),
+      buildRunDataPayload({
+        source: 'nodeTest',
+        status: 'error',
+        preview: 'Save workflow first before testing this step.',
+        payload: { error: 'missing_workflow_id' },
+      }),
+    )
     return
   }
 
@@ -822,6 +903,15 @@ async function handleTestNode(node: any) {
       status: 'error',
       message,
     }
+    setNodeRunData(
+      String(node.id),
+      buildRunDataPayload({
+        source: 'nodeTest',
+        status: 'error',
+        preview: message,
+        payload: { error: message },
+      }),
+    )
     executionNotice.value = {
       type: 'error',
       message,
@@ -837,6 +927,15 @@ async function handleTestNode(node: any) {
       status: 'error',
       message,
     }
+    setNodeRunData(
+      String(node.id),
+      buildRunDataPayload({
+        source: 'nodeTest',
+        status: 'error',
+        preview: message,
+        payload: { error: message },
+      }),
+    )
     executionNotice.value = {
       type: 'error',
       message,
@@ -857,6 +956,16 @@ async function handleTestNode(node: any) {
         status: 'success',
         message: 'Test reached a Wait state and is awaiting resume input.',
       }
+      setNodeRunData(
+        String(node.id),
+        buildRunDataPayload({
+          source: 'nodeTest',
+          status: 'waiting',
+          executionId: result?.id || null,
+          preview: 'Test reached a Wait state and is awaiting resume input.',
+          payload: result?.data || null,
+        }),
+      )
       return
     }
 
@@ -878,6 +987,18 @@ async function handleTestNode(node: any) {
             ? `Test passed. ${preview || `Outputs: ${outputsCount}`}`
             : 'Test passed. No output items returned.',
       }
+      setNodeRunData(
+        String(node.id),
+        buildRunDataPayload({
+          source: 'nodeTest',
+          status: 'success',
+          executionId: result?.id || null,
+          preview:
+            preview ||
+            (outputsCount > 0 ? `Outputs: ${outputsCount}` : 'No output items returned.'),
+          payload: nodeResult,
+        }),
+      )
     } else {
       const message = extractNodeError(result, node.data.label)
       nodeTestState.value = {
@@ -885,6 +1006,16 @@ async function handleTestNode(node: any) {
         status: 'error',
         message,
       }
+      setNodeRunData(
+        String(node.id),
+        buildRunDataPayload({
+          source: 'nodeTest',
+          status: 'error',
+          executionId: result?.id || null,
+          preview: message,
+          payload: nodeResult || result?.data || null,
+        }),
+      )
       executionNotice.value = {
         type: 'error',
         message,
@@ -898,6 +1029,15 @@ async function handleTestNode(node: any) {
       status: 'error',
       message,
     }
+    setNodeRunData(
+      String(node.id),
+      buildRunDataPayload({
+        source: 'nodeTest',
+        status: 'error',
+        preview: String(message),
+        payload: { error: String(message) },
+      }),
+    )
     executionNotice.value = {
       type: 'error',
       message,
@@ -974,10 +1114,13 @@ function onDrop(event: DragEvent) {
       isTrigger: !!(typeEntry?.isTrigger || nodeSchema.isTrigger || schema?.isTrigger || schema?.is_trigger),
       label,
       description: nodeSchema.description || schema?.description || '',
+      typeVersion: Number(schema?.typeVersion ?? 1),
+      disabled: false,
       status: null,
       schema,
       properties: propertiesObj,
       credentials: {},
+      runData: null,
     },
   }
 
