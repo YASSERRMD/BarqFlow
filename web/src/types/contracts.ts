@@ -491,3 +491,52 @@ export interface CreateApiKeyRequest {
   name: string
   expiresAt?: string | null
 }
+
+export interface ExtensionPermissionScope {
+  network: string[]
+  credentials: string[]
+  workflow: string[]
+  filesystem: string[]
+}
+
+export interface ExtensionProvidedAssets {
+  nodes: string[]
+  templates: string[]
+  panels: string[]
+}
+
+export interface ExtensionBundleRecord {
+  id: string
+  name: string
+  vendor: string
+  version: string
+  runtime: string
+  description: string
+  homepage?: string | null
+  entrypoint?: string | null
+  capabilities: string[]
+  permissions: ExtensionPermissionScope
+  providedAssets: ExtensionProvidedAssets
+  sourcePath: string
+  digest: string
+  status: 'validated' | 'validatedWithWarnings' | 'needsAttention' | string
+  warnings: string[]
+}
+
+export interface WorkflowDraftRequest {
+  prompt: string
+}
+
+export interface WorkflowDraftRecord {
+  generator: string
+  name: string
+  summary: string
+  rationale: string[]
+  warnings: string[]
+  suggestedTags: string[]
+  requiredCredentials: string[]
+  recommendedExtensions: string[]
+  nodes: WorkflowNode[]
+  connections: WorkflowConnections
+  settings: WorkflowSettings
+}

@@ -6,6 +6,7 @@ import {
   History,
   LogOut,
   Menu,
+  Sparkles,
   Settings,
   Workflow,
   X,
@@ -43,6 +44,15 @@ const navItems = [
     matches: (path: string) => path.startsWith('/executions'),
     pageTitle: 'Execution Monitor',
     pageDescription: 'Inspect workflow runs, recovery paths, and execution telemetry.',
+  },
+  {
+    name: 'Automation Studio',
+    path: '/studio',
+    icon: Sparkles,
+    description: 'Prompt-to-workflow drafts and extension packs',
+    matches: (path: string) => path.startsWith('/studio'),
+    pageTitle: 'Automation Studio',
+    pageDescription: 'Generate workflow drafts from natural language and review the extension packs that support them.',
   },
   {
     name: 'Credential Operations',
