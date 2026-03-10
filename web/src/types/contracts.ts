@@ -709,6 +709,13 @@ export interface ExtensionProvidedAssets {
   panels: string[]
 }
 
+export interface ExtensionActionRecord {
+  id: string
+  name: string
+  description: string
+  requiredCapabilities: string[]
+}
+
 export interface ExtensionBundleRecord {
   id: string
   name: string
@@ -719,6 +726,7 @@ export interface ExtensionBundleRecord {
   homepage?: string | null
   entrypoint?: string | null
   capabilities: string[]
+  actions: ExtensionActionRecord[]
   permissions: ExtensionPermissionScope
   providedAssets: ExtensionProvidedAssets
   sourcePath: string
@@ -727,6 +735,21 @@ export interface ExtensionBundleRecord {
   signatureKeyId?: string | null
   status: 'validated' | 'validatedWithWarnings' | 'needsAttention' | string
   warnings: string[]
+}
+
+export interface InvokeExtensionActionRequest {
+  actionId: string
+  context?: Record<string, unknown>
+}
+
+export interface ExtensionActionInvocationRecord {
+  bundleId: string
+  actionId: string
+  status: string
+  summary: string
+  capabilityTrace: string[]
+  output: Record<string, unknown>
+  signatureStatus: string
 }
 
 export interface WorkflowDraftRequest {
