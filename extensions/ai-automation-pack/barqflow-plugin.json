@@ -1,0 +1,52 @@
+{
+  "id": "barqflow.ai.automation-pack",
+  "name": "AI Automation Pack",
+  "vendor": "BarqFlow Labs",
+  "version": "0.1.0",
+  "runtime": "builtin-pack",
+  "description": "Packages the built-in AI analysis nodes, GitHub source integrations, and draft-planning panels into a reusable AI workflow bundle.",
+  "homepage": "https://github.com/YASSERRMD/BarqFlow",
+  "capabilities": [
+    "workflow:compose",
+    "workflow:create",
+    "ai:draft",
+    "nodes:llm",
+    "execution:annotate",
+    "credentials:bind",
+    "ui:panel"
+  ],
+  "permissions": {
+    "network": [
+      "api.openai.com",
+      "localhost:11434",
+      "api.github.com",
+      "api.telegram.org"
+    ],
+    "credentials": [
+      "openAiApi",
+      "githubApi",
+      "telegramApi"
+    ],
+    "workflow": [
+      "read",
+      "create"
+    ],
+    "filesystem": []
+  },
+  "provides": {
+    "nodes": [
+      "barqflow-nodes.openai",
+      "barqflow-nodes.ollama",
+      "barqflow-nodes.github",
+      "barqflow-nodes.telegram"
+    ],
+    "templates": [
+      "github-release-brief"
+    ],
+    "panels": [
+      "ai-draft-preview",
+      "run-diagnosis",
+      "prompt-planner"
+    ]
+  }
+}

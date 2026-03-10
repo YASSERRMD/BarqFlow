@@ -1,0 +1,52 @@
+{
+  "id": "barqflow.ops.observability-pack",
+  "name": "Ops Observability Pack",
+  "vendor": "BarqFlow Labs",
+  "version": "0.1.0",
+  "runtime": "builtin-pack",
+  "description": "Packages the built-in incident monitoring, webhook intake, and runtime health assets into a reusable operational automation pack.",
+  "homepage": "https://github.com/YASSERRMD/BarqFlow",
+  "capabilities": [
+    "workflow:compose",
+    "workflow:create",
+    "runtime:read",
+    "network:outbound",
+    "credentials:bind",
+    "ui:panel"
+  ],
+  "permissions": {
+    "network": [
+      "status.example.com",
+      "slack.com",
+      "api.twilio.com"
+    ],
+    "credentials": [
+      "slackApi",
+      "twilioApi"
+    ],
+    "workflow": [
+      "read",
+      "create"
+    ],
+    "filesystem": []
+  },
+  "provides": {
+    "nodes": [
+      "barqflow-nodes.cronTrigger",
+      "barqflow-nodes.webhook",
+      "n8n-nodes-base.httpRequest",
+      "n8n-nodes-base.if",
+      "barqflow-nodes.slack",
+      "barqflow-nodes.twilio"
+    ],
+    "templates": [
+      "incident-slack-escalation",
+      "webhook-lead-triage"
+    ],
+    "panels": [
+      "runtime-health",
+      "execution-timeline",
+      "incident-brief"
+    ]
+  }
+}
