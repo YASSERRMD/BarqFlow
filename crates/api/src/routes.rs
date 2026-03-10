@@ -2,7 +2,7 @@ use crate::execution_events::ExecutionEventHub;
 use crate::operations::OperationsRuntime;
 use crate::repositories::{
     api_key::ApiKeyRepository, credential::CredentialRepository, execution::ExecutionRepository,
-    execution_log::ExecutionLogRepository, governance::GovernanceRepository,
+    execution_dispatch::ExecutionDispatchRepository, execution_log::ExecutionLogRepository, governance::GovernanceRepository,
     workflow::WorkflowRepository, workspace::WorkspaceRepository,
 };
 use axum::Router;
@@ -46,6 +46,7 @@ pub struct AppState {
     pub workflow_repo: Arc<WorkflowRepository>,
     pub credential_repo: Arc<CredentialRepository>,
     pub exec_repo: Arc<ExecutionRepository>,
+    pub execution_dispatch_repo: Arc<ExecutionDispatchRepository>,
     pub execution_log_repo: Arc<ExecutionLogRepository>,
     pub governance_repo: Arc<GovernanceRepository>,
     pub user_repo: Arc<UserRepo>,
@@ -87,6 +88,7 @@ pub fn create_router(state: AppState) -> Router {
         }))
         .merge(execution_routes(ExecState {
             execution_repo: Arc::clone(&state.exec_repo),
+            execution_dispatch_repo: Arc::clone(&state.execution_dispatch_repo),
             execution_log_repo: Arc::clone(&state.execution_log_repo),
             workflow_repo: Arc::clone(&state.workflow_repo),
             node_registry: Arc::clone(&state.node_registry),
