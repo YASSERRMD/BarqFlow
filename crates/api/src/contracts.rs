@@ -1,7 +1,8 @@
 use barqflow_core::properties::INodeProperty;
 use barqflow_core::schema::CredentialReference;
 use barqflow_db::models::{
-    ApiKeyEntity, CredentialEntity, ExecutionEntity, TagEntity, WorkflowEntity,
+    ApiKeyEntity, CredentialEntity, ExecutionEntity, ExecutionLogEntity, TagEntity,
+    WorkflowEntity,
 };
 use barqflow_registry::registry::NodeInfo;
 use chrono::{DateTime, Utc};
@@ -234,6 +235,38 @@ pub struct ExecutionResponse {
     pub stopped_at: Option<DateTime<Utc>>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionLogResponse {
+    pub id: Uuid,
+    pub execution_id: Uuid,
+    pub workflow_id: Uuid,
+    pub level: String,
+    pub event_type: Option<String>,
+    pub message: String,
+    pub node_id: Option<String>,
+    pub node_name: Option<String>,
+    pub payload: Value,
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<ExecutionLogEntity> for ExecutionLogResponse {
+    fn from(value: ExecutionLogEntity) -> Self {
+        Self {
+            id: value.id,
+            execution_id: value.execution_id,
+            workflow_id: value.workflow_id,
+            level: value.level,
+            event_type: value.event_type,
+            message: value.message,
+            node_id: value.node_id,
+            node_name: value.node_name,
+            payload: value.payload,
+            created_at: value.created_at,
+        }
+    }
+}
+
 impl From<ExecutionEntity> for ExecutionResponse {
     fn from(value: ExecutionEntity) -> Self {
         Self {
@@ -361,6 +394,79 @@ pub struct RuntimeSettingsResponse {
     pub node_types_count: usize,
     pub credential_types_count: usize,
     pub encryption_key_configured: bool,
+    pub execution_mode: String,
+    pub worker_concurrency: usize,
+    pub queue_capacity: usize,
+    pub pruning_enabled: bool,
+    pub execution_retention_days: u64,
+    pub tracing_enabled: bool,
+    pub trace_format: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionDispatchMetricsResponse {
+    pub mode: String,
+    pub worker_concurrency: usize,
+    pub queue_capacity: usize,
+    pub queued_count: usize,
+    pub running_count: usize,
+    pub total_enqueued: u64,
+    pub total_started: u64,
+    pub total_finished: u64,
+    pub total_failed_to_dispatch: u64,
+    pub last_enqueued_at: Option<DateTime<Utc>>,
+    pub last_started_at: Option<DateTime<Utc>>,
+    pub last_finished_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionPruningStatusResponse {
+    pub enabled: bool,
+    pub retention_days: u64,
+    pub interval_minutes: u64,
+    pub last_run_at: Option<DateTime<Utc>>,
+    pub last_cutoff_at: Option<DateTime<Utc>>,
+    pub last_executions_deleted: u64,
+    pub last_wait_resumes_deleted: u64,
+    pub last_logs_deleted: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TelemetrySettingsResponse {
+    pub enabled: bool,
+    pub format: String,
+    pub service_name: String,
+    pub environment: String,
+    pub request_id_header: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperationsOverviewResponse {
+    pub dispatch: ExecutionDispatchMetricsResponse,
+    pub pruning: ExecutionPruningStatusResponse,
+    pub telemetry: TelemetrySettingsResponse,
+    pub active_executions: usize,
+    pub webhook_endpoint_count: usize,
+    pub webhook_workflow_count: usize,
+    pub cron_workflow_count: usize,
+    pub cron_job_count: usize,
+    pub node_types_count: usize,
+    pub credential_types_count: usize,
+    pub generated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PruneExecutionsResponse {
+    pub cutoff: DateTime<Utc>,
+    pub ran_at: DateTime<Utc>,
+    pub executions_deleted: u64,
+    pub wait_resumes_deleted: u64,
+    pub logs_deleted: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

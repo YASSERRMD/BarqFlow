@@ -5,18 +5,13 @@ import type {
   ApiKeyRecord,
   ChangePasswordRequest,
   CreateApiKeyRequest,
+  OperationsOverview,
+  PruneExecutionsResult,
+  RuntimeSettings,
   UserProfile,
   WorkspaceMember,
   WorkspaceSummary,
 } from '../../types/contracts'
-
-export interface RuntimeSettings {
-  serverTime: string
-  environment: string
-  nodeTypesCount: number
-  credentialTypesCount: number
-  encryptionKeyConfigured: boolean
-}
 
 export interface CreateWorkspacePayload {
   name: string
@@ -24,6 +19,14 @@ export interface CreateWorkspacePayload {
 
 export function getRuntimeSettings() {
   return http.get<RuntimeSettings>('/settings/runtime')
+}
+
+export function getOperationsOverview() {
+  return http.get<OperationsOverview>('/settings/operations')
+}
+
+export function pruneExecutions() {
+  return http.post<PruneExecutionsResult>('/settings/operations/prune')
 }
 
 export function listWorkspaces() {

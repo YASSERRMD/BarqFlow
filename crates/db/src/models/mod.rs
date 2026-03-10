@@ -89,6 +89,20 @@ pub struct ExecutionEntity {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct ExecutionLogEntity {
+    pub id: Uuid,
+    pub execution_id: Uuid,
+    pub workflow_id: Uuid,
+    pub level: String,
+    pub event_type: Option<String>,
+    pub message: String,
+    pub node_id: Option<String>,
+    pub node_name: Option<String>,
+    pub payload: serde_json::Value,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct WaitResumeEntity {
     pub id: Uuid,
     pub execution_id: Uuid,

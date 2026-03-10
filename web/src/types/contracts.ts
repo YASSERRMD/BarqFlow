@@ -269,6 +269,90 @@ export interface ExecutionEvent {
   data: Record<string, unknown>
 }
 
+export interface ExecutionLogRecord {
+  id: string
+  executionId: string
+  workflowId: string
+  level: string
+  eventType?: string | null
+  message: string
+  nodeId?: string | null
+  nodeName?: string | null
+  payload: Record<string, unknown>
+  createdAt: string
+}
+
+export interface RuntimeSettings {
+  serverTime: string
+  environment: string
+  nodeTypesCount: number
+  credentialTypesCount: number
+  encryptionKeyConfigured: boolean
+  executionMode: string
+  workerConcurrency: number
+  queueCapacity: number
+  pruningEnabled: boolean
+  executionRetentionDays: number
+  tracingEnabled: boolean
+  traceFormat: string
+}
+
+export interface ExecutionDispatchMetrics {
+  mode: string
+  workerConcurrency: number
+  queueCapacity: number
+  queuedCount: number
+  runningCount: number
+  totalEnqueued: number
+  totalStarted: number
+  totalFinished: number
+  totalFailedToDispatch: number
+  lastEnqueuedAt?: string | null
+  lastStartedAt?: string | null
+  lastFinishedAt?: string | null
+}
+
+export interface ExecutionPruningStatus {
+  enabled: boolean
+  retentionDays: number
+  intervalMinutes: number
+  lastRunAt?: string | null
+  lastCutoffAt?: string | null
+  lastExecutionsDeleted: number
+  lastWaitResumesDeleted: number
+  lastLogsDeleted: number
+}
+
+export interface TelemetrySettings {
+  enabled: boolean
+  format: string
+  serviceName: string
+  environment: string
+  requestIdHeader: string
+}
+
+export interface OperationsOverview {
+  dispatch: ExecutionDispatchMetrics
+  pruning: ExecutionPruningStatus
+  telemetry: TelemetrySettings
+  activeExecutions: number
+  webhookEndpointCount: number
+  webhookWorkflowCount: number
+  cronWorkflowCount: number
+  cronJobCount: number
+  nodeTypesCount: number
+  credentialTypesCount: number
+  generatedAt: string
+}
+
+export interface PruneExecutionsResult {
+  cutoff: string
+  ranAt: string
+  executionsDeleted: number
+  waitResumesDeleted: number
+  logsDeleted: number
+}
+
 export interface CredentialSummary {
   id: string
   name: string

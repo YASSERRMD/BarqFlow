@@ -1,5 +1,5 @@
 import http from '../../api'
-import type { ExecutionEvent, ExecutionRecord } from '../../types/contracts'
+import type { ExecutionEvent, ExecutionLogRecord, ExecutionRecord } from '../../types/contracts'
 
 export function listExecutions(params: {
   workflowId?: string
@@ -15,6 +15,12 @@ export function getExecution(id: string) {
 
 export function getExecutionEvents(id: string) {
   return http.get<ExecutionEvent[]>(`/executions/${id}/events`)
+}
+
+export function getExecutionLogs(id: string, limit = 500) {
+  return http.get<ExecutionLogRecord[]>(`/executions/${id}/logs`, {
+    params: { limit },
+  })
 }
 
 export function createExecutionEventSource(id: string) {

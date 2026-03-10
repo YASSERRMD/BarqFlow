@@ -17,11 +17,12 @@ import {
   deleteExecution as deleteExecutionRequest,
   getExecution,
   getExecutionEvents,
+  getExecutionLogs,
   listExecutions,
   retryExecution as retryExecutionRequest,
   stopExecution as stopExecutionRequest,
 } from '../features/executions/api'
-import type { ExecutionEvent, ExecutionRecord } from '../types/contracts'
+import type { ExecutionEvent, ExecutionLogRecord, ExecutionRecord } from '../types/contracts'
 import {
   extractExecutionEvents,
   extractExecutionMeta,
@@ -37,6 +38,7 @@ import ExecutionTimeline from '../features/executions/components/ExecutionTimeli
 const executions = ref<ExecutionRecord[]>([])
 const selectedExecutionId = ref<string | null>(null)
 const executionEvents = ref<Record<string, ExecutionEvent[]>>({})
+const executionLogs = ref<Record<string, ExecutionLogRecord[]>>({})
 const loading = ref(false)
 const detailsLoading = ref(false)
 const actionLoading = ref(false)
@@ -74,6 +76,10 @@ const selectedEvents = computed(() => {
     executionEvents.value[selectedExecution.value.id] || [],
   )
 })
+const selectedLogs = computed(() => {
+  if (!selectedExecution.value) return []
+  return executionLogs.value[selectedExecution.value.id] || []
+})
 
 const selectedMeta = computed(() => extractExecutionMeta(selectedExecution.value))
 const nodeResults = computed(() => extractExecutionNodeResults(selectedExecution.value))
@@ -110,6 +116,11 @@ async function syncExecution(id: string) {
 async function loadExecutionEvents(id: string) {
   const response = await getExecutionEvents(id)
   executionEvents.value[id] = mergeExecutionEvents(executionEvents.value[id] || [], response.data)
+}
+
+async function loadExecutionLogs(id: string) {
+  const response = await getExecutionLogs(id)
+  executionLogs.value[id] = response.data
 }
 
 function applyExecutionEvent(executionId: string, event: ExecutionEvent) {
@@ -222,7 +233,7 @@ async function openExecutionDetails(execution: ExecutionRecord) {
 
   try {
     const latest = await syncExecution(execution.id)
-    await loadExecutionEvents(execution.id)
+    await Promise.all([loadExecutionEvents(execution.id), loadExecutionLogs(execution.id)])
 
     if (latest.status === 'running' || latest.status === 'queued') {
       startExecutionStream(execution.id)
@@ -266,7 +277,7 @@ async function stopExecution(id: string) {
   try {
     await stopExecutionRequest(id)
     await syncExecution(id)
-    await loadExecutionEvents(id)
+    await Promise.all([loadExecutionEvents(id), loadExecutionLogs(id)])
   } catch (err: any) {
     error.value = err?.response?.data || err?.message || 'Failed to stop execution'
   } finally {
@@ -285,6 +296,7 @@ async function deleteExecution(id: string) {
     await deleteExecutionRequest(id)
     executions.value = executions.value.filter((execution) => execution.id !== id)
     delete executionEvents.value[id]
+    delete executionLogs.value[id]
     if (selectedExecutionId.value === id) {
       closeExecutionDetails()
     }
@@ -302,6 +314,13 @@ async function copyResumeUrl() {
   window.setTimeout(() => {
     copiedResumeUrl.value = false
   }, 2000)
+}
+
+function logLevelClass(level?: string | null) {
+  const normalized = String(level || '').toLowerCase()
+  if (normalized === 'error') return 'bg-red-100 text-red-700'
+  if (normalized === 'warn' || normalized === 'warning') return 'bg-amber-100 text-amber-700'
+  return 'bg-slate-200 text-slate-700'
 }
 
 onMounted(fetchExecutions)
@@ -639,6 +658,59 @@ onBeforeUnmount(stopExecutionStream)
                   :events="selectedEvents"
                   empty-message="This execution has no lifecycle timeline yet."
                 />
+              </div>
+
+              <div class="space-y-3">
+                <div class="flex items-center justify-between">
+                  <h3 class="text-sm font-semibold text-slate-800">Structured Logs</h3>
+                  <p class="text-xs text-slate-400">
+                    {{ selectedLogs.length }} record{{ selectedLogs.length === 1 ? '' : 's' }}
+                  </p>
+                </div>
+                <div
+                  v-if="selectedLogs.length === 0"
+                  class="rounded-[24px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500"
+                >
+                  No persisted log records were captured for this execution.
+                </div>
+                <div
+                  v-else
+                  class="max-h-[320px] space-y-3 overflow-auto rounded-[28px] border border-slate-200 bg-slate-50 p-4"
+                >
+                  <div
+                    v-for="log in selectedLogs"
+                    :key="log.id"
+                    class="rounded-[22px] border border-slate-200 bg-white px-4 py-4"
+                  >
+                    <div class="flex flex-wrap items-start justify-between gap-3">
+                      <div class="min-w-0">
+                        <div class="flex flex-wrap items-center gap-2">
+                          <span
+                            class="rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em]"
+                            :class="logLevelClass(log.level)"
+                          >
+                            {{ log.level }}
+                          </span>
+                          <span
+                            v-if="log.eventType"
+                            class="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-600"
+                          >
+                            {{ log.eventType }}
+                          </span>
+                          <span v-if="log.nodeName" class="text-xs font-medium text-slate-500">
+                            {{ log.nodeName }}
+                          </span>
+                        </div>
+                        <p class="mt-2 text-sm font-medium text-slate-900">{{ log.message }}</p>
+                      </div>
+                      <p class="text-xs text-slate-400">{{ formatTimestamp(log.createdAt) }}</p>
+                    </div>
+                    <pre
+                      v-if="Object.keys(log.payload || {}).length > 0"
+                      class="mt-3 overflow-auto rounded-2xl bg-slate-950 p-3 text-[11px] text-slate-100"
+                    >{{ JSON.stringify(log.payload, null, 2) }}</pre>
+                  </div>
+                </div>
               </div>
 
               <div class="space-y-3">
