@@ -364,6 +364,109 @@ export interface OperationsOverview {
   generatedAt: string
 }
 
+export interface LatencyBucket {
+  label: string
+  count: number
+}
+
+export interface NodeLatencyHistogram {
+  workflowId: string
+  workflowName: string
+  nodeName: string
+  nodeType: string
+  samples: number
+  failedRuns: number
+  avgDurationMs: number
+  p95DurationMs: number
+  maxDurationMs: number
+  histogram: LatencyBucket[]
+}
+
+export interface WorkflowBottleneck {
+  workflowId: string
+  workflowName: string
+  nodeName: string
+  nodeType: string
+  samples: number
+  failureCount: number
+  avgDurationMs: number
+  p95DurationMs: number
+  contributionRate: number
+}
+
+export interface FailureCluster {
+  clusterKey: string
+  workflowId?: string | null
+  workflowName?: string | null
+  nodeName?: string | null
+  nodeType?: string | null
+  level: string
+  eventType?: string | null
+  message: string
+  failureCount: number
+  affectedExecutionCount: number
+  lastSeenAt: string
+}
+
+export interface CredentialHealthRecord {
+  credentialId: string
+  name: string
+  credentialType: string
+  health: string
+  issues: string[]
+  lastTestStatus?: string | null
+  lastTestedAt?: string | null
+  lastUsedAt?: string | null
+  rotatedAt?: string | null
+  usageCount: number
+}
+
+export interface ExecutionFlamegraphSpan {
+  nodeName: string
+  nodeType: string
+  offsetMs: number
+  durationMs: number
+  status: string
+  startedAt: string
+  finishedAt: string
+  inputItems: number
+  outputItems: number
+}
+
+export interface ExecutionFlamegraph {
+  executionId: string
+  workflowId: string
+  workflowName: string
+  status: string
+  startedAt: string
+  stoppedAt?: string | null
+  totalDurationMs: number
+  spans: ExecutionFlamegraphSpan[]
+}
+
+export interface ObservabilityOverview {
+  workspaceId: string
+  generatedAt: string
+  windowHours: number
+  workflowCount: number
+  executionCount: number
+  terminalExecutionCount: number
+  successfulExecutionCount: number
+  failedExecutionCount: number
+  stoppedExecutionCount: number
+  queuedExecutionCount: number
+  runningExecutionCount: number
+  waitingExecutionCount: number
+  successRate: number
+  failureRate: number
+  averageExecutionDurationMs: number
+  nodeLatencyHistograms: NodeLatencyHistogram[]
+  workflowBottlenecks: WorkflowBottleneck[]
+  failureClusters: FailureCluster[]
+  credentialHealth: CredentialHealthRecord[]
+  executionFlamegraphs: ExecutionFlamegraph[]
+}
+
 export interface PruneExecutionsResult {
   cutoff: string
   ranAt: string

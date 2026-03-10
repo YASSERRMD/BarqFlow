@@ -30,6 +30,11 @@ const router = createRouter({
             component: ExecutionViewer
         },
         {
+            path: '/observability',
+            name: 'Observability',
+            component: () => import('../views/Observability.vue')
+        },
+        {
             path: '/studio',
             name: 'AutomationStudio',
             component: () => import('../views/AutomationStudio.vue')
