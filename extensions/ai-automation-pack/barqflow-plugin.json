@@ -15,6 +15,26 @@
     "credentials:bind",
     "ui:panel"
   ],
+  "actions": [
+    {
+      "id": "prompt-planner",
+      "name": "Prompt Planner",
+      "description": "Turn a high-level automation request into a concrete implementation plan.",
+      "requiredCapabilities": [
+        "ai:draft",
+        "nodes:llm"
+      ]
+    },
+    {
+      "id": "run-diagnosis",
+      "name": "Run Diagnosis",
+      "description": "Summarize likely causes and next checks for a failing workflow run.",
+      "requiredCapabilities": [
+        "execution:annotate",
+        "ui:panel"
+      ]
+    }
+  ],
   "permissions": {
     "network": [
       "api.openai.com",
