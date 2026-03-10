@@ -9,5 +9,6 @@ pub mod execution_events;
 pub mod repositories;
 pub mod routes;
 pub mod subworkflow_executor;
+pub mod workflow_templates;
 
 pub use routes::{create_router, AppState};
