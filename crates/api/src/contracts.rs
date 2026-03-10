@@ -351,10 +351,22 @@ pub struct RuntimeSettingsResponse {
 #[serde(rename_all = "camelCase")]
 pub struct CredentialValidationResponse {
     pub valid: bool,
+    pub status: String,
+    pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub credential_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub credential_type: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialOAuthConnectResponse {
+    pub credential_id: Uuid,
+    pub credential_type: String,
+    pub connect_url: String,
+    pub redirect_uri: String,
+    pub state: String,
 }
 
 #[cfg(test)]

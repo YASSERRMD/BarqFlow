@@ -1,9 +1,10 @@
 use crate::repositories::credential::CredentialRepository;
 use axum::{
     extract::{Query, State},
+    response::{Html, IntoResponse},
     http::StatusCode,
     routing::get,
-    Json, Router,
+    Router,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -19,9 +20,13 @@ pub struct OAuth2State {
 #[derive(Debug, Deserialize)]
 pub struct OAuth2CallbackQuery {
     /// The authorization code returned by the OAuth2 provider
-    pub code: String,
+    pub code: Option<String>,
     /// The credential ID to update (state used to track which credential to update)
     pub state: String,
+    /// Optional provider error code
+    pub error: Option<String>,
+    /// Optional provider error details
+    pub error_description: Option<String>,
     /// The token exchange URL — provided by the credential type
     pub token_url: Option<String>,
     /// Optional redirect URI to pass to the token exchange
@@ -116,6 +121,123 @@ fn read_credential_string(data: &serde_json::Value, keys: &[&str]) -> Option<Str
         .map(|v| v.to_string())
 }
 
+fn oauth_validation_status(status_code: StatusCode) -> &'static str {
+    if status_code.is_server_error() || status_code == StatusCode::BAD_GATEWAY {
+        "error"
+    } else {
+        "invalid"
+    }
+}
+
+async fn persist_oauth_status(
+    repo: &CredentialRepository,
+    credential_id: Uuid,
+    status: &str,
+    message: &str,
+) {
+    let _ = repo
+        .record_test_result(credential_id, status, Some(message))
+        .await;
+}
+
+fn render_callback_page(
+    success: bool,
+    credential_id: Option<&str>,
+    message: &str,
+) -> Html<String> {
+    let payload = serde_json::json!({
+        "source": "barqflow-oauth2",
+        "success": success,
+        "credentialId": credential_id,
+        "message": message,
+    });
+    let payload_json = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string());
+    let title = if success {
+        "Credential Connected"
+    } else {
+        "Credential Connection Failed"
+    };
+    let badge_class = if success {
+        "background:#dcfce7;color:#166534;"
+    } else {
+        "background:#fee2e2;color:#991b1b;"
+    };
+
+    Html(format!(
+        r#"<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <style>
+      body {{
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: linear-gradient(160deg, #f8fafc 0%, #e2e8f0 100%);
+        color: #0f172a;
+        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }}
+      main {{
+        width: min(420px, calc(100vw - 32px));
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.96);
+        border: 1px solid rgba(148, 163, 184, 0.24);
+        box-shadow: 0 24px 80px rgba(15, 23, 42, 0.14);
+        padding: 28px;
+      }}
+      .badge {{
+        display: inline-flex;
+        align-items: center;
+        border-radius: 999px;
+        padding: 6px 12px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        {badge_class}
+      }}
+      h1 {{
+        margin: 16px 0 10px;
+        font-size: 28px;
+        line-height: 1.1;
+      }}
+      p {{
+        margin: 0;
+        color: #475569;
+        line-height: 1.6;
+      }}
+      code {{
+        display: inline-block;
+        margin-top: 14px;
+        padding: 8px 10px;
+        border-radius: 10px;
+        background: #f8fafc;
+        color: #0f172a;
+      }}
+    </style>
+  </head>
+  <body>
+    <main>
+      <span class="badge">{title}</span>
+      <h1>{title}</h1>
+      <p>{message}</p>
+      <code>You can close this window.</code>
+    </main>
+    <script>
+      const payload = {payload_json};
+      if (window.opener && !window.opener.closed) {{
+        window.opener.postMessage(payload, window.location.origin);
+        window.close();
+      }}
+    </script>
+  </body>
+</html>"#
+    ))
+}
+
 /// Handles the OAuth2 redirect callback from an external provider.
 ///
 /// Flow:
@@ -125,25 +247,91 @@ fn read_credential_string(data: &serde_json::Value, keys: &[&str]) -> Option<Str
 async fn oauth2_callback(
     Query(params): Query<OAuth2CallbackQuery>,
     State(state): State<OAuth2State>,
-) -> Result<Json<OAuth2CallbackResponse>, (StatusCode, String)> {
+) -> impl IntoResponse {
+    match oauth2_callback_inner(params, state).await {
+        Ok(response) => (
+            StatusCode::OK,
+            render_callback_page(
+                true,
+                Some(response.credential_id.as_str()),
+                &response.message,
+            ),
+        )
+            .into_response(),
+        Err((status_code, credential_id, message)) => (
+            status_code,
+            render_callback_page(false, credential_id.as_deref(), &message),
+        )
+            .into_response(),
+    }
+}
+
+async fn oauth2_callback_inner(
+    params: OAuth2CallbackQuery,
+    state: OAuth2State,
+) -> Result<OAuth2CallbackResponse, (StatusCode, Option<String>, String)> {
     // Parse the credential ID and optional CSRF token from OAuth2 `state`.
-    let (credential_id, csrf_token) = parse_callback_state(&params.state)?;
+    let (credential_id, csrf_token) =
+        parse_callback_state(&params.state).map_err(|(status_code, message)| {
+            (status_code, None, message)
+        })?;
 
     // Retrieve the existing credential (needed for current data e.g. client_id/secret if not in query)
     let existing = state
         .credential_repo
         .find_by_id(credential_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "Credential not found".into()))?;
-    validate_state_nonce(&existing.data, csrf_token.as_deref())?;
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Some(credential_id.to_string()),
+                e.to_string(),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Some(credential_id.to_string()),
+                "Credential not found".to_string(),
+            )
+        })?;
+
+    if let Some(error) = params.error.as_deref() {
+        let message = params
+            .error_description
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .map(|description| format!("OAuth provider returned {}: {}", error, description))
+            .unwrap_or_else(|| format!("OAuth provider returned {}", error));
+        persist_oauth_status(&state.credential_repo, credential_id, "invalid", &message).await;
+        return Err((StatusCode::BAD_REQUEST, Some(credential_id.to_string()), message));
+    }
+
+    if let Err((status_code, message)) = validate_state_nonce(&existing.data, csrf_token.as_deref())
+    {
+        persist_oauth_status(
+            &state.credential_repo,
+            credential_id,
+            oauth_validation_status(status_code),
+            &message,
+        )
+        .await;
+        return Err((status_code, Some(credential_id.to_string()), message));
+    }
 
     // Build the token exchange request body
     let token_url = params
         .token_url
         .clone()
         .or_else(|| read_credential_string(&existing.data, &["accessTokenUrl", "tokenUrl"]))
-        .ok_or_else(|| (StatusCode::BAD_REQUEST, "token_url is required".into()))?;
+        .ok_or_else(|| {
+            let message = "token_url is required".to_string();
+            (
+                StatusCode::BAD_REQUEST,
+                Some(credential_id.to_string()),
+                message,
+            )
+        })?;
 
     let redirect_uri = params
         .redirect_uri
@@ -158,6 +346,14 @@ async fn oauth2_callback(
     let client_secret = read_credential_string(&existing.data, &["clientSecret"])
         .or_else(|| params.client_secret.clone())
         .unwrap_or_default();
+    let code = params.code.as_deref().ok_or_else(|| {
+        let message = "Missing OAuth2 authorization code".to_string();
+        (
+            StatusCode::BAD_REQUEST,
+            Some(credential_id.to_string()),
+            message,
+        )
+    })?;
 
     // Exchange code for tokens via POST to the provider token endpoint
     let client = reqwest::Client::new();
@@ -165,7 +361,7 @@ async fn oauth2_callback(
         .post(&token_url)
         .form(&[
             ("grant_type", "authorization_code"),
-            ("code", &params.code),
+            ("code", code),
             ("redirect_uri", &redirect_uri),
             ("client_id", &client_id),
             ("client_secret", &client_secret),
@@ -173,25 +369,28 @@ async fn oauth2_callback(
         .send()
         .await
         .map_err(|e| {
+            let message = format!("Token exchange failed: {}", e);
             (
                 StatusCode::BAD_GATEWAY,
-                format!("Token exchange failed: {}", e),
+                Some(credential_id.to_string()),
+                message,
             )
         })?;
 
     if !token_res.status().is_success() {
         let status = token_res.status().as_u16();
         let body = token_res.text().await.unwrap_or_default();
-        return Err((
-            StatusCode::BAD_GATEWAY,
-            format!("Provider returned {}: {}", status, body),
-        ));
+        let message = format!("Provider returned {}: {}", status, body);
+        persist_oauth_status(&state.credential_repo, credential_id, "error", &message).await;
+        return Err((StatusCode::BAD_GATEWAY, Some(credential_id.to_string()), message));
     }
 
     let token_body: OAuth2TokenResponse = token_res.json().await.map_err(|e| {
+        let message = format!("Failed to parse token response: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to parse token response: {}", e),
+            Some(credential_id.to_string()),
+            message,
         )
     })?;
 
@@ -218,13 +417,29 @@ async fn oauth2_callback(
         .credential_repo
         .update(credential_id, &existing.name, updated_data)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Some(credential_id.to_string()),
+                e.to_string(),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Some(credential_id.to_string()),
+                "Credential not found".to_string(),
+            )
+        })?;
 
-    Ok(Json(OAuth2CallbackResponse {
+    let message = "OAuth2 tokens exchanged and saved successfully".to_string();
+    persist_oauth_status(&state.credential_repo, credential_id, "valid", &message).await;
+
+    Ok(OAuth2CallbackResponse {
         success: true,
         credential_id: credential_id.to_string(),
-        message: "OAuth2 tokens exchanged and saved successfully".to_string(),
-    }))
+        message,
+    })
 }
 
 #[cfg(test)]
@@ -257,6 +472,15 @@ mod tests {
         let data = json!({ "oauthState": "csrf-abc" });
         assert!(validate_state_nonce(&data, None).is_err());
         assert!(validate_state_nonce(&data, Some("wrong")).is_err());
+    }
+
+    #[test]
+    fn render_callback_page_embeds_post_message_payload() {
+        let html = render_callback_page(true, Some("cred-1"), "Connected")
+            .0;
+        assert!(html.contains("barqflow-oauth2"));
+        assert!(html.contains("window.opener.postMessage"));
+        assert!(html.contains("cred-1"));
     }
 
     #[sqlx::test(migrations = "./migrations")]

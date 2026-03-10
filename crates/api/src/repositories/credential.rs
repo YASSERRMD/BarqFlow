@@ -260,6 +260,23 @@ impl CredentialRepository {
         .await
     }
 
+    pub async fn clear_test_result(&self, id: Uuid) -> Result<Option<CredentialEntity>> {
+        sqlx::query_as::<_, CredentialEntity>(&format!(
+            r#"
+            UPDATE credentials
+            SET
+                last_tested_at = NULL,
+                last_test_status = NULL,
+                last_test_message = NULL
+            WHERE id = $1
+            RETURNING {CREDENTIAL_COLUMNS}
+            "#
+        ))
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
     pub async fn record_usage(&self, id: Uuid) -> Result<bool> {
         let now = Utc::now();
 

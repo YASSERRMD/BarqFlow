@@ -1,10 +1,12 @@
 use crate::auth::Claims;
-use crate::contracts::{CredentialResponse, CredentialValidationResponse};
+use crate::contracts::{
+    CredentialOAuthConnectResponse, CredentialResponse, CredentialValidationResponse,
+};
 use crate::repositories::credential::CredentialRepository;
-use axum::http::StatusCode;
+use axum::http::{header, HeaderMap, StatusCode};
 use axum::{
     extract::{Json, Path, Query, State},
-    routing::{get, post, put},
+    routing::{get, post},
     Router,
 };
 use barqflow_core::types::GenericValue;
@@ -42,9 +44,13 @@ pub fn credential_routes(state: AppState) -> Router {
         .route("/credentials", get(get_credentials).post(create_credential))
         .route(
             "/credentials/{id}",
-            put(update_credential).delete(delete_credential),
+            get(get_credential)
+                .put(update_credential)
+                .delete(delete_credential),
         )
         .route("/credentials/{id}/test", post(test_saved_credential))
+        .route("/credentials/{id}/rotate", post(rotate_credential))
+        .route("/credentials/{id}/oauth2/connect", post(start_oauth_connect))
         .route("/credentials/types", get(get_credential_types))
         .route("/credentials/test", post(test_credential))
         .with_state(state)
@@ -78,6 +84,170 @@ pub struct CredentialListQuery {
     pub r#type: Option<String>,
 }
 
+fn build_validation_response(
+    valid: bool,
+    status: impl Into<String>,
+    message: impl Into<String>,
+    credential_id: Option<uuid::Uuid>,
+    credential_type: Option<String>,
+) -> CredentialValidationResponse {
+    CredentialValidationResponse {
+        valid,
+        status: status.into(),
+        message: message.into(),
+        credential_id,
+        credential_type,
+    }
+}
+
+fn validation_status_from_error(status_code: StatusCode) -> &'static str {
+    if status_code.is_server_error() || status_code == StatusCode::BAD_GATEWAY {
+        "error"
+    } else {
+        "invalid"
+    }
+}
+
+fn read_credential_string(data: &serde_json::Value, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .find_map(|key| data.get(*key).and_then(|value| value.as_str()))
+        .map(|value| value.to_string())
+}
+
+fn request_origin(headers: &HeaderMap) -> Option<String> {
+    if let Some(origin) = headers
+        .get(header::ORIGIN)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return Some(origin.trim_end_matches('/').to_string());
+    }
+
+    let proto = headers
+        .get("x-forwarded-proto")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("http");
+
+    let host = headers
+        .get("x-forwarded-host")
+        .or_else(|| headers.get(header::HOST))
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+
+    Some(format!("{}://{}", proto, host))
+}
+
+fn default_oauth_redirect_uri(headers: &HeaderMap) -> Result<String, (StatusCode, String)> {
+    let origin = request_origin(headers).ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            "Unable to determine request origin for OAuth callback".to_string(),
+        )
+    })?;
+
+    Ok(format!("{}/rest/oauth2-credential/callback", origin))
+}
+
+fn build_oauth_connect_payload(
+    credential_id: uuid::Uuid,
+    credential_type: &str,
+    current_data: &serde_json::Value,
+    headers: &HeaderMap,
+) -> Result<(serde_json::Value, CredentialOAuthConnectResponse), (StatusCode, String)> {
+    let grant_type = read_credential_string(current_data, &["grantType"])
+        .unwrap_or_else(|| "authorizationCode".to_string());
+    if grant_type != "authorizationCode" {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "OAuth connect only supports authorizationCode grant credentials, received '{}'",
+                grant_type
+            ),
+        ));
+    }
+
+    let auth_url = read_credential_string(current_data, &["authUrl", "authorizationUrl"])
+        .ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                "Credential is missing authUrl required for OAuth connect".to_string(),
+            )
+        })?;
+    let client_id = read_credential_string(current_data, &["clientId"]).ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            "Credential is missing clientId required for OAuth connect".to_string(),
+        )
+    })?;
+    let redirect_uri = read_credential_string(current_data, &["redirectUri"])
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(default_oauth_redirect_uri(headers)?);
+
+    let nonce = uuid::Uuid::new_v4().to_string();
+    let state_token = format!("{}:{}", credential_id, nonce);
+
+    let mut updated_data = current_data.clone();
+    let object = updated_data.as_object_mut().ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            "Credential payload must be a JSON object".to_string(),
+        )
+    })?;
+    object.insert("oauthState".to_string(), serde_json::json!(nonce));
+    object.insert("oauthCsrfState".to_string(), serde_json::json!(nonce));
+    object.insert("redirectUri".to_string(), serde_json::json!(redirect_uri.clone()));
+
+    let mut connect_url = reqwest::Url::parse(&auth_url).map_err(|error| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("Invalid OAuth authorization URL: {}", error),
+        )
+    })?;
+
+    {
+        let mut query_pairs = connect_url.query_pairs_mut();
+        query_pairs.append_pair("response_type", "code");
+        query_pairs.append_pair("client_id", &client_id);
+        query_pairs.append_pair("redirect_uri", &redirect_uri);
+        query_pairs.append_pair("state", &state_token);
+
+        if let Some(scope) = read_credential_string(current_data, &["scope", "scopes"])
+            .filter(|value| !value.trim().is_empty())
+        {
+            query_pairs.append_pair("scope", &scope);
+        }
+
+        for (source_key, query_key) in [
+            ("accessType", "access_type"),
+            ("prompt", "prompt"),
+            ("audience", "audience"),
+            ("resource", "resource"),
+            ("includeGrantedScopes", "include_granted_scopes"),
+        ] {
+            if let Some(value) = read_credential_string(current_data, &[source_key])
+                .filter(|value| !value.trim().is_empty())
+            {
+                query_pairs.append_pair(query_key, &value);
+            }
+        }
+    }
+
+    Ok((
+        updated_data,
+        CredentialOAuthConnectResponse {
+            credential_id,
+            credential_type: credential_type.to_string(),
+            connect_url: connect_url.to_string(),
+            redirect_uri,
+            state: state_token,
+        },
+    ))
+}
+
 async fn get_credentials(
     _claims: Claims,
     State(state): State<AppState>,
@@ -100,6 +270,21 @@ async fn get_credentials(
     Ok(Json(
         creds.into_iter().map(CredentialResponse::from).collect(),
     ))
+}
+
+async fn get_credential(
+    _claims: Claims,
+    State(state): State<AppState>,
+    Path(id): Path<uuid::Uuid>,
+) -> Result<Json<CredentialResponse>, (StatusCode, String)> {
+    let credential = state
+        .credential_repo
+        .find_by_id(id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Credential not found".to_string()))?;
+
+    Ok(Json(CredentialResponse::from(credential)))
 }
 
 async fn get_credential_types(
@@ -180,15 +365,83 @@ async fn update_credential(
         .to_string();
 
     let merged_data = merge_credential_data(&existing.data, payload.data.as_ref())?;
+    let credential_changed = merged_data != existing.data;
 
-    let updated = state
+    let mut updated = state
         .credential_repo
         .update(id, &next_name, merged_data)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Credential not found".to_string()))?;
 
+    if credential_changed {
+        updated = state
+            .credential_repo
+            .clear_test_result(id)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+            .ok_or_else(|| (StatusCode::NOT_FOUND, "Credential not found".to_string()))?;
+    }
+
     Ok(Json(CredentialResponse::from(updated)))
+}
+
+async fn rotate_credential(
+    _claims: Claims,
+    State(state): State<AppState>,
+    Path(id): Path<uuid::Uuid>,
+    Json(payload): Json<UpdateCredentialRequest>,
+) -> Result<Json<CredentialResponse>, (StatusCode, String)> {
+    let existing = state
+        .credential_repo
+        .find_by_id(id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Credential not found".to_string()))?;
+
+    let next_name = payload
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .unwrap_or(existing.name.as_str())
+        .to_string();
+    let merged_data = merge_credential_data(&existing.data, payload.data.as_ref())?;
+
+    let rotated = state
+        .credential_repo
+        .rotate(id, &next_name, merged_data)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Credential not found".to_string()))?;
+
+    Ok(Json(CredentialResponse::from(rotated)))
+}
+
+async fn start_oauth_connect(
+    _claims: Claims,
+    State(state): State<AppState>,
+    Path(id): Path<uuid::Uuid>,
+    headers: HeaderMap,
+) -> Result<Json<CredentialOAuthConnectResponse>, (StatusCode, String)> {
+    let existing = state
+        .credential_repo
+        .find_by_id(id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Credential not found".to_string()))?;
+
+    let (updated_data, response) =
+        build_oauth_connect_payload(existing.id, &existing.cred_type, &existing.data, &headers)?;
+
+    state
+        .credential_repo
+        .update(existing.id, &existing.name, updated_data)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Credential not found".to_string()))?;
+
+    Ok(Json(response))
 }
 
 fn credential_data_to_map(
@@ -265,14 +518,29 @@ async fn test_credential(
     State(state): State<AppState>,
     Json(payload): Json<TestCredentialRequest>,
 ) -> Result<Json<CredentialValidationResponse>, (StatusCode, String)> {
-    let is_valid =
-        validate_credential_data(&state, &payload.credential_type, &payload.data).await?;
-
-    Ok(Json(CredentialValidationResponse {
-        valid: is_valid,
-        credential_id: None,
-        credential_type: None,
-    }))
+    match validate_credential_data(&state, &payload.credential_type, &payload.data).await {
+        Ok(true) => Ok(Json(build_validation_response(
+            true,
+            "valid",
+            "Credential validated successfully.",
+            None,
+            Some(payload.credential_type),
+        ))),
+        Ok(false) => Ok(Json(build_validation_response(
+            false,
+            "invalid",
+            "Credential validation returned false.",
+            None,
+            Some(payload.credential_type),
+        ))),
+        Err((status_code, message)) => Ok(Json(build_validation_response(
+            false,
+            validation_status_from_error(status_code),
+            message,
+            None,
+            Some(payload.credential_type),
+        ))),
+    }
 }
 
 async fn test_saved_credential(
@@ -287,14 +555,75 @@ async fn test_saved_credential(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Credential not found".to_string()))?;
 
-    let data_map = credential_data_to_map(&credential.data)?;
-    let is_valid = validate_credential_data(&state, &credential.cred_type, &data_map).await?;
+    let data_map = match credential_data_to_map(&credential.data) {
+        Ok(data_map) => data_map,
+        Err((status_code, message)) => {
+            state
+                .credential_repo
+                .record_test_result(id, validation_status_from_error(status_code), Some(&message))
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    Ok(Json(CredentialValidationResponse {
-        valid: is_valid,
-        credential_id: Some(credential.id),
-        credential_type: Some(credential.cred_type),
-    }))
+            return Ok(Json(build_validation_response(
+                false,
+                validation_status_from_error(status_code),
+                message,
+                Some(credential.id),
+                Some(credential.cred_type),
+            )));
+        }
+    };
+
+    match validate_credential_data(&state, &credential.cred_type, &data_map).await {
+        Ok(true) => {
+            let message = "Credential validated successfully.";
+            state
+                .credential_repo
+                .record_test_result(id, "valid", Some(message))
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+            Ok(Json(build_validation_response(
+                true,
+                "valid",
+                message,
+                Some(credential.id),
+                Some(credential.cred_type),
+            )))
+        }
+        Ok(false) => {
+            let message = "Credential validation returned false.";
+            state
+                .credential_repo
+                .record_test_result(id, "invalid", Some(message))
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+            Ok(Json(build_validation_response(
+                false,
+                "invalid",
+                message,
+                Some(credential.id),
+                Some(credential.cred_type),
+            )))
+        }
+        Err((status_code, message)) => {
+            let validation_status = validation_status_from_error(status_code);
+            state
+                .credential_repo
+                .record_test_result(id, validation_status, Some(&message))
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+            Ok(Json(build_validation_response(
+                false,
+                validation_status,
+                message,
+                Some(credential.id),
+                Some(credential.cred_type),
+            )))
+        }
+    }
 }
 
 async fn delete_credential(
