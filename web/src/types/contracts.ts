@@ -127,10 +127,31 @@ export interface WorkflowSettings {
   callerPolicy?: string | null
 }
 
+export interface WorkflowTag {
+  id: string
+  name: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface TagRecord extends WorkflowTag {
+  workflowCount: number
+}
+
+export interface WorkflowSummary {
+  nodeCount: number
+  triggerCount: number
+  credentialBindingCount: number
+  tagCount: number
+  latestVersion: number
+}
+
 export interface WorkflowRecord {
   id: string
   name: string
   active: boolean
+  tags: WorkflowTag[]
+  summary: WorkflowSummary
   nodes: WorkflowNode[]
   connections: WorkflowConnections
   settings: WorkflowSettings
@@ -143,6 +164,74 @@ export interface WorkflowUpsertRequest {
   nodes: WorkflowNode[]
   connections: WorkflowConnections
   settings: WorkflowSettings
+  tags?: string[]
+}
+
+export interface WorkflowImportDocument {
+  name: string
+  nodes: WorkflowNode[]
+  connections: WorkflowConnections
+  settings: WorkflowSettings
+  tags?: string[]
+}
+
+export interface WorkflowImportRequest {
+  workflow: WorkflowImportDocument
+  nameOverride?: string
+}
+
+export interface WorkflowHistoryEntry {
+  version: number
+  source: string
+  name: string
+  active: boolean
+  tags: string[]
+  summary: WorkflowSummary
+  createdAt: string
+}
+
+export interface WorkflowNodeChange {
+  nodeId: string
+  nodeName: string
+  changedFields: string[]
+}
+
+export interface WorkflowHistoryDiff {
+  workflowId: string
+  fromVersion: number
+  toVersion: number
+  fromName: string
+  toName: string
+  nameChanged: boolean
+  activeChanged: boolean
+  tagsAdded: string[]
+  tagsRemoved: string[]
+  settingsChanged: string[]
+  nodesAdded: string[]
+  nodesRemoved: string[]
+  nodesChanged: WorkflowNodeChange[]
+  connectionsAdded: string[]
+  connectionsRemoved: string[]
+}
+
+export interface WorkflowTemplateRecord {
+  id: string
+  name: string
+  description: string
+  category: string
+  difficulty: string
+  tags: string[]
+  highlights: string[]
+  summary: WorkflowSummary
+  nodes: WorkflowNode[]
+  connections: WorkflowConnections
+  settings: WorkflowSettings
+}
+
+export interface WorkflowExportRecord {
+  format: string
+  exportedAt: string
+  workflow: WorkflowRecord
 }
 
 export interface ExecutionNodeSummary {
