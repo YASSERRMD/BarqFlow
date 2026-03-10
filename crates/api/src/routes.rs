@@ -1,6 +1,7 @@
 use crate::repositories::{
     credential::CredentialRepository, execution::ExecutionRepository, workflow::WorkflowRepository,
 };
+use crate::execution_events::ExecutionEventHub;
 use axum::Router;
 use barqflow_db::users::UserRepo;
 use std::collections::HashMap;
@@ -44,6 +45,7 @@ pub struct AppState {
     pub job_scheduler: JobScheduler,
     pub active_executions: ActiveExecutionManager,
     pub active_cron_jobs: ActiveCronJobs,
+    pub execution_events: ExecutionEventHub,
 }
 
 pub fn create_router(state: AppState) -> Router {
@@ -65,6 +67,7 @@ pub fn create_router(state: AppState) -> Router {
             node_registry: Arc::clone(&state.node_registry),
             credential_repo: Arc::clone(&state.credential_repo),
             active_executions: Arc::clone(&state.active_executions),
+            execution_events: state.execution_events.clone(),
         }))
         .merge(credential_routes(CredState {
             credential_repo: Arc::clone(&state.credential_repo),

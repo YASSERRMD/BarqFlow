@@ -1,5 +1,6 @@
 use barqflow_api::AppState as ApiState;
 use barqflow_db::users::UserRepo;
+use barqflow_api::execution_events::ExecutionEventHub;
 use barqflow_api::repositories::{
     credential::CredentialRepository, execution::ExecutionRepository,
     static_data::StaticDataRepository, workflow::WorkflowRepository,
@@ -27,6 +28,7 @@ pub struct AppState {
     pub job_scheduler: JobScheduler,
     pub active_executions: ActiveExecutionManager,
     pub active_cron_jobs: ActiveCronJobs,
+    pub execution_events: ExecutionEventHub,
 }
 
 impl AppState {
@@ -42,6 +44,7 @@ impl AppState {
         let job_scheduler = JobScheduler::new().await?;
         let active_executions = Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
         let active_cron_jobs = Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+        let execution_events = ExecutionEventHub::new();
 
         Ok(Self {
             db_pool: pool.clone(),
@@ -56,6 +59,7 @@ impl AppState {
             job_scheduler,
             active_executions,
             active_cron_jobs,
+            execution_events,
         })
     }
 
@@ -71,6 +75,7 @@ impl AppState {
             job_scheduler: self.job_scheduler.clone(),
             active_executions: Arc::clone(&self.active_executions),
             active_cron_jobs: Arc::clone(&self.active_cron_jobs),
+            execution_events: self.execution_events.clone(),
         }
     }
 }

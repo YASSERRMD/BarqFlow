@@ -3,17 +3,21 @@
 //! Implements the core execution engine that walks the workflow graph
 //! and executes nodes in topological order.
 
+use async_trait::async_trait;
+use barqflow_core::contracts::{ExecutionEvent, ExecutionEventType, ExecutionStatus};
 use barqflow_core::errors::BarqError;
 use barqflow_core::schema::{
     INodeExecutionData, ITaskDataConnections, WorkflowDef as CoreWorkflowDef,
 };
 use barqflow_core::types::{IDataObject, NodeId, RunId};
+use chrono::Utc;
 use barqflow_flow::graph::{GraphTraversal, ParsedGraph, WorkflowDef, WorkflowNode};
 use barqflow_registry::registry::NodeRegistry;
+use futures::FutureExt;
 use petgraph::graph::NodeIndex;
+use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use futures::FutureExt;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, instrument};
 
@@ -51,6 +55,11 @@ pub struct NodeExecutionResult {
     pub error: Option<String>,
 }
 
+#[async_trait]
+pub trait ExecutionEventReporter: Send + Sync {
+    async fn report(&self, event: ExecutionEvent);
+}
+
 /// Context for a workflow execution run.
 #[derive(Debug, Clone)]
 pub struct WorkflowRunContext {
@@ -71,6 +80,8 @@ pub struct WorkflowRunContext {
     /// Optional target node id/name for partial execution.
     /// When set, runner executes only target ancestors + target and stops after target runs.
     pub stop_after_node_id: Option<String>,
+    /// Monotonic event sequence offset. The next emitted event uses `event_sequence_start + 1`.
+    pub event_sequence_start: u64,
 }
 
 /// The core workflow execution engine.
@@ -85,6 +96,8 @@ pub struct WorkflowRunner {
     credential_provider: Option<Arc<dyn crate::context::CredentialProvider>>,
     /// Optional sub-workflow executor used by Execute Workflow nodes.
     subworkflow_executor: Option<Arc<dyn crate::subworkflow::SubWorkflowExecutor>>,
+    /// Optional reporter used to surface lifecycle events while the workflow runs.
+    event_reporter: Option<Arc<dyn ExecutionEventReporter>>,
 }
 
 impl WorkflowRunner {
@@ -116,6 +129,7 @@ impl WorkflowRunner {
             config,
             credential_provider: None,
             subworkflow_executor: None,
+            event_reporter: None,
         }
     }
 
@@ -135,6 +149,46 @@ impl WorkflowRunner {
         self
     }
 
+    pub fn with_event_reporter(
+        mut self,
+        event_reporter: Arc<dyn ExecutionEventReporter>,
+    ) -> Self {
+        self.event_reporter = Some(event_reporter);
+        self
+    }
+
+    async fn emit_execution_event(
+        &self,
+        context: &WorkflowRunContext,
+        sequence: &mut u64,
+        event_type: ExecutionEventType,
+        status: ExecutionStatus,
+        node: Option<&WorkflowNode>,
+        message: impl Into<String>,
+        data: serde_json::Value,
+    ) {
+        let Some(event_reporter) = self.event_reporter.as_ref() else {
+            return;
+        };
+
+        *sequence += 1;
+        event_reporter
+            .report(ExecutionEvent {
+                execution_id: context.execution_id.unwrap_or(context.run_id.0),
+                workflow_id: context.workflow.id,
+                run_id: context.run_id,
+                event_type,
+                status,
+                node_id: node.map(|current| current.id.clone()),
+                node_name: node.map(|current| current.name.clone()),
+                message: message.into(),
+                timestamp: Utc::now(),
+                sequence: *sequence,
+                data: IDataObject::from(data),
+            })
+            .await;
+    }
+
     /// Execute a workflow.
     ///
     /// # Arguments
@@ -148,10 +202,26 @@ impl WorkflowRunner {
         context: WorkflowRunContext,
     ) -> Result<HashMap<String, NodeExecutionResult>, BarqError> {
         info!("Starting workflow execution");
+        let mut event_sequence = context.event_sequence_start;
 
         if Self::is_cancelled(&context) {
             return Err(Self::cancellation_error(&context));
         }
+
+        self.emit_execution_event(
+            &context,
+            &mut event_sequence,
+            ExecutionEventType::Started,
+            ExecutionStatus::Running,
+            None,
+            "Execution started",
+            json!({
+                "workflowName": context.workflow.name,
+                "manual": context.manual,
+                "stopAfterNodeId": context.stop_after_node_id,
+            }),
+        )
+        .await;
 
         // Convert core workflow to flow workflow
         let flow_workflow = self.convert_workflow(&context.workflow);
@@ -317,10 +387,25 @@ impl WorkflowRunner {
                         futures.push(fut.boxed());
                     },
                     Some((input_data, None)) => {
+                        let input_items: usize = input_data.0.values().map(|items| items.len()).sum();
                         let context_ref = &context;
                         let parsed_ref = &parsed;
                         let node = &parsed.graph[node_index];
                         let workflow_cache_clone = Arc::clone(&workflow_cache);
+
+                        self.emit_execution_event(
+                            &context,
+                            &mut event_sequence,
+                            ExecutionEventType::NodeStarted,
+                            ExecutionStatus::Running,
+                            Some(node),
+                            format!("Node '{}' started", node.name),
+                            json!({
+                                "inputItems": input_items,
+                                "layer": node_layers.get(&node_index).copied().unwrap_or_default(),
+                            }),
+                        )
+                        .await;
                         
                         // Execute the node
                         let fut = async move {
@@ -339,8 +424,8 @@ impl WorkflowRunner {
 
             // 4. Update state caches from results sequentially
             for execute_result in layer_results {
-                let (node_index, result) = match execute_result {
-                    Ok((n_idx, _in_data, res)) => (n_idx, res),
+                let (node_index, input_data, result) = match execute_result {
+                    Ok((n_idx, in_data, res)) => (n_idx, in_data, res),
                     Err((n_idx, in_data, BarqError::SuspendExecution { node_name: _, wait_config })) => {
                         let node = &parsed.graph[n_idx];
                         info!("Execution suspended at node '{}'", node.name);
@@ -376,7 +461,7 @@ impl WorkflowRunner {
                         });
                     },
                     Err((n_idx, in_data, BarqError::ExecuteSubWorkflow { workflow_id, input_data })) => {
-                        self.handle_subworkflow_execution(
+                        let (resolved_index, result) = self.handle_subworkflow_execution(
                             &context,
                             &parsed,
                             n_idx,
@@ -384,7 +469,8 @@ impl WorkflowRunner {
                             workflow_id,
                             input_data,
                         )
-                        .await?
+                        .await?;
+                        (resolved_index, in_data, result)
                     },
                     Err((_n_idx, _in_data, e)) => {
                         if let Some(error_workflow_id) = context.workflow.settings.error_workflow.clone() {
@@ -395,6 +481,32 @@ impl WorkflowRunner {
                 };
                 
                 let node = &parsed.graph[node_index];
+                let input_items: usize = input_data.0.values().map(|items| items.len()).sum();
+                let output_items: usize = result.outputs.iter().map(|branch| branch.len()).sum();
+                let skipped = input_items == 0 && output_items == 0 && result.success && result.error.is_none();
+
+                self.emit_execution_event(
+                    &context,
+                    &mut event_sequence,
+                    ExecutionEventType::NodeFinished,
+                    ExecutionStatus::Running,
+                    Some(node),
+                    if skipped {
+                        format!("Node '{}' skipped because upstream branches yielded no items", node.name)
+                    } else if result.success {
+                        format!("Node '{}' completed", node.name)
+                    } else {
+                        format!("Node '{}' failed", node.name)
+                    },
+                    json!({
+                        "inputItems": input_items,
+                        "outputItems": output_items,
+                        "success": result.success,
+                        "error": result.error,
+                        "skipped": skipped,
+                    }),
+                )
+                .await;
                 
                 if let Some(first_output) = result.outputs.first() {
                     let json_items: Vec<serde_json::Value> = first_output
@@ -435,6 +547,7 @@ impl WorkflowRunner {
         checkpoint: crate::checkpoint::ExecutionCheckpoint,
     ) -> Result<HashMap<String, NodeExecutionResult>, BarqError> {
         info!("Resuming workflow execution for run {}", checkpoint.run_id);
+        let mut event_sequence = context.event_sequence_start;
 
         if Self::is_cancelled(&context) {
             return Err(Self::cancellation_error(&context));
@@ -562,10 +675,25 @@ impl WorkflowRunner {
                         futures.push(fut.boxed());
                     },
                     Some((input_data, None)) => {
+                        let input_items: usize = input_data.0.values().map(|items| items.len()).sum();
                         let context_ref = &context;
                         let parsed_ref = &parsed;
                         let node = &parsed.graph[node_index];
                         let workflow_cache_clone = Arc::clone(&workflow_cache);
+
+                        self.emit_execution_event(
+                            &context,
+                            &mut event_sequence,
+                            ExecutionEventType::NodeStarted,
+                            ExecutionStatus::Running,
+                            Some(node),
+                            format!("Node '{}' started", node.name),
+                            json!({
+                                "inputItems": input_items,
+                                "layer": node_layers.get(&node_index).copied().unwrap_or_default(),
+                            }),
+                        )
+                        .await;
                         
                         let fut = async move {
                             match self.run_node(context_ref, node, input_data.clone(), parsed_ref, workflow_cache_clone).await {
@@ -581,8 +709,8 @@ impl WorkflowRunner {
             let layer_results = futures::future::join_all(futures).await;
 
             for execute_result in layer_results {
-                let (node_index, result) = match execute_result {
-                    Ok((n_idx, _in_data, res)) => (n_idx, res),
+                let (node_index, input_data, result) = match execute_result {
+                    Ok((n_idx, in_data, res)) => (n_idx, in_data, res),
                     Err((n_idx, in_data, BarqError::SuspendExecution { node_name: _, wait_config })) => {
                         let node = &parsed.graph[n_idx];
                         let config: crate::checkpoint::WaitConfig = serde_json::from_value(wait_config)
@@ -612,7 +740,7 @@ impl WorkflowRunner {
                         });
                     },
                     Err((n_idx, in_data, BarqError::ExecuteSubWorkflow { workflow_id, input_data })) => {
-                        self.handle_subworkflow_execution(
+                        let (resolved_index, result) = self.handle_subworkflow_execution(
                             &context,
                             &parsed,
                             n_idx,
@@ -620,7 +748,8 @@ impl WorkflowRunner {
                             workflow_id,
                             input_data,
                         )
-                        .await?
+                        .await?;
+                        (resolved_index, in_data, result)
                     },
                     Err((_n_idx, _in_data, e)) => {
                         if let Some(error_workflow_id) = context.workflow.settings.error_workflow.clone() {
@@ -635,6 +764,32 @@ impl WorkflowRunner {
                 };
 
                 let node = &parsed.graph[node_index];
+                let input_items: usize = input_data.0.values().map(|items| items.len()).sum();
+                let output_items: usize = result.outputs.iter().map(|branch| branch.len()).sum();
+                let skipped = input_items == 0 && output_items == 0 && result.success && result.error.is_none();
+
+                self.emit_execution_event(
+                    &context,
+                    &mut event_sequence,
+                    ExecutionEventType::NodeFinished,
+                    ExecutionStatus::Running,
+                    Some(node),
+                    if skipped {
+                        format!("Node '{}' skipped because upstream branches yielded no items", node.name)
+                    } else if result.success {
+                        format!("Node '{}' completed", node.name)
+                    } else {
+                        format!("Node '{}' failed", node.name)
+                    },
+                    json!({
+                        "inputItems": input_items,
+                        "outputItems": output_items,
+                        "success": result.success,
+                        "error": result.error,
+                        "skipped": skipped,
+                    }),
+                )
+                .await;
                 
                 if let Some(first_output) = result.outputs.first() {
                     let json_items: Vec<serde_json::Value> = first_output
@@ -1157,6 +1312,7 @@ mod tests {
             parent_execution_id: None,
             cancellation_token: None,
             stop_after_node_id: None,
+            event_sequence_start: 0,
         };
 
         let results = runner.run_workflow(context).await.unwrap();
@@ -1184,6 +1340,7 @@ mod tests {
             parent_execution_id: None,
             cancellation_token: None,
             stop_after_node_id: Some("node_b".to_string()),
+            event_sequence_start: 0,
         };
 
         let results = runner.run_workflow(context).await.unwrap();
@@ -1207,6 +1364,7 @@ mod tests {
             parent_execution_id: None,
             cancellation_token: None,
             stop_after_node_id: Some("missing-node".to_string()),
+            event_sequence_start: 0,
         };
 
         let err = runner.run_workflow(context).await.unwrap_err();
@@ -1237,6 +1395,7 @@ mod tests {
             parent_execution_id: None,
             cancellation_token: None,
             stop_after_node_id: None,
+            event_sequence_start: 0,
         };
 
         let results = runner.run_workflow(context).await.unwrap();
@@ -1264,6 +1423,7 @@ mod tests {
             parent_execution_id: None,
             cancellation_token: None,
             stop_after_node_id: None,
+            event_sequence_start: 0,
         };
 
         assert!(!context.manual);
@@ -1287,6 +1447,7 @@ mod tests {
             parent_execution_id: None,
             cancellation_token: Some(token),
             stop_after_node_id: None,
+            event_sequence_start: 0,
         };
 
         let err = runner.run_workflow(context).await.unwrap_err();
@@ -1418,6 +1579,7 @@ mod tests {
                 parent_execution_id: None,
                 cancellation_token: None,
                 stop_after_node_id: None,
+                event_sequence_start: 0,
             })
             .await
             .unwrap();
@@ -1500,6 +1662,7 @@ mod tests {
                 parent_execution_id: None,
                 cancellation_token: None,
                 stop_after_node_id: None,
+                event_sequence_start: 0,
             })
             .await
             .unwrap_err();

@@ -78,6 +78,28 @@ fn jwt_secret() -> &'static str {
         .as_str()
 }
 
+pub fn decode_jwt_token(token: &str) -> Result<Claims, &'static str> {
+    decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(jwt_secret().as_bytes()),
+        &Validation::default(),
+    )
+    .map(|token_data| token_data.claims)
+    .map_err(|_| "Invalid token")
+}
+
+pub fn decode_claims_from_auth_header(auth_header: Option<&str>) -> Result<Option<Claims>, &'static str> {
+    let Some(auth_header) = auth_header else {
+        return Ok(None);
+    };
+
+    let Some(token) = auth_header.strip_prefix("Bearer ") else {
+        return Ok(None);
+    };
+
+    decode_jwt_token(token).map(Some)
+}
+
 pub fn generate_jwt(user_id: &str, role: &str) -> Result<String, AuthError> {
     let secret = jwt_secret();
 
@@ -112,25 +134,14 @@ where
             .get(axum::http::header::AUTHORIZATION)
             .and_then(|value| value.to_str().ok());
 
-        if let Some(auth_header) = auth_header {
-            if let Some(token) = auth_header.strip_prefix("Bearer ") {
-                let secret = jwt_secret();
-
-                let token_data = decode::<Claims>(
-                    token,
-                    &DecodingKey::from_secret(secret.as_bytes()),
-                    &Validation::default(),
-                )
-                .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid token"))?;
-
-                return Ok(token_data.claims);
-            }
+        match decode_claims_from_auth_header(auth_header) {
+            Ok(Some(claims)) => Ok(claims),
+            Ok(None) => Err((
+                StatusCode::UNAUTHORIZED,
+                "Missing or invalid authorization header",
+            )),
+            Err(message) => Err((StatusCode::UNAUTHORIZED, message)),
         }
-
-        Err((
-            StatusCode::UNAUTHORIZED,
-            "Missing or invalid authorization header",
-        ))
     }
 }
 
