@@ -89,6 +89,28 @@ pub struct ExecutionEntity {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct ExecutionDispatchItemEntity {
+    pub id: Uuid,
+    pub execution_id: Uuid,
+    pub workspace_id: Uuid,
+    pub workflow_id: Uuid,
+    pub queue_kind: String,
+    pub source: String,
+    pub status: String,
+    pub priority: i32,
+    pub payload: serde_json::Value,
+    pub available_at: DateTime<Utc>,
+    pub claimed_at: Option<DateTime<Utc>>,
+    pub lease_expires_at: Option<DateTime<Utc>>,
+    pub worker_id: Option<String>,
+    pub attempt_count: i32,
+    pub last_error: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub finished_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct ExecutionLogEntity {
     pub id: Uuid,
     pub execution_id: Uuid,
