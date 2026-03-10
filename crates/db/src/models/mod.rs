@@ -10,6 +10,12 @@ pub struct CredentialEntity {
     pub data: serde_json::Value,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub last_tested_at: Option<DateTime<Utc>>,
+    pub last_test_status: Option<String>,
+    pub last_test_message: Option<String>,
+    pub last_used_at: Option<DateTime<Utc>>,
+    pub usage_count: i64,
+    pub rotated_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]

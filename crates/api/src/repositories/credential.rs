@@ -9,6 +9,21 @@ pub struct CredentialRepository {
     crypto: CryptoService,
 }
 
+const CREDENTIAL_COLUMNS: &str = r#"
+    id,
+    name,
+    cred_type,
+    data,
+    created_at,
+    updated_at,
+    last_tested_at,
+    last_test_status,
+    last_test_message,
+    last_used_at,
+    usage_count,
+    rotated_at
+"#;
+
 impl CredentialRepository {
     pub fn new(pool: PgPool) -> Self {
         let crypto = CryptoService::new().unwrap_or_else(|e| {
@@ -20,13 +35,13 @@ impl CredentialRepository {
     }
 
     pub async fn find_all(&self) -> Result<Vec<CredentialEntity>> {
-        let mut entities = sqlx::query_as::<_, CredentialEntity>(
+        let mut entities = sqlx::query_as::<_, CredentialEntity>(&format!(
             r#"
-            SELECT id, name, cred_type, data, created_at, updated_at
+            SELECT {CREDENTIAL_COLUMNS}
             FROM credentials
             ORDER BY name ASC
-            "#,
-        )
+            "#
+        ))
         .fetch_all(&self.pool)
         .await?;
 
@@ -38,13 +53,13 @@ impl CredentialRepository {
     }
 
     pub async fn find_by_id(&self, id: Uuid) -> Result<Option<CredentialEntity>> {
-        let mut entity_opt = sqlx::query_as::<_, CredentialEntity>(
+        let mut entity_opt = sqlx::query_as::<_, CredentialEntity>(&format!(
             r#"
-            SELECT id, name, cred_type, data, created_at, updated_at
+            SELECT {CREDENTIAL_COLUMNS}
             FROM credentials
             WHERE id = $1
-            "#,
-        )
+            "#
+        ))
         .bind(id)
         .fetch_optional(&self.pool)
         .await?;
@@ -57,15 +72,15 @@ impl CredentialRepository {
     }
 
     pub async fn find_by_name(&self, name: &str) -> Result<Option<CredentialEntity>> {
-        let mut entity_opt = sqlx::query_as::<_, CredentialEntity>(
+        let mut entity_opt = sqlx::query_as::<_, CredentialEntity>(&format!(
             r#"
-            SELECT id, name, cred_type, data, created_at, updated_at
+            SELECT {CREDENTIAL_COLUMNS}
             FROM credentials
             WHERE name = $1
             ORDER BY updated_at DESC
             LIMIT 1
-            "#,
-        )
+            "#
+        ))
         .bind(name)
         .fetch_optional(&self.pool)
         .await?;
@@ -78,14 +93,14 @@ impl CredentialRepository {
     }
 
     pub async fn find_by_type(&self, cred_type: &str) -> Result<Vec<CredentialEntity>> {
-        let mut entities = sqlx::query_as::<_, CredentialEntity>(
+        let mut entities = sqlx::query_as::<_, CredentialEntity>(&format!(
             r#"
-            SELECT id, name, cred_type, data, created_at, updated_at
+            SELECT {CREDENTIAL_COLUMNS}
             FROM credentials
             WHERE cred_type = $1
             ORDER BY name ASC
-            "#,
-        )
+            "#
+        ))
         .bind(cred_type)
         .fetch_all(&self.pool)
         .await?;
@@ -98,15 +113,15 @@ impl CredentialRepository {
     }
 
     pub async fn find_latest_by_type(&self, cred_type: &str) -> Result<Option<CredentialEntity>> {
-        let mut entity_opt = sqlx::query_as::<_, CredentialEntity>(
+        let mut entity_opt = sqlx::query_as::<_, CredentialEntity>(&format!(
             r#"
-            SELECT id, name, cred_type, data, created_at, updated_at
+            SELECT {CREDENTIAL_COLUMNS}
             FROM credentials
             WHERE cred_type = $1
             ORDER BY updated_at DESC
             LIMIT 1
-            "#,
-        )
+            "#
+        ))
         .bind(cred_type)
         .fetch_optional(&self.pool)
         .await?;
@@ -134,13 +149,13 @@ impl CredentialRepository {
             .map_err(|e| sqlx::Error::Protocol(format!("Encryption error: {}", e)))?;
         let encrypted_data = serde_json::json!({ "encrypted": encrypted_base64 });
 
-        sqlx::query_as::<_, CredentialEntity>(
+        sqlx::query_as::<_, CredentialEntity>(&format!(
             r#"
             INSERT INTO credentials (id, name, cred_type, data, created_at, updated_at)
             VALUES ($1, $2, $3, $4, $5, $6)
-            RETURNING id, name, cred_type, data, created_at, updated_at
-            "#,
-        )
+            RETURNING {CREDENTIAL_COLUMNS}
+            "#
+        ))
         .bind(id)
         .bind(name)
         .bind(cred_type)
@@ -165,20 +180,104 @@ impl CredentialRepository {
             .map_err(|e| sqlx::Error::Protocol(format!("Encryption error: {}", e)))?;
         let encrypted_data = serde_json::json!({ "encrypted": encrypted_base64 });
 
-        sqlx::query_as::<_, CredentialEntity>(
+        sqlx::query_as::<_, CredentialEntity>(&format!(
             r#"
             UPDATE credentials
             SET name = $1, data = $2, updated_at = $3
             WHERE id = $4
-            RETURNING id, name, cred_type, data, created_at, updated_at
-            "#,
-        )
+            RETURNING {CREDENTIAL_COLUMNS}
+            "#
+        ))
         .bind(name)
         .bind(encrypted_data)
         .bind(now)
         .bind(id)
         .fetch_optional(&self.pool)
         .await
+    }
+
+    pub async fn rotate(
+        &self,
+        id: Uuid,
+        name: &str,
+        data: serde_json::Value,
+    ) -> Result<Option<CredentialEntity>> {
+        let now = Utc::now();
+
+        let encrypted_base64 = self
+            .crypto
+            .encrypt_value(&data)
+            .map_err(|e| sqlx::Error::Protocol(format!("Encryption error: {}", e)))?;
+        let encrypted_data = serde_json::json!({ "encrypted": encrypted_base64 });
+
+        sqlx::query_as::<_, CredentialEntity>(&format!(
+            r#"
+            UPDATE credentials
+            SET
+                name = $1,
+                data = $2,
+                updated_at = $3,
+                rotated_at = $3,
+                last_tested_at = NULL,
+                last_test_status = NULL,
+                last_test_message = NULL
+            WHERE id = $4
+            RETURNING {CREDENTIAL_COLUMNS}
+            "#
+        ))
+        .bind(name)
+        .bind(encrypted_data)
+        .bind(now)
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    pub async fn record_test_result(
+        &self,
+        id: Uuid,
+        status: &str,
+        message: Option<&str>,
+    ) -> Result<Option<CredentialEntity>> {
+        let now = Utc::now();
+
+        sqlx::query_as::<_, CredentialEntity>(&format!(
+            r#"
+            UPDATE credentials
+            SET
+                last_tested_at = $1,
+                last_test_status = $2,
+                last_test_message = $3
+            WHERE id = $4
+            RETURNING {CREDENTIAL_COLUMNS}
+            "#
+        ))
+        .bind(now)
+        .bind(status)
+        .bind(message)
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    pub async fn record_usage(&self, id: Uuid) -> Result<bool> {
+        let now = Utc::now();
+
+        let result = sqlx::query(
+            r#"
+            UPDATE credentials
+            SET
+                last_used_at = $1,
+                usage_count = usage_count + 1
+            WHERE id = $2
+            "#,
+        )
+        .bind(now)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.rows_affected() > 0)
     }
 
     pub async fn delete(&self, id: Uuid) -> Result<bool> {
@@ -247,10 +346,83 @@ mod tests {
         let refound = repo.find_by_id(created.id).await.unwrap().unwrap();
         assert_eq!(refound.name, "Renamed ACME Creds");
         assert_eq!(refound.data, updated_payload);
+        assert_eq!(refound.usage_count, 0);
+        assert!(refound.last_tested_at.is_none());
 
         // DELETE
         repo.delete(created.id).await.unwrap();
         let deleted = repo.find_by_id(created.id).await.unwrap();
         assert!(deleted.is_none());
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn test_credential_usage_and_test_metadata(pool: PgPool) {
+        env::set_var(
+            "BARQFLOW_ENCRYPTION_KEY",
+            "test_key_must_be_exactly_32_byte",
+        );
+        let repo = CredentialRepository::new(pool.clone());
+
+        let created = repo
+            .create(
+                "Usage Creds",
+                "openAiApi",
+                json!({ "apiKey": "sk-test", "baseUrl": "https://api.openai.com/v1" }),
+            )
+            .await
+            .unwrap();
+
+        let used = repo.record_usage(created.id).await.unwrap();
+        assert!(used);
+
+        let tested = repo
+            .record_test_result(created.id, "valid", Some("Credential validated"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(tested.last_test_status.as_deref(), Some("valid"));
+
+        let reloaded = repo.find_by_id(created.id).await.unwrap().unwrap();
+        assert_eq!(reloaded.usage_count, 1);
+        assert!(reloaded.last_used_at.is_some());
+        assert!(reloaded.last_tested_at.is_some());
+        assert_eq!(reloaded.last_test_status.as_deref(), Some("valid"));
+        assert_eq!(
+            reloaded.last_test_message.as_deref(),
+            Some("Credential validated")
+        );
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn test_rotate_clears_test_metadata_and_sets_rotated_at(pool: PgPool) {
+        env::set_var(
+            "BARQFLOW_ENCRYPTION_KEY",
+            "test_key_must_be_exactly_32_byte",
+        );
+        let repo = CredentialRepository::new(pool.clone());
+
+        let created = repo
+            .create("Rotate Me", "openAiApi", json!({ "apiKey": "sk-old" }))
+            .await
+            .unwrap();
+
+        repo.record_test_result(created.id, "valid", Some("before rotation"))
+            .await
+            .unwrap();
+
+        repo.rotate(
+            created.id,
+            "Rotate Me",
+            json!({ "apiKey": "sk-new", "baseUrl": "https://api.openai.com/v1" }),
+        )
+        .await
+        .unwrap();
+
+        let reloaded = repo.find_by_id(created.id).await.unwrap().unwrap();
+        assert_eq!(reloaded.data["apiKey"], "sk-new");
+        assert!(reloaded.rotated_at.is_some());
+        assert!(reloaded.last_tested_at.is_none());
+        assert!(reloaded.last_test_status.is_none());
+        assert!(reloaded.last_test_message.is_none());
     }
 }
