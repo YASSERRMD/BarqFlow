@@ -12,6 +12,7 @@ use crate::operations::{
 };
 use crate::repositories::{
     api_key::ApiKeyRepository, execution::ExecutionRepository,
+    execution_dispatch::{ExecutionDispatchRepository, ExecutionQueueKind},
     execution_log::ExecutionLogRepository, workspace::WorkspaceRepository,
 };
 use crate::routes::ActiveExecutionManager;
@@ -31,6 +32,7 @@ pub struct AppState {
     pub node_registry: Arc<barqflow_registry::registry::NodeRegistry>,
     pub credential_registry: Arc<barqflow_registry::registry::CredentialRegistry>,
     pub execution_repo: Arc<ExecutionRepository>,
+    pub execution_dispatch_repo: Arc<ExecutionDispatchRepository>,
     pub execution_log_repo: Arc<ExecutionLogRepository>,
     pub user_repo: Arc<UserRepo>,
     pub workspace_repo: Arc<WorkspaceRepository>,
@@ -70,6 +72,8 @@ async fn get_runtime_settings(
         encryption_key_configured,
         execution_mode: dispatch_mode_label(dispatch.mode),
         worker_concurrency: dispatch.worker_concurrency,
+        run_worker_concurrency: state.operations_runtime.run_worker_concurrency(),
+        trigger_worker_concurrency: state.operations_runtime.trigger_worker_concurrency(),
         queue_capacity: dispatch.queue_capacity,
         pruning_enabled: pruning.enabled,
         execution_retention_days: pruning.retention_days,
@@ -101,11 +105,29 @@ async fn get_operations_overview(
 
     let active_executions = state.active_executions.read().await.len();
     let dispatch = state.operations_runtime.dispatch_metrics_snapshot().await;
+    let run_queued_count = state
+        .execution_dispatch_repo
+        .count_open_items_by_kind(ExecutionQueueKind::Run)
+        .await
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+        .max(0) as usize;
+    let trigger_queued_count = state
+        .execution_dispatch_repo
+        .count_open_items_by_kind(ExecutionQueueKind::Trigger)
+        .await
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+        .max(0) as usize;
     let pruning = state.operations_runtime.pruning_snapshot().await;
     let telemetry = state.operations_runtime.telemetry_snapshot();
 
     Ok(Json(OperationsOverviewResponse {
-        dispatch: map_dispatch_metrics(dispatch),
+        dispatch: map_dispatch_metrics(
+            dispatch,
+            state.operations_runtime.run_worker_concurrency(),
+            state.operations_runtime.trigger_worker_concurrency(),
+            run_queued_count,
+            trigger_queued_count,
+        ),
         pruning: map_pruning_snapshot(pruning),
         telemetry: map_telemetry_snapshot(telemetry),
         active_executions,
@@ -187,12 +209,22 @@ fn dispatch_mode_label(mode: ExecutionDispatchMode) -> String {
     }
 }
 
-fn map_dispatch_metrics(snapshot: ExecutionDispatchMetricsSnapshot) -> ExecutionDispatchMetricsResponse {
+fn map_dispatch_metrics(
+    snapshot: ExecutionDispatchMetricsSnapshot,
+    run_worker_concurrency: usize,
+    trigger_worker_concurrency: usize,
+    run_queued_count: usize,
+    trigger_queued_count: usize,
+) -> ExecutionDispatchMetricsResponse {
     ExecutionDispatchMetricsResponse {
         mode: dispatch_mode_label(snapshot.mode),
         worker_concurrency: snapshot.worker_concurrency,
+        run_worker_concurrency,
+        trigger_worker_concurrency,
         queue_capacity: snapshot.queue_capacity,
-        queued_count: snapshot.queued_count,
+        queued_count: run_queued_count + trigger_queued_count,
+        run_queued_count,
+        trigger_queued_count,
         running_count: snapshot.running_count,
         total_enqueued: snapshot.total_enqueued,
         total_started: snapshot.total_started,

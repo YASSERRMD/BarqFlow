@@ -1,5 +1,6 @@
 pub mod api_key;
 pub mod credential;
+pub mod execution_dispatch;
 pub mod execution;
 pub mod execution_log;
 pub mod governance;

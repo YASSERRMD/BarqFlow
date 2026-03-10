@@ -2,7 +2,7 @@ use crate::execution_events::ExecutionEventHub;
 use crate::operations::OperationsRuntime;
 use crate::repositories::{
     api_key::ApiKeyRepository, credential::CredentialRepository, execution::ExecutionRepository,
-    execution_log::ExecutionLogRepository, governance::GovernanceRepository,
+    execution_dispatch::ExecutionDispatchRepository, execution_log::ExecutionLogRepository, governance::GovernanceRepository,
     workflow::WorkflowRepository, workspace::WorkspaceRepository,
 };
 use axum::Router;
@@ -46,6 +46,7 @@ pub struct AppState {
     pub workflow_repo: Arc<WorkflowRepository>,
     pub credential_repo: Arc<CredentialRepository>,
     pub exec_repo: Arc<ExecutionRepository>,
+    pub execution_dispatch_repo: Arc<ExecutionDispatchRepository>,
     pub execution_log_repo: Arc<ExecutionLogRepository>,
     pub governance_repo: Arc<GovernanceRepository>,
     pub user_repo: Arc<UserRepo>,
@@ -81,12 +82,28 @@ pub fn create_router(state: AppState) -> Router {
             workspace_repo: Arc::clone(&state.workspace_repo),
             api_key_repo: Arc::clone(&state.api_key_repo),
             node_registry: Arc::clone(&state.node_registry),
+            execution_controller_state: ExecState {
+                execution_repo: Arc::clone(&state.exec_repo),
+                execution_dispatch_repo: Arc::clone(&state.execution_dispatch_repo),
+                execution_log_repo: Arc::clone(&state.execution_log_repo),
+                workflow_repo: Arc::clone(&state.workflow_repo),
+                node_registry: Arc::clone(&state.node_registry),
+                credential_repo: Arc::clone(&state.credential_repo),
+                governance_repo: Arc::clone(&state.governance_repo),
+                user_repo: Arc::clone(&state.user_repo),
+                workspace_repo: Arc::clone(&state.workspace_repo),
+                api_key_repo: Arc::clone(&state.api_key_repo),
+                active_executions: Arc::clone(&state.active_executions),
+                execution_events: state.execution_events.clone(),
+                operations_runtime: state.operations_runtime.clone(),
+            },
             webhook_registry: Arc::clone(&state.webhook_registry),
             job_scheduler: state.job_scheduler.clone(),
             active_cron_jobs: Arc::clone(&state.active_cron_jobs),
         }))
         .merge(execution_routes(ExecState {
             execution_repo: Arc::clone(&state.exec_repo),
+            execution_dispatch_repo: Arc::clone(&state.execution_dispatch_repo),
             execution_log_repo: Arc::clone(&state.execution_log_repo),
             workflow_repo: Arc::clone(&state.workflow_repo),
             node_registry: Arc::clone(&state.node_registry),
@@ -121,6 +138,7 @@ pub fn create_router(state: AppState) -> Router {
             node_registry: Arc::clone(&state.node_registry),
             credential_registry: Arc::clone(&state.credential_registry),
             execution_repo: Arc::clone(&state.exec_repo),
+            execution_dispatch_repo: Arc::clone(&state.execution_dispatch_repo),
             execution_log_repo: Arc::clone(&state.execution_log_repo),
             user_repo: Arc::clone(&state.user_repo),
             workspace_repo: Arc::clone(&state.workspace_repo),
@@ -151,6 +169,7 @@ pub fn create_router(state: AppState) -> Router {
             active_executions: Arc::clone(&state.active_executions),
             node_registry: Arc::clone(&state.node_registry),
             credential_registry: Arc::clone(&state.credential_registry),
+            execution_dispatch_repo: Arc::clone(&state.execution_dispatch_repo),
             operations_runtime: state.operations_runtime.clone(),
         }))
         .nest(

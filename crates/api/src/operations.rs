@@ -1,7 +1,8 @@
 use chrono::{DateTime, Duration, Utc};
 use serde::Serialize;
 use std::sync::Arc;
-use tokio::sync::{OwnedSemaphorePermit, RwLock, Semaphore};
+use tokio::sync::RwLock;
+use tokio::time::Duration as TokioDuration;
 
 use crate::repositories::{
     execution::ExecutionRepository, execution_log::ExecutionLogRepository,
@@ -96,8 +97,11 @@ struct ExecutionPruningState {
 pub struct OperationsRuntime {
     dispatch_mode: ExecutionDispatchMode,
     worker_concurrency: usize,
+    run_worker_concurrency: usize,
+    trigger_worker_concurrency: usize,
     queue_capacity: usize,
-    worker_semaphore: Arc<Semaphore>,
+    worker_poll_interval_ms: u64,
+    worker_lease_seconds: i64,
     dispatch_metrics: Arc<RwLock<ExecutionDispatchMetrics>>,
     pruning_config: ExecutionPruningConfig,
     pruning_state: Arc<RwLock<ExecutionPruningState>>,
@@ -111,9 +115,16 @@ impl OperationsRuntime {
             _ => ExecutionDispatchMode::Queue,
         };
 
-        let worker_concurrency = parse_usize_env("BARQFLOW_EXECUTION_WORKER_CONCURRENCY", 4)
-            .max(1);
+        let run_worker_concurrency =
+            parse_usize_env("BARQFLOW_EXECUTION_RUN_WORKER_CONCURRENCY", 4).max(1);
+        let trigger_worker_concurrency =
+            parse_usize_env("BARQFLOW_EXECUTION_TRIGGER_WORKER_CONCURRENCY", 2).max(1);
+        let worker_concurrency = run_worker_concurrency + trigger_worker_concurrency;
         let queue_capacity = parse_usize_env("BARQFLOW_EXECUTION_QUEUE_CAPACITY", 128).max(1);
+        let worker_poll_interval_ms =
+            parse_u64_env("BARQFLOW_EXECUTION_POLL_INTERVAL_MS", 750).max(100);
+        let worker_lease_seconds =
+            parse_i64_env("BARQFLOW_EXECUTION_WORKER_LEASE_SECONDS", 300).max(30);
         let pruning_config = ExecutionPruningConfig {
             enabled: parse_bool_env("BARQFLOW_EXECUTION_PRUNING_ENABLED", true),
             retention_days: parse_u64_env("BARQFLOW_EXECUTION_RETENTION_DAYS", 30).max(1),
@@ -135,8 +146,11 @@ impl OperationsRuntime {
         Self {
             dispatch_mode,
             worker_concurrency,
+            run_worker_concurrency,
+            trigger_worker_concurrency,
             queue_capacity,
-            worker_semaphore: Arc::new(Semaphore::new(worker_concurrency)),
+            worker_poll_interval_ms,
+            worker_lease_seconds,
             dispatch_metrics: Arc::new(RwLock::new(ExecutionDispatchMetrics {
                 queued_count: 0,
                 running_count: 0,
@@ -162,32 +176,41 @@ impl OperationsRuntime {
         self.worker_concurrency
     }
 
+    pub fn run_worker_concurrency(&self) -> usize {
+        self.run_worker_concurrency
+    }
+
+    pub fn trigger_worker_concurrency(&self) -> usize {
+        self.trigger_worker_concurrency
+    }
+
     pub fn queue_capacity(&self) -> usize {
         self.queue_capacity
+    }
+
+    pub fn worker_poll_interval(&self) -> TokioDuration {
+        TokioDuration::from_millis(self.worker_poll_interval_ms)
+    }
+
+    pub fn worker_lease_seconds(&self) -> i64 {
+        self.worker_lease_seconds
+    }
+
+    pub fn worker_lease_heartbeat_interval(&self) -> TokioDuration {
+        TokioDuration::from_secs((self.worker_lease_seconds.max(30) / 3).max(10) as u64)
     }
 
     pub fn telemetry_snapshot(&self) -> TelemetrySnapshot {
         self.telemetry.clone()
     }
 
-    pub async fn register_dispatch(&self) -> Result<(), String> {
+    pub async fn register_dispatch(&self) {
         let mut metrics = self.dispatch_metrics.write().await;
-        if self.dispatch_mode == ExecutionDispatchMode::Queue
-            && metrics.queued_count >= self.queue_capacity
-        {
-            metrics.total_failed_to_dispatch += 1;
-            return Err(format!(
-                "Execution queue is full (capacity: {})",
-                self.queue_capacity
-            ));
-        }
-
         metrics.total_enqueued += 1;
         metrics.last_enqueued_at = Some(Utc::now());
         if self.dispatch_mode == ExecutionDispatchMode::Queue {
             metrics.queued_count += 1;
         }
-        Ok(())
     }
 
     pub async fn mark_started(&self) {
@@ -216,14 +239,6 @@ impl OperationsRuntime {
         }
         metrics.total_finished += 1;
         metrics.last_finished_at = Some(Utc::now());
-    }
-
-    pub async fn acquire_worker_permit(&self) -> Option<OwnedSemaphorePermit> {
-        if self.dispatch_mode != ExecutionDispatchMode::Queue {
-            return None;
-        }
-
-        self.worker_semaphore.clone().acquire_owned().await.ok()
     }
 
     pub async fn dispatch_metrics_snapshot(&self) -> ExecutionDispatchMetricsSnapshot {
@@ -360,6 +375,13 @@ fn parse_u64_env(key: &str, default: u64) -> u64 {
         .unwrap_or(default)
 }
 
+fn parse_i64_env(key: &str, default: i64) -> i64 {
+    std::env::var(key)
+        .ok()
+        .and_then(|value| value.trim().parse::<i64>().ok())
+        .unwrap_or(default)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -367,13 +389,15 @@ mod tests {
     #[tokio::test]
     async fn queue_dispatch_rejects_when_capacity_is_exhausted() {
         std::env::set_var("BARQFLOW_EXECUTION_MODE", "queue");
-        std::env::set_var("BARQFLOW_EXECUTION_QUEUE_CAPACITY", "1");
         let runtime = OperationsRuntime::from_env();
 
-        assert!(runtime.register_dispatch().await.is_ok());
-        assert!(runtime.register_dispatch().await.is_err());
+        runtime.register_dispatch().await;
+        runtime.register_dispatch().await;
+
+        let metrics = runtime.dispatch_metrics_snapshot().await;
+        assert_eq!(metrics.total_enqueued, 2);
+        assert_eq!(metrics.queued_count, 2);
 
         std::env::remove_var("BARQFLOW_EXECUTION_MODE");
-        std::env::remove_var("BARQFLOW_EXECUTION_QUEUE_CAPACITY");
     }
 }

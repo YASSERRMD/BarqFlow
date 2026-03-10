@@ -4,6 +4,7 @@ use crate::contracts::{
     TagResponse, WorkflowExportResponse, WorkflowHistoryDiffResponse, WorkflowHistoryEntryResponse,
     WorkflowNodeChangeResponse, WorkflowResponse, WorkflowTemplateResponse,
 };
+use crate::controllers::executions::AppState as ExecutionControllerState;
 use crate::controllers::webhooks::WebhookRegistry;
 use crate::governance::{enforce_workflow_policy, record_governance_event};
 use crate::repositories::workflow::{
@@ -41,6 +42,7 @@ pub struct AppState {
     pub workspace_repo: Arc<WorkspaceRepository>,
     pub api_key_repo: Arc<ApiKeyRepository>,
     pub node_registry: Arc<NodeRegistry>,
+    pub execution_controller_state: ExecutionControllerState,
     pub webhook_registry: WebhookRegistry,
     pub job_scheduler: JobScheduler,
     pub active_cron_jobs: ActiveCronJobs,
@@ -224,9 +226,7 @@ async fn toggle_workflow_active(
     require_workspace_role(&auth, "member")?;
     let manager = ActiveWorkflowManager::new(
         Arc::clone(&state.workflow_repo),
-        Arc::clone(&state.credential_repo),
-        Arc::clone(&state.governance_repo),
-        Arc::clone(&state.node_registry),
+        state.execution_controller_state.clone(),
         Arc::clone(&state.webhook_registry),
         state.job_scheduler.clone(),
         Arc::clone(&state.active_cron_jobs),

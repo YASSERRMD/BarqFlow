@@ -1,12 +1,14 @@
 use crate::auth::{require_authenticated_user, require_workspace_role, AuthenticatedUser};
 use crate::contracts::{ExecutionLogResponse, ExecutionResponse};
+use crate::execution_dispatch::{enqueue_workflow_execution, QueuedExecutionPayload};
 use crate::execution_events::{
     extract_execution_events, merge_execution_events, with_execution_event_history,
     ExecutionEventHub,
 };
-use crate::operations::{maybe_run_execution_pruning, OperationsRuntime};
+use crate::operations::OperationsRuntime;
 use crate::repositories::{
     api_key::ApiKeyRepository, credential::CredentialRepository, execution::ExecutionRepository,
+    execution_dispatch::{ExecutionDispatchRepository, ExecutionQueueKind},
     execution_log::ExecutionLogRepository, governance::GovernanceRepository,
     workflow::WorkflowRepository, workspace::WorkspaceRepository,
 };
@@ -38,6 +40,7 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub struct AppState {
     pub execution_repo: Arc<ExecutionRepository>,
+    pub execution_dispatch_repo: Arc<ExecutionDispatchRepository>,
     pub execution_log_repo: Arc<ExecutionLogRepository>,
     pub workflow_repo: Arc<WorkflowRepository>,
     pub node_registry: Arc<barqflow_registry::registry::NodeRegistry>,
@@ -158,7 +161,7 @@ impl barqflow_exec::runner::ExecutionEventReporter for StateBackedExecutionEvent
     }
 }
 
-fn build_execution_event(
+pub(crate) fn build_execution_event(
     execution_id: Uuid,
     workflow_id: Uuid,
     run_id: RunId,
@@ -195,7 +198,7 @@ async fn load_execution_event_history(
     )
 }
 
-async fn append_execution_event(state: &AppState, event: ExecutionEvent) {
+pub(crate) async fn append_execution_event(state: &AppState, event: ExecutionEvent) {
     state.execution_events.append(event.clone()).await;
 
     if let Err(error) = state
@@ -220,7 +223,7 @@ async fn append_execution_event(state: &AppState, event: ExecutionEvent) {
     }
 }
 
-async fn persist_execution_with_events(
+pub(crate) async fn persist_execution_with_events(
     state: &AppState,
     execution_id: Uuid,
     status: &str,
@@ -969,16 +972,6 @@ async fn run_workflow_execution(
     manual: bool,
     stop_after_node_id: Option<String>,
 ) -> Result<ExecutionEntity, (StatusCode, String)> {
-    if let Err(error) = maybe_run_execution_pruning(
-        &state.operations_runtime,
-        &state.execution_repo,
-        &state.execution_log_repo,
-    )
-    .await
-    {
-        warn!(error = %error, "Execution pruning run failed");
-    }
-
     let wf_entity = state
         .workflow_repo
         .find_by_id_in_workspace(workspace_id, workflow_id)
@@ -1007,136 +1000,74 @@ async fn run_workflow_execution(
         }
     }
 
-    state
-        .operations_runtime
-        .register_dispatch()
-        .await
-        .map_err(|message| (StatusCode::SERVICE_UNAVAILABLE, message))?;
-
-    let connections: std::collections::HashMap<String, barqflow_core::schema::INodeConnections> =
-        serde_json::from_value(wf_entity.connections.clone()).unwrap_or_default();
-
-    let settings: barqflow_core::schema::IWorkflowSettings =
-        serde_json::from_value(wf_entity.settings.clone()).unwrap_or_default();
-
-    let core_wf = barqflow_core::schema::WorkflowDef {
-        id: barqflow_core::types::WorkflowId(wf_entity.id),
-        name: wf_entity.name.clone(),
-        nodes,
-        connections: connections.into_iter().collect(),
-        active: wf_entity.active,
-        settings,
-    };
-    let new_exec = state
-        .execution_repo
-        .create(workflow_id, "queued", serde_json::Value::Null)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    let run_id = RunId(new_exec.id);
-    append_execution_event(
+    enqueue_workflow_execution(
         state,
-        build_execution_event(
-            new_exec.id,
-            workflow_id,
-            run_id,
-            1,
-            ExecutionEventType::Queued,
-            ExecutionStatus::Queued,
-            "Execution queued",
-            None,
-            None,
-            serde_json::json!({
-                "manual": manual,
-                "workflowName": wf_entity.name.clone(),
-                "stopAfterNodeId": stop_after_node_id.clone(),
-            }),
-        ),
+        workspace_id,
+        &wf_entity,
+        if manual {
+            ExecutionQueueKind::Run
+        } else {
+            ExecutionQueueKind::Trigger
+        },
+        if manual { "manual" } else { "api" },
+        manual,
+        stop_after_node_id,
+        None,
     )
-    .await;
-    let new_exec = persist_execution_with_events(
-        state,
-        new_exec.id,
-        "queued",
-        serde_json::json!({
-            "queued": true,
-            "manual": manual,
-            "workflowName": wf_entity.name,
-            "stopAfterNodeId": stop_after_node_id.clone(),
-        }),
-    )
-    .await?;
-
-    let execution_id = new_exec.id;
-    let state_for_dispatch = state.clone();
-    tokio::spawn(async move {
-        let permit = state_for_dispatch
-            .operations_runtime
-            .acquire_worker_permit()
-            .await;
-        state_for_dispatch.operations_runtime.mark_started().await;
-
-        if let Err((status_code, message)) = start_dispatched_execution(
-            state_for_dispatch.clone(),
-            execution_id,
-            core_wf,
-            manual,
-            stop_after_node_id,
-            permit,
-        )
-        .await
-        {
-            let next_sequence = state_for_dispatch
-                .execution_events
-                .snapshot(execution_id)
-                .await
-                .last()
-                .map(|event| event.sequence + 1)
-                .unwrap_or(2);
-            append_execution_event(
-                &state_for_dispatch,
-                build_execution_event(
-                    execution_id,
-                    workflow_id,
-                    RunId(execution_id),
-                    next_sequence,
-                    ExecutionEventType::Failed,
-                    ExecutionStatus::Failed,
-                    format!("Execution failed before start: {}", message),
-                    None,
-                    None,
-                    serde_json::json!({
-                        "error": message,
-                        "statusCode": status_code.as_u16(),
-                    }),
-                ),
-            )
-            .await;
-
-            let _ = persist_execution_with_events(
-                &state_for_dispatch,
-                execution_id,
-                "failed",
-                serde_json::json!({
-                    "error": message,
-                    "statusCode": status_code.as_u16(),
-                }),
-            )
-            .await;
-
-            state_for_dispatch.operations_runtime.mark_finished().await;
-        }
-    });
-
-    Ok(new_exec)
+    .await
 }
 
-async fn start_dispatched_execution(
+pub(crate) async fn execute_queued_dispatch_item(
+    state: AppState,
+    queue_item: barqflow_db::models::ExecutionDispatchItemEntity,
+) -> Result<(), (StatusCode, String)> {
+    let payload: QueuedExecutionPayload = serde_json::from_value(queue_item.payload.clone())
+        .map_err(|error| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to parse queued execution payload: {error}"),
+            )
+        })?;
+
+    let nodes: Vec<barqflow_core::schema::INode> =
+        serde_json::from_value(payload.nodes.clone()).map_err(|error| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to parse queued workflow nodes: {error}"),
+            )
+        })?;
+    let connections: std::collections::HashMap<String, barqflow_core::schema::INodeConnections> =
+        serde_json::from_value(payload.connections.clone()).unwrap_or_default();
+    let settings: barqflow_core::schema::IWorkflowSettings =
+        serde_json::from_value(payload.settings.clone()).unwrap_or_default();
+
+    let workflow = barqflow_core::schema::WorkflowDef {
+        id: barqflow_core::types::WorkflowId(queue_item.workflow_id),
+        name: payload.workflow_name,
+        nodes,
+        connections: connections.into_iter().collect(),
+        active: payload.active,
+        settings,
+    };
+
+    run_claimed_execution(
+        state,
+        queue_item.execution_id,
+        workflow,
+        payload.manual,
+        payload.stop_after_node_id,
+        payload.static_data,
+    )
+    .await
+}
+
+async fn run_claimed_execution(
     state: AppState,
     execution_id: Uuid,
     workflow: barqflow_core::schema::WorkflowDef,
     manual: bool,
     stop_after_node_id: Option<String>,
-    worker_permit: Option<tokio::sync::OwnedSemaphorePermit>,
+    static_data: Option<serde_json::Value>,
 ) -> Result<(), (StatusCode, String)> {
     use barqflow_core::types::RunId;
     use barqflow_exec::runner::{ExecutionConfig, WorkflowRunContext, WorkflowRunner};
@@ -1182,7 +1113,7 @@ async fn start_dispatched_execution(
     let ctx = WorkflowRunContext {
         run_id,
         workflow: workflow.clone(),
-        static_data: None,
+        static_data: static_data.map(IDataObject::from),
         manual,
         execution_id: Some(execution_id),
         parent_execution_id: None,
@@ -1203,138 +1134,119 @@ async fn start_dispatched_execution(
         );
     }
 
-    let state_for_completion = state.clone();
-    tokio::spawn(async move {
-        let results = match run_task.await {
-            Ok(result) => result,
-            Err(join_err) if join_err.is_cancelled() => {
-                Err(barqflow_core::errors::BarqError::ExecutionCancelledError {
-                    execution_id: execution_id.to_string(),
-                })
-            }
-            Err(join_err) => Err(barqflow_core::errors::BarqError::InternalError(format!(
-                "Execution task join error: {}",
-                join_err
-            ))),
-        };
+    let results = match run_task.await {
+        Ok(result) => result,
+        Err(join_err) if join_err.is_cancelled() => {
+            Err(barqflow_core::errors::BarqError::ExecutionCancelledError {
+                execution_id: execution_id.to_string(),
+            })
+        }
+        Err(join_err) => Err(barqflow_core::errors::BarqError::InternalError(format!(
+            "Execution task join error: {}",
+            join_err
+        ))),
+    };
 
-        let (status, data, event_type, event_status, message, node_name_for_event) = match results {
-            Ok(res) => {
-                let (status, data) = summarize_node_results(res);
-                if status.eq_ignore_ascii_case("success") {
-                    (
-                        status,
-                        data,
-                        ExecutionEventType::Completed,
-                        ExecutionStatus::Success,
-                        "Execution completed successfully".to_string(),
-                        None,
-                    )
-                } else {
-                    (
-                        status,
-                        data,
-                        ExecutionEventType::Failed,
-                        ExecutionStatus::Failed,
-                        "Execution completed with node failures".to_string(),
-                        None,
-                    )
-                }
-            }
-            Err(barqflow_core::errors::BarqError::SuspendExecution {
-                node_name,
-                wait_config,
-            }) => match build_waiting_execution_data(
-                &state_for_completion,
-                execution_id,
-                node_name.as_str(),
-                wait_config,
-            )
-            .await
-            {
-                Ok(waiting_data) => (
-                    "waiting".to_string(),
-                    waiting_data,
-                    ExecutionEventType::Waiting,
-                    ExecutionStatus::Waiting,
-                    format!("Execution waiting at '{}'", node_name),
-                    Some(node_name),
-                ),
-                Err((code, message)) => (
-                    "failed".to_string(),
-                    serde_json::json!({
-                        "error": format!(
-                            "Failed to persist wait state ({}): {}",
-                            code.as_u16(),
-                            message
-                        )
-                    }),
+    let (status, data, event_type, event_status, message, node_name_for_event) = match results {
+        Ok(res) => {
+            let (status, data) = summarize_node_results(res);
+            if status.eq_ignore_ascii_case("success") {
+                (
+                    status,
+                    data,
+                    ExecutionEventType::Completed,
+                    ExecutionStatus::Success,
+                    "Execution completed successfully".to_string(),
+                    None,
+                )
+            } else {
+                (
+                    status,
+                    data,
                     ExecutionEventType::Failed,
                     ExecutionStatus::Failed,
-                    format!("Execution failed while persisting wait state: {}", message),
+                    "Execution completed with node failures".to_string(),
                     None,
-                ),
-            },
-            Err(barqflow_core::errors::BarqError::ExecutionCancelledError { .. }) => (
-                "stopped".to_string(),
-                serde_json::json!({
-                    "stopped": true,
-                    "reason": "Execution cancelled",
-                }),
-                ExecutionEventType::Stopped,
-                ExecutionStatus::Stopped,
-                "Execution cancelled".to_string(),
-                None,
+                )
+            }
+        }
+        Err(barqflow_core::errors::BarqError::SuspendExecution {
+            node_name,
+            wait_config,
+        }) => match build_waiting_execution_data(&state, execution_id, node_name.as_str(), wait_config)
+            .await
+        {
+            Ok(waiting_data) => (
+                "waiting".to_string(),
+                waiting_data,
+                ExecutionEventType::Waiting,
+                ExecutionStatus::Waiting,
+                format!("Execution waiting at '{}'", node_name),
+                Some(node_name),
             ),
-            Err(e) => (
+            Err((code, message)) => (
                 "failed".to_string(),
-                serde_json::json!({"error": e.to_string()}),
+                serde_json::json!({
+                    "error": format!(
+                        "Failed to persist wait state ({}): {}",
+                        code.as_u16(),
+                        message
+                    )
+                }),
                 ExecutionEventType::Failed,
                 ExecutionStatus::Failed,
-                format!("Execution failed: {}", e),
+                format!("Execution failed while persisting wait state: {}", message),
                 None,
             ),
-        };
-        let next_sequence = state_for_completion
-            .execution_events
-            .snapshot(execution_id)
-            .await
-            .last()
-            .map(|event| event.sequence + 1)
-            .unwrap_or(2);
-        append_execution_event(
-            &state_for_completion,
-            build_execution_event(
-                execution_id,
-                workflow.id.0,
-                run_id,
-                next_sequence,
-                event_type,
-                event_status,
-                message,
-                None,
-                node_name_for_event,
-                data.clone(),
-            ),
-        )
-        .await;
-
-        let _ = persist_execution_with_events(
-            &state_for_completion,
+        },
+        Err(barqflow_core::errors::BarqError::ExecutionCancelledError { .. }) => (
+            "stopped".to_string(),
+            serde_json::json!({
+                "stopped": true,
+                "reason": "Execution cancelled",
+            }),
+            ExecutionEventType::Stopped,
+            ExecutionStatus::Stopped,
+            "Execution cancelled".to_string(),
+            None,
+        ),
+        Err(e) => (
+            "failed".to_string(),
+            serde_json::json!({"error": e.to_string()}),
+            ExecutionEventType::Failed,
+            ExecutionStatus::Failed,
+            format!("Execution failed: {}", e),
+            None,
+        ),
+    };
+    let next_sequence = state
+        .execution_events
+        .snapshot(execution_id)
+        .await
+        .last()
+        .map(|event| event.sequence + 1)
+        .unwrap_or(2);
+    append_execution_event(
+        &state,
+        build_execution_event(
             execution_id,
-            status.as_str(),
-            data,
-        )
-        .await;
+            workflow.id.0,
+            run_id,
+            next_sequence,
+            event_type,
+            event_status,
+            message,
+            None,
+            node_name_for_event,
+            data.clone(),
+        ),
+    )
+    .await;
 
-        let mut active = state_for_completion.active_executions.write().await;
-        active.remove(&execution_id);
-        state_for_completion
-            .operations_runtime
-            .mark_finished()
-            .await;
-        drop(worker_permit);
-    });
+    let _ = persist_execution_with_events(&state, execution_id, status.as_str(), data).await;
+
+    let mut active = state.active_executions.write().await;
+    active.remove(&execution_id);
 
     Ok(())
 }

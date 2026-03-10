@@ -309,6 +309,8 @@ export interface RuntimeSettings {
   encryptionKeyConfigured: boolean
   executionMode: string
   workerConcurrency: number
+  runWorkerConcurrency: number
+  triggerWorkerConcurrency: number
   queueCapacity: number
   pruningEnabled: boolean
   executionRetentionDays: number
@@ -319,8 +321,12 @@ export interface RuntimeSettings {
 export interface ExecutionDispatchMetrics {
   mode: string
   workerConcurrency: number
+  runWorkerConcurrency: number
+  triggerWorkerConcurrency: number
   queueCapacity: number
   queuedCount: number
+  runQueuedCount: number
+  triggerQueuedCount: number
   runningCount: number
   totalEnqueued: number
   totalStarted: number

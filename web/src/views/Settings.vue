@@ -634,7 +634,7 @@ onMounted(refreshSurface)
                     {{ operations?.dispatch.mode || runtime?.executionMode || '-' }}
                   </p>
                   <p class="mt-1 text-xs text-slate-500">
-                    {{ operations?.dispatch.runningCount ?? 0 }} running, {{ operations?.dispatch.queuedCount ?? 0 }} queued, {{ runtime?.workerConcurrency || 0 }} workers
+                    {{ operations?.dispatch.runningCount ?? 0 }} running, {{ operations?.dispatch.queuedCount ?? 0 }} open, {{ runtime?.runWorkerConcurrency || operations?.dispatch.runWorkerConcurrency || 0 }} run / {{ runtime?.triggerWorkerConcurrency || operations?.dispatch.triggerWorkerConcurrency || 0 }} trigger workers
                   </p>
                 </div>
                 <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
@@ -646,7 +646,7 @@ onMounted(refreshSurface)
                     {{ operations?.dispatch.queueCapacity ?? runtime?.queueCapacity ?? 0 }}
                   </p>
                   <p class="mt-1 text-xs text-slate-500">
-                    {{ operations?.dispatch.totalEnqueued ?? 0 }} enqueued since start
+                    {{ operations?.dispatch.runQueuedCount ?? 0 }} run-lane, {{ operations?.dispatch.triggerQueuedCount ?? 0 }} trigger-lane items
                   </p>
                 </div>
                 <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">

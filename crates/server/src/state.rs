@@ -4,7 +4,7 @@ use barqflow_api::execution_events::ExecutionEventHub;
 use barqflow_api::operations::OperationsRuntime;
 use barqflow_api::repositories::{
     api_key::ApiKeyRepository, credential::CredentialRepository, execution::ExecutionRepository,
-    execution_log::ExecutionLogRepository, governance::GovernanceRepository,
+    execution_dispatch::ExecutionDispatchRepository, execution_log::ExecutionLogRepository, governance::GovernanceRepository,
     static_data::StaticDataRepository, workflow::WorkflowRepository,
     workspace::WorkspaceRepository,
 };
@@ -22,6 +22,7 @@ pub struct AppState {
     pub db_pool: PgPool,
     pub workflow_repo: Arc<WorkflowRepository>,
     pub execution_repo: Arc<ExecutionRepository>,
+    pub execution_dispatch_repo: Arc<ExecutionDispatchRepository>,
     pub execution_log_repo: Arc<ExecutionLogRepository>,
     pub credential_repo: Arc<CredentialRepository>,
     pub governance_repo: Arc<GovernanceRepository>,
@@ -60,6 +61,7 @@ impl AppState {
             db_pool: pool.clone(),
             workflow_repo: Arc::new(WorkflowRepository::new(pool.clone())),
             execution_repo: Arc::new(ExecutionRepository::new(pool.clone())),
+            execution_dispatch_repo: Arc::new(ExecutionDispatchRepository::new(pool.clone())),
             execution_log_repo: Arc::new(ExecutionLogRepository::new(pool.clone())),
             credential_repo: Arc::new(CredentialRepository::new(pool.clone())),
             governance_repo: Arc::new(GovernanceRepository::new(pool.clone())),
@@ -84,6 +86,7 @@ impl AppState {
             credential_repo: Arc::clone(&self.credential_repo),
             governance_repo: Arc::clone(&self.governance_repo),
             exec_repo: Arc::clone(&self.execution_repo),
+            execution_dispatch_repo: Arc::clone(&self.execution_dispatch_repo),
             execution_log_repo: Arc::clone(&self.execution_log_repo),
             user_repo: Arc::clone(&self.user_repo),
             workspace_repo: Arc::clone(&self.workspace_repo),
