@@ -1,6 +1,5 @@
 use barqflow_core::errors::BarqError;
 use barqflow_core::schema::{INodeExecutionData, WorkflowDef};
-use barqflow_core::traits::INodeType;
 use barqflow_core::types::IDataObject;
 use barqflow_registry::registry::NodeRegistry;
 use std::collections::HashMap;
@@ -11,11 +10,6 @@ use tracing::{debug, error, info};
 
 use crate::context::PollExecutionContext;
 use crate::deduplication::{DeduplicationManager, DeduplicationMode};
-
-pub struct ActivePoller {
-    workflow_id: String,
-    node_id: String,
-}
 
 pub struct PollingEngine {
     registry: Arc<NodeRegistry>,

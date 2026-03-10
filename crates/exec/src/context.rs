@@ -31,7 +31,7 @@ pub struct NodeExecutionContext {
     /// Input data connections (mapped by input index)
     input_data: Arc<RwLock<ITaskDataConnections>>,
     /// Static data from workflow for expression evaluation
-    static_data: Option<IDataObject>,
+    _static_data: Option<IDataObject>,
     /// Run ID for tracing
     run_id: uuid::Uuid,
     /// Execution output cache from previous nodes
@@ -85,7 +85,7 @@ impl NodeExecutionContext {
         Self {
             node,
             input_data: Arc::new(RwLock::new(input_data)),
-            static_data,
+            _static_data: static_data,
             run_id,
             workflow_cache,
             credential_provider,

@@ -19,14 +19,14 @@ use tokio_cron_scheduler::JobScheduler;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub db_pool: PgPool,
+    pub _db_pool: PgPool,
     pub workflow_repo: Arc<WorkflowRepository>,
     pub execution_repo: Arc<ExecutionRepository>,
     pub execution_dispatch_repo: Arc<ExecutionDispatchRepository>,
     pub execution_log_repo: Arc<ExecutionLogRepository>,
     pub credential_repo: Arc<CredentialRepository>,
     pub governance_repo: Arc<GovernanceRepository>,
-    pub static_data_repo: Arc<StaticDataRepository>,
+    pub _static_data_repo: Arc<StaticDataRepository>,
     pub user_repo: Arc<UserRepo>,
     pub workspace_repo: Arc<WorkspaceRepository>,
     pub api_key_repo: Arc<ApiKeyRepository>,
@@ -58,14 +58,14 @@ impl AppState {
         let operations_runtime = OperationsRuntime::from_env();
 
         Ok(Self {
-            db_pool: pool.clone(),
+            _db_pool: pool.clone(),
             workflow_repo: Arc::new(WorkflowRepository::new(pool.clone())),
             execution_repo: Arc::new(ExecutionRepository::new(pool.clone())),
             execution_dispatch_repo: Arc::new(ExecutionDispatchRepository::new(pool.clone())),
             execution_log_repo: Arc::new(ExecutionLogRepository::new(pool.clone())),
             credential_repo: Arc::new(CredentialRepository::new(pool.clone())),
             governance_repo: Arc::new(GovernanceRepository::new(pool.clone())),
-            static_data_repo: Arc::new(StaticDataRepository::new(pool.clone())),
+            _static_data_repo: Arc::new(StaticDataRepository::new(pool.clone())),
             user_repo: Arc::new(UserRepo::new(pool.clone())),
             workspace_repo: Arc::new(WorkspaceRepository::new(pool.clone())),
             api_key_repo: Arc::new(ApiKeyRepository::new(pool)),
