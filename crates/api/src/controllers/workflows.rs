@@ -1,22 +1,26 @@
 use crate::active_workflows::{ActiveCronJobs, ActiveWorkflowManager};
-use crate::auth::Claims;
+use crate::auth::{require_authenticated_user, require_workspace_role, AuthenticatedUser};
 use crate::contracts::{
-    TagResponse, WorkflowExportResponse, WorkflowHistoryDiffResponse,
-    WorkflowHistoryEntryResponse, WorkflowNodeChangeResponse, WorkflowResponse,
-    WorkflowTemplateResponse,
+    TagResponse, WorkflowExportResponse, WorkflowHistoryDiffResponse, WorkflowHistoryEntryResponse,
+    WorkflowNodeChangeResponse, WorkflowResponse, WorkflowTemplateResponse,
 };
 use crate::controllers::webhooks::WebhookRegistry;
-use crate::repositories::credential::CredentialRepository;
 use crate::repositories::workflow::{
     SortDirection, WorkflowListFilters, WorkflowRepository, WorkflowSortBy, WorkflowUpsert,
 };
-use crate::workflow_templates::{find_workflow_template, list_workflow_templates, WorkflowTemplateDefinition};
-use axum::http::StatusCode;
+use crate::repositories::{
+    api_key::ApiKeyRepository, credential::CredentialRepository, workspace::WorkspaceRepository,
+};
+use crate::workflow_templates::{
+    find_workflow_template, list_workflow_templates, WorkflowTemplateDefinition,
+};
+use axum::http::{HeaderMap, StatusCode};
 use axum::{
     extract::{Json, Path, Query, State},
     routing::{delete, get, post, put},
     Router,
 };
+use barqflow_db::users::UserRepo;
 use barqflow_registry::registry::NodeRegistry;
 use chrono::Utc;
 use serde::Deserialize;
@@ -30,6 +34,9 @@ use uuid::Uuid;
 pub struct AppState {
     pub workflow_repo: Arc<WorkflowRepository>,
     pub credential_repo: Arc<CredentialRepository>,
+    pub user_repo: Arc<UserRepo>,
+    pub workspace_repo: Arc<WorkspaceRepository>,
+    pub api_key_repo: Arc<ApiKeyRepository>,
     pub node_registry: Arc<NodeRegistry>,
     pub webhook_registry: WebhookRegistry,
     pub job_scheduler: JobScheduler,
@@ -42,7 +49,10 @@ pub fn workflow_routes(state: AppState) -> Router {
         .route("/workflows/import", post(import_workflow))
         .route("/workflows/{id}/export", get(export_workflow))
         .route("/workflows/{id}/history", get(get_workflow_history))
-        .route("/workflows/{id}/history/diff", get(get_workflow_history_diff))
+        .route(
+            "/workflows/{id}/history/diff",
+            get(get_workflow_history_diff),
+        )
         .route(
             "/workflows/{id}",
             get(get_workflow)
@@ -121,20 +131,24 @@ pub struct CreateTagRequest {
 }
 
 async fn get_workflows(
-    _claims: Claims,
+    headers: HeaderMap,
     State(state): State<AppState>,
     Query(query): Query<WorkflowListQuery>,
 ) -> Result<Json<Vec<WorkflowResponse>>, (StatusCode, String)> {
+    let auth = require_workflow_auth(&headers, &state).await?;
     let workflows = state
         .workflow_repo
-        .find_documents(WorkflowListFilters {
-            active: query.active,
-            search: query.search,
-            tags: parse_tags_csv(query.tags.as_deref()),
-            limit: query.limit,
-            sort_by: parse_sort_by(query.sort_by.as_deref()),
-            sort_direction: parse_sort_direction(query.sort_direction.as_deref()),
-        })
+        .find_documents_for_workspace(
+            auth.workspace_id,
+            WorkflowListFilters {
+                active: query.active,
+                search: query.search,
+                tags: parse_tags_csv(query.tags.as_deref()),
+                limit: query.limit,
+                sort_by: parse_sort_by(query.sort_by.as_deref()),
+                sort_direction: parse_sort_direction(query.sort_direction.as_deref()),
+            },
+        )
         .await
         .map_err(internal_error)?;
 
@@ -144,13 +158,14 @@ async fn get_workflows(
 }
 
 async fn get_workflow(
-    _claims: Claims,
+    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<WorkflowResponse>, (StatusCode, String)> {
+    let auth = require_workflow_auth(&headers, &state).await?;
     let workflow = state
         .workflow_repo
-        .find_document_by_id(id)
+        .find_document_by_id_in_workspace(auth.workspace_id, id)
         .await
         .map_err(internal_error)?
         .ok_or_else(|| not_found("Workflow not found"))?;
@@ -159,13 +174,20 @@ async fn get_workflow(
 }
 
 async fn create_workflow(
-    _claims: Claims,
+    headers: HeaderMap,
     State(state): State<AppState>,
     Json(payload): Json<WorkflowUpsertRequest>,
 ) -> Result<Json<WorkflowResponse>, (StatusCode, String)> {
+    let auth = require_workflow_auth(&headers, &state).await?;
+    require_workspace_role(&auth, "member")?;
     let workflow = state
         .workflow_repo
-        .create_document(to_workflow_upsert(payload)?, "create")
+        .create_document_in_workspace(
+            auth.workspace_id,
+            Some(auth.id),
+            to_workflow_upsert(payload)?,
+            "create",
+        )
         .await
         .map_err(internal_error)?;
 
@@ -173,14 +195,21 @@ async fn create_workflow(
 }
 
 async fn update_workflow(
-    _claims: Claims,
+    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
     Json(payload): Json<WorkflowUpsertRequest>,
 ) -> Result<Json<WorkflowResponse>, (StatusCode, String)> {
+    let auth = require_workflow_auth(&headers, &state).await?;
+    require_workspace_role(&auth, "member")?;
     let updated = state
         .workflow_repo
-        .update_document(id, to_workflow_upsert(payload)?, "update")
+        .update_document_in_workspace(
+            auth.workspace_id,
+            id,
+            to_workflow_upsert(payload)?,
+            "update",
+        )
         .await
         .map_err(internal_error)?
         .ok_or_else(|| not_found("Workflow not found"))?;
@@ -189,11 +218,13 @@ async fn update_workflow(
 }
 
 async fn toggle_workflow_active(
-    _claims: Claims,
+    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
     Json(payload): Json<ToggleActiveRequest>,
 ) -> Result<Json<WorkflowResponse>, (StatusCode, String)> {
+    let auth = require_workflow_auth(&headers, &state).await?;
+    require_workspace_role(&auth, "member")?;
     let manager = ActiveWorkflowManager::new(
         Arc::clone(&state.workflow_repo),
         Arc::clone(&state.credential_repo),
@@ -217,14 +248,28 @@ async fn toggle_workflow_active(
 
     state
         .workflow_repo
-        .record_snapshot_by_workflow_id(id, if payload.active { "activate" } else { "deactivate" })
+        .find_by_id_in_workspace(auth.workspace_id, id)
+        .await
+        .map_err(internal_error)?
+        .ok_or_else(|| not_found("Workflow not found"))?;
+
+    state
+        .workflow_repo
+        .record_snapshot_by_workflow_id(
+            id,
+            if payload.active {
+                "activate"
+            } else {
+                "deactivate"
+            },
+        )
         .await
         .map_err(internal_error)?
         .ok_or_else(|| not_found("Workflow not found"))?;
 
     let workflow = state
         .workflow_repo
-        .find_document_by_id(id)
+        .find_document_by_id_in_workspace(auth.workspace_id, id)
         .await
         .map_err(internal_error)?
         .ok_or_else(|| not_found("Workflow not found"))?;
@@ -233,13 +278,15 @@ async fn toggle_workflow_active(
 }
 
 async fn delete_workflow(
-    _claims: Claims,
+    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, (StatusCode, String)> {
+    let auth = require_workflow_auth(&headers, &state).await?;
+    require_workspace_role(&auth, "member")?;
     let deleted = state
         .workflow_repo
-        .delete(id)
+        .delete_in_workspace(auth.workspace_id, id)
         .await
         .map_err(internal_error)?;
 
@@ -251,20 +298,24 @@ async fn delete_workflow(
 }
 
 async fn duplicate_workflow(
-    _claims: Claims,
+    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<WorkflowResponse>, (StatusCode, String)> {
+    let auth = require_workflow_auth(&headers, &state).await?;
+    require_workspace_role(&auth, "member")?;
     let workflow = state
         .workflow_repo
-        .find_document_by_id(id)
+        .find_document_by_id_in_workspace(auth.workspace_id, id)
         .await
         .map_err(internal_error)?
         .ok_or_else(|| not_found("Workflow not found"))?;
 
     let duplicated = state
         .workflow_repo
-        .create_document(
+        .create_document_in_workspace(
+            auth.workspace_id,
+            Some(auth.id),
             WorkflowUpsert {
                 name: format!("{} (copy)", workflow.workflow.name),
                 nodes: workflow.workflow.nodes.clone(),
@@ -281,10 +332,12 @@ async fn duplicate_workflow(
 }
 
 async fn import_workflow(
-    _claims: Claims,
+    headers: HeaderMap,
     State(state): State<AppState>,
     Json(payload): Json<ImportWorkflowRequest>,
 ) -> Result<Json<WorkflowResponse>, (StatusCode, String)> {
+    let auth = require_workflow_auth(&headers, &state).await?;
+    require_workspace_role(&auth, "member")?;
     let name = payload
         .name_override
         .unwrap_or(payload.workflow.name)
@@ -297,7 +350,9 @@ async fn import_workflow(
 
     let imported = state
         .workflow_repo
-        .create_document(
+        .create_document_in_workspace(
+            auth.workspace_id,
+            Some(auth.id),
             WorkflowUpsert {
                 name,
                 nodes: payload.workflow.nodes,
@@ -314,13 +369,14 @@ async fn import_workflow(
 }
 
 async fn export_workflow(
-    _claims: Claims,
+    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<WorkflowExportResponse>, (StatusCode, String)> {
+    let auth = require_workflow_auth(&headers, &state).await?;
     let workflow = state
         .workflow_repo
-        .find_document_by_id(id)
+        .find_document_by_id_in_workspace(auth.workspace_id, id)
         .await
         .map_err(internal_error)?
         .ok_or_else(|| not_found("Workflow not found"))?;
@@ -333,13 +389,14 @@ async fn export_workflow(
 }
 
 async fn get_workflow_history(
-    _claims: Claims,
+    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Vec<WorkflowHistoryEntryResponse>>, (StatusCode, String)> {
+    let auth = require_workflow_auth(&headers, &state).await?;
     state
         .workflow_repo
-        .find_by_id(id)
+        .find_by_id_in_workspace(auth.workspace_id, id)
         .await
         .map_err(internal_error)?
         .ok_or_else(|| not_found("Workflow not found"))?;
@@ -359,17 +416,25 @@ async fn get_workflow_history(
 }
 
 async fn get_workflow_history_diff(
-    _claims: Claims,
+    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
     Query(query): Query<WorkflowHistoryDiffQuery>,
 ) -> Result<Json<WorkflowHistoryDiffResponse>, (StatusCode, String)> {
+    let auth = require_workflow_auth(&headers, &state).await?;
     if query.from_version == query.to_version {
         return Err((
             StatusCode::BAD_REQUEST,
             "Choose two different workflow versions to diff".into(),
         ));
     }
+
+    state
+        .workflow_repo
+        .find_by_id_in_workspace(auth.workspace_id, id)
+        .await
+        .map_err(internal_error)?
+        .ok_or_else(|| not_found("Workflow not found"))?;
 
     let from_entry = state
         .workflow_repo
@@ -389,9 +454,16 @@ async fn get_workflow_history_diff(
 }
 
 async fn get_workflow_templates(
-    _claims: Claims,
-    _state: State<AppState>,
+    headers: HeaderMap,
+    State(state): State<AppState>,
 ) -> Result<Json<Vec<WorkflowTemplateResponse>>, (StatusCode, String)> {
+    let _auth = require_authenticated_user(
+        &headers,
+        Arc::clone(&state.user_repo),
+        Arc::clone(&state.workspace_repo),
+        Arc::clone(&state.api_key_repo),
+    )
+    .await?;
     Ok(Json(
         list_workflow_templates()
             .into_iter()
@@ -401,12 +473,15 @@ async fn get_workflow_templates(
 }
 
 async fn instantiate_workflow_template(
-    _claims: Claims,
+    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<String>,
     Json(payload): Json<WorkflowTemplateInstantiateRequest>,
 ) -> Result<Json<WorkflowResponse>, (StatusCode, String)> {
-    let template = find_workflow_template(&id).ok_or_else(|| not_found("Workflow template not found"))?;
+    let auth = require_workflow_auth(&headers, &state).await?;
+    require_workspace_role(&auth, "member")?;
+    let template =
+        find_workflow_template(&id).ok_or_else(|| not_found("Workflow template not found"))?;
     let tag_names = template.tag_names();
     let workflow_name = payload
         .name
@@ -418,7 +493,9 @@ async fn instantiate_workflow_template(
     }
     let workflow = state
         .workflow_repo
-        .create_document(
+        .create_document_in_workspace(
+            auth.workspace_id,
+            Some(auth.id),
             WorkflowUpsert {
                 name: workflow_name,
                 nodes: template.nodes,
@@ -435,18 +512,25 @@ async fn instantiate_workflow_template(
 }
 
 async fn get_tags(
-    _claims: Claims,
+    headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<TagResponse>>, (StatusCode, String)> {
-    let tags = state.workflow_repo.list_tags().await.map_err(internal_error)?;
+    let auth = require_workflow_auth(&headers, &state).await?;
+    let tags = state
+        .workflow_repo
+        .list_tags_in_workspace(auth.workspace_id)
+        .await
+        .map_err(internal_error)?;
     Ok(Json(tags.into_iter().map(TagResponse::from).collect()))
 }
 
 async fn create_tag(
-    _claims: Claims,
+    headers: HeaderMap,
     State(state): State<AppState>,
     Json(payload): Json<CreateTagRequest>,
 ) -> Result<Json<TagResponse>, (StatusCode, String)> {
+    let auth = require_workflow_auth(&headers, &state).await?;
+    require_workspace_role(&auth, "member")?;
     let name = payload.name.trim();
     if name.is_empty() {
         return Err((StatusCode::BAD_REQUEST, "Tag name is required".into()));
@@ -454,7 +538,7 @@ async fn create_tag(
 
     let tag = state
         .workflow_repo
-        .create_tag(name)
+        .create_tag_in_workspace(auth.workspace_id, name)
         .await
         .map_err(internal_error)?;
 
@@ -462,13 +546,15 @@ async fn create_tag(
 }
 
 async fn delete_tag(
-    _claims: Claims,
+    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, (StatusCode, String)> {
+    let auth = require_workflow_auth(&headers, &state).await?;
+    require_workspace_role(&auth, "member")?;
     let deleted = state
         .workflow_repo
-        .delete_tag(id)
+        .delete_tag_in_workspace(auth.workspace_id, id)
         .await
         .map_err(internal_error)?;
 
@@ -479,7 +565,9 @@ async fn delete_tag(
     }
 }
 
-fn to_workflow_upsert(payload: WorkflowUpsertRequest) -> Result<WorkflowUpsert, (StatusCode, String)> {
+fn to_workflow_upsert(
+    payload: WorkflowUpsertRequest,
+) -> Result<WorkflowUpsert, (StatusCode, String)> {
     let name = payload.name.trim().to_string();
     if name.is_empty() {
         return Err((StatusCode::BAD_REQUEST, "Workflow name is required".into()));
@@ -525,6 +613,19 @@ fn parse_sort_direction(raw: Option<&str>) -> SortDirection {
     }
 }
 
+async fn require_workflow_auth(
+    headers: &HeaderMap,
+    state: &AppState,
+) -> Result<AuthenticatedUser, (StatusCode, String)> {
+    require_authenticated_user(
+        headers,
+        Arc::clone(&state.user_repo),
+        Arc::clone(&state.workspace_repo),
+        Arc::clone(&state.api_key_repo),
+    )
+    .await
+}
+
 fn to_workflow_template_response(template: WorkflowTemplateDefinition) -> WorkflowTemplateResponse {
     WorkflowTemplateResponse {
         id: template.id.to_string(),
@@ -541,7 +642,9 @@ fn to_workflow_template_response(template: WorkflowTemplateDefinition) -> Workfl
     }
 }
 
-fn summarize_template(template: &WorkflowTemplateDefinition) -> crate::repositories::workflow::WorkflowSummaryEntity {
+fn summarize_template(
+    template: &WorkflowTemplateDefinition,
+) -> crate::repositories::workflow::WorkflowSummaryEntity {
     let nodes = template.nodes.as_array().cloned().unwrap_or_default();
     let mut trigger_count = 0;
     let mut credential_binding_count = 0;
@@ -619,8 +722,14 @@ fn build_history_diff(
     let from_connections = flatten_connections(&from_entry.snapshot.connections);
     let to_connections = flatten_connections(&to_entry.snapshot.connections);
 
-    let connections_added = to_connections.difference(&from_connections).cloned().collect();
-    let connections_removed = from_connections.difference(&to_connections).cloned().collect();
+    let connections_added = to_connections
+        .difference(&from_connections)
+        .cloned()
+        .collect();
+    let connections_removed = from_connections
+        .difference(&to_connections)
+        .cloned()
+        .collect();
 
     WorkflowHistoryDiffResponse {
         workflow_id,
@@ -715,11 +824,11 @@ fn flatten_connections(connections: &Value) -> BTreeSet<String> {
                     .get("node")
                     .and_then(Value::as_str)
                     .unwrap_or("unknown");
-                let index = target.get("index").and_then(Value::as_i64).unwrap_or_default();
-                let connection_type = target
-                    .get("type")
-                    .and_then(Value::as_str)
-                    .unwrap_or("main");
+                let index = target
+                    .get("index")
+                    .and_then(Value::as_i64)
+                    .unwrap_or_default();
+                let connection_type = target.get("type").and_then(Value::as_str).unwrap_or("main");
                 flattened.insert(format!(
                     "{source_name} -> {target_name} [{connection_type}:{index}]"
                 ));
@@ -841,7 +950,10 @@ mod tests {
         assert_eq!(diff.nodes_added, vec!["Notify Slack".to_string()]);
         assert!(diff.settings_changed.contains(&"timezone".to_string()));
         assert_eq!(diff.nodes_changed.len(), 1);
-        assert!(diff.connections_added.iter().any(|entry| entry.contains("Notify Slack")));
+        assert!(diff
+            .connections_added
+            .iter()
+            .any(|entry| entry.contains("Notify Slack")));
     }
 
     #[test]

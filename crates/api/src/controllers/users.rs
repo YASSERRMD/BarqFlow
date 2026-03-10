@@ -1,5 +1,7 @@
 use crate::auth::{generate_jwt, hash_password, verify_password, Claims};
-use crate::contracts::{AuthResponse, AuthUserResponse, UserProfileResponse};
+use crate::contracts::{AuthResponse, UserProfileResponse};
+use crate::controllers::identity::{auth_user_response, build_user_profile_response};
+use crate::repositories::{api_key::ApiKeyRepository, workspace::WorkspaceRepository};
 use axum::{
     extract::{Json, State},
     http::StatusCode,
@@ -13,6 +15,8 @@ use sqlx::Error as SqlxError;
 #[derive(Clone)]
 pub struct AppState {
     pub user_repo: std::sync::Arc<UserRepo>,
+    pub workspace_repo: std::sync::Arc<WorkspaceRepository>,
+    pub api_key_repo: std::sync::Arc<ApiKeyRepository>,
 }
 
 pub fn user_routes(state: AppState) -> Router {
@@ -44,6 +48,8 @@ async fn register_user(
     State(state): State<AppState>,
     Json(payload): Json<RegisterRequest>,
 ) -> Result<Json<AuthResponse>, (StatusCode, String)> {
+    let first_name = payload.first_name.clone();
+    let last_name = payload.last_name.clone();
     let hashed_pw = hash_password(&payload.password)
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Hashing failed".into()))?;
 
@@ -52,24 +58,49 @@ async fn register_user(
         .create(
             &payload.email,
             &hashed_pw,
-            payload.first_name,
-            payload.last_name,
+            first_name.clone(),
+            last_name,
             "user", // default role
         )
         .await
         .map_err(map_register_error)?;
 
+    let default_workspace_name = payload
+        .first_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| format!("{} Workspace", value))
+        .unwrap_or_else(|| {
+            let seed = payload
+                .email
+                .split('@')
+                .next()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or("Workspace");
+            format!("{} Workspace", seed)
+        });
+
+    state
+        .workspace_repo
+        .create_workspace(&default_workspace_name, new_user.id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
     let token = generate_jwt(&new_user.id.to_string(), &new_user.global_role)
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "JWT logic failed".into()))?;
+
+    let profile = build_user_profile_response(
+        state.user_repo.as_ref(),
+        state.workspace_repo.as_ref(),
+        new_user.id,
+    )
+    .await?;
 
     Ok(Json(AuthResponse {
         token,
         user_id: new_user.id.to_string(),
-        user: AuthUserResponse {
-            id: new_user.id.to_string(),
-            email: new_user.email,
-            role: new_user.global_role,
-        },
+        user: auth_user_response(profile),
     }))
 }
 
@@ -110,14 +141,17 @@ async fn login_user(
         )
     })?;
 
+    let profile = build_user_profile_response(
+        state.user_repo.as_ref(),
+        state.workspace_repo.as_ref(),
+        user.id,
+    )
+    .await?;
+
     Ok(Json(AuthResponse {
         token,
         user_id: user.id.to_string(),
-        user: AuthUserResponse {
-            id: user.id.to_string(),
-            email: user.email,
-            role: user.global_role,
-        },
+        user: auth_user_response(profile),
     }))
 }
 
@@ -127,19 +161,13 @@ async fn get_profile(
 ) -> Result<Json<UserProfileResponse>, (StatusCode, String)> {
     let user_uuid = uuid::Uuid::parse_str(&claims.sub)
         .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid UUID in token".into()))?;
-
-    let user = state
-        .user_repo
-        .get_by_id(user_uuid)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "User not found".into()))?;
-
-    Ok(Json(UserProfileResponse {
-        id: user.id.to_string(),
-        email: user.email,
-        role: user.global_role,
-    }))
+    let profile = build_user_profile_response(
+        state.user_repo.as_ref(),
+        state.workspace_repo.as_ref(),
+        user_uuid,
+    )
+    .await?;
+    Ok(Json(profile))
 }
 
 #[cfg(test)]
@@ -153,7 +181,9 @@ mod tests {
     #[sqlx::test(migrations = "./migrations")]
     async fn register_user_returns_conflict_for_duplicate_email(pool: PgPool) {
         let app = user_routes(AppState {
-            user_repo: std::sync::Arc::new(UserRepo::new(pool)),
+            user_repo: std::sync::Arc::new(UserRepo::new(pool.clone())),
+            workspace_repo: std::sync::Arc::new(WorkspaceRepository::new(pool.clone())),
+            api_key_repo: std::sync::Arc::new(ApiKeyRepository::new(pool)),
         });
 
         let payload = json!({

@@ -1,8 +1,10 @@
-use crate::auth::Claims;
+use crate::auth::{require_authenticated_user, require_workspace_role, AuthenticatedUser};
 use crate::contracts::{
     CredentialOAuthConnectResponse, CredentialResponse, CredentialValidationResponse,
 };
-use crate::repositories::credential::CredentialRepository;
+use crate::repositories::{
+    api_key::ApiKeyRepository, credential::CredentialRepository, workspace::WorkspaceRepository,
+};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::{
     extract::{Json, Path, Query, State},
@@ -11,14 +13,19 @@ use axum::{
 };
 use barqflow_core::types::GenericValue;
 use barqflow_db::models::CredentialEntity;
+use barqflow_db::users::UserRepo;
 use barqflow_registry::registry::CredentialRegistry;
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub credential_repo: std::sync::Arc<CredentialRepository>,
-    pub credential_registry: std::sync::Arc<CredentialRegistry>,
+    pub credential_repo: Arc<CredentialRepository>,
+    pub credential_registry: Arc<CredentialRegistry>,
+    pub user_repo: Arc<UserRepo>,
+    pub workspace_repo: Arc<WorkspaceRepository>,
+    pub api_key_repo: Arc<ApiKeyRepository>,
 }
 
 impl From<CredentialEntity> for CredentialResponse {
@@ -50,7 +57,10 @@ pub fn credential_routes(state: AppState) -> Router {
         )
         .route("/credentials/{id}/test", post(test_saved_credential))
         .route("/credentials/{id}/rotate", post(rotate_credential))
-        .route("/credentials/{id}/oauth2/connect", post(start_oauth_connect))
+        .route(
+            "/credentials/{id}/oauth2/connect",
+            post(start_oauth_connect),
+        )
         .route("/credentials/types", get(get_credential_types))
         .route("/credentials/test", post(test_credential))
         .with_state(state)
@@ -199,7 +209,10 @@ fn build_oauth_connect_payload(
     })?;
     object.insert("oauthState".to_string(), serde_json::json!(nonce));
     object.insert("oauthCsrfState".to_string(), serde_json::json!(nonce));
-    object.insert("redirectUri".to_string(), serde_json::json!(redirect_uri.clone()));
+    object.insert(
+        "redirectUri".to_string(),
+        serde_json::json!(redirect_uri.clone()),
+    );
 
     let mut connect_url = reqwest::Url::parse(&auth_url).map_err(|error| {
         (
@@ -249,20 +262,21 @@ fn build_oauth_connect_payload(
 }
 
 async fn get_credentials(
-    _claims: Claims,
+    headers: HeaderMap,
     State(state): State<AppState>,
     Query(query): Query<CredentialListQuery>,
 ) -> Result<Json<Vec<CredentialResponse>>, (StatusCode, String)> {
+    let auth = require_credentials_auth(&headers, &state).await?;
     let creds = if let Some(cred_type) = query.r#type {
         state
             .credential_repo
-            .find_by_type(&cred_type)
+            .find_by_type_in_workspace(auth.workspace_id, &cred_type)
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
     } else {
         state
             .credential_repo
-            .find_all()
+            .find_all_in_workspace(auth.workspace_id)
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
     };
@@ -273,13 +287,14 @@ async fn get_credentials(
 }
 
 async fn get_credential(
-    _claims: Claims,
+    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<uuid::Uuid>,
 ) -> Result<Json<CredentialResponse>, (StatusCode, String)> {
+    let auth = require_credentials_auth(&headers, &state).await?;
     let credential = state
         .credential_repo
-        .find_by_id(id)
+        .find_by_id_in_workspace(auth.workspace_id, id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Credential not found".to_string()))?;
@@ -288,9 +303,10 @@ async fn get_credential(
 }
 
 async fn get_credential_types(
-    _claims: Claims,
+    headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<barqflow_core::properties::ICredentialProperties>>, (StatusCode, String)> {
+    let _auth = require_credentials_auth(&headers, &state).await?;
     let creds = state.credential_registry.get_all_credentials();
     let schema_list: Vec<_> = creds
         .into_iter()
@@ -301,13 +317,21 @@ async fn get_credential_types(
 }
 
 async fn create_credential(
-    _claims: Claims,
+    headers: HeaderMap,
     State(state): State<AppState>,
     Json(payload): Json<CreateCredentialRequest>,
 ) -> Result<Json<CredentialResponse>, (StatusCode, String)> {
+    let auth = require_credentials_auth(&headers, &state).await?;
+    require_workspace_role(&auth, "member")?;
     let new_cred = state
         .credential_repo
-        .create(&payload.name, &payload.credential_type, payload.data)
+        .create_in_workspace(
+            auth.workspace_id,
+            Some(auth.id),
+            &payload.name,
+            &payload.credential_type,
+            payload.data,
+        )
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
@@ -344,14 +368,16 @@ fn merge_credential_data(
 }
 
 async fn update_credential(
-    _claims: Claims,
+    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<uuid::Uuid>,
     Json(payload): Json<UpdateCredentialRequest>,
 ) -> Result<Json<CredentialResponse>, (StatusCode, String)> {
+    let auth = require_credentials_auth(&headers, &state).await?;
+    require_workspace_role(&auth, "member")?;
     let existing = state
         .credential_repo
-        .find_by_id(id)
+        .find_by_id_in_workspace(auth.workspace_id, id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Credential not found".to_string()))?;
@@ -369,7 +395,7 @@ async fn update_credential(
 
     let mut updated = state
         .credential_repo
-        .update(id, &next_name, merged_data)
+        .update_in_workspace(auth.workspace_id, id, &next_name, merged_data)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Credential not found".to_string()))?;
@@ -377,7 +403,7 @@ async fn update_credential(
     if credential_changed {
         updated = state
             .credential_repo
-            .clear_test_result(id)
+            .clear_test_result_in_workspace(auth.workspace_id, id)
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
             .ok_or_else(|| (StatusCode::NOT_FOUND, "Credential not found".to_string()))?;
@@ -387,14 +413,16 @@ async fn update_credential(
 }
 
 async fn rotate_credential(
-    _claims: Claims,
+    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<uuid::Uuid>,
     Json(payload): Json<UpdateCredentialRequest>,
 ) -> Result<Json<CredentialResponse>, (StatusCode, String)> {
+    let auth = require_credentials_auth(&headers, &state).await?;
+    require_workspace_role(&auth, "member")?;
     let existing = state
         .credential_repo
-        .find_by_id(id)
+        .find_by_id_in_workspace(auth.workspace_id, id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Credential not found".to_string()))?;
@@ -410,7 +438,7 @@ async fn rotate_credential(
 
     let rotated = state
         .credential_repo
-        .rotate(id, &next_name, merged_data)
+        .rotate_in_workspace(auth.workspace_id, id, &next_name, merged_data)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Credential not found".to_string()))?;
@@ -419,14 +447,15 @@ async fn rotate_credential(
 }
 
 async fn start_oauth_connect(
-    _claims: Claims,
+    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<uuid::Uuid>,
-    headers: HeaderMap,
 ) -> Result<Json<CredentialOAuthConnectResponse>, (StatusCode, String)> {
+    let auth = require_credentials_auth(&headers, &state).await?;
+    require_workspace_role(&auth, "member")?;
     let existing = state
         .credential_repo
-        .find_by_id(id)
+        .find_by_id_in_workspace(auth.workspace_id, id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Credential not found".to_string()))?;
@@ -436,7 +465,7 @@ async fn start_oauth_connect(
 
     state
         .credential_repo
-        .update(existing.id, &existing.name, updated_data)
+        .update_in_workspace(auth.workspace_id, existing.id, &existing.name, updated_data)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Credential not found".to_string()))?;
@@ -514,10 +543,12 @@ async fn validate_credential_data(
 }
 
 async fn test_credential(
-    _claims: Claims,
+    headers: HeaderMap,
     State(state): State<AppState>,
     Json(payload): Json<TestCredentialRequest>,
 ) -> Result<Json<CredentialValidationResponse>, (StatusCode, String)> {
+    let auth = require_credentials_auth(&headers, &state).await?;
+    require_workspace_role(&auth, "member")?;
     match validate_credential_data(&state, &payload.credential_type, &payload.data).await {
         Ok(true) => Ok(Json(build_validation_response(
             true,
@@ -544,13 +575,15 @@ async fn test_credential(
 }
 
 async fn test_saved_credential(
-    _claims: Claims,
+    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<uuid::Uuid>,
 ) -> Result<Json<CredentialValidationResponse>, (StatusCode, String)> {
+    let auth = require_credentials_auth(&headers, &state).await?;
+    require_workspace_role(&auth, "member")?;
     let credential = state
         .credential_repo
-        .find_by_id(id)
+        .find_by_id_in_workspace(auth.workspace_id, id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Credential not found".to_string()))?;
@@ -560,7 +593,12 @@ async fn test_saved_credential(
         Err((status_code, message)) => {
             state
                 .credential_repo
-                .record_test_result(id, validation_status_from_error(status_code), Some(&message))
+                .record_test_result_in_workspace(
+                    auth.workspace_id,
+                    id,
+                    validation_status_from_error(status_code),
+                    Some(&message),
+                )
                 .await
                 .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
@@ -579,7 +617,7 @@ async fn test_saved_credential(
             let message = "Credential validated successfully.";
             state
                 .credential_repo
-                .record_test_result(id, "valid", Some(message))
+                .record_test_result_in_workspace(auth.workspace_id, id, "valid", Some(message))
                 .await
                 .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
@@ -595,7 +633,7 @@ async fn test_saved_credential(
             let message = "Credential validation returned false.";
             state
                 .credential_repo
-                .record_test_result(id, "invalid", Some(message))
+                .record_test_result_in_workspace(auth.workspace_id, id, "invalid", Some(message))
                 .await
                 .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
@@ -611,7 +649,12 @@ async fn test_saved_credential(
             let validation_status = validation_status_from_error(status_code);
             state
                 .credential_repo
-                .record_test_result(id, validation_status, Some(&message))
+                .record_test_result_in_workspace(
+                    auth.workspace_id,
+                    id,
+                    validation_status,
+                    Some(&message),
+                )
                 .await
                 .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
@@ -627,13 +670,15 @@ async fn test_saved_credential(
 }
 
 async fn delete_credential(
-    _claims: Claims,
+    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<uuid::Uuid>,
 ) -> Result<StatusCode, (StatusCode, String)> {
+    let auth = require_credentials_auth(&headers, &state).await?;
+    require_workspace_role(&auth, "member")?;
     let deleted = state
         .credential_repo
-        .delete(id)
+        .delete_in_workspace(auth.workspace_id, id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
@@ -644,14 +689,29 @@ async fn delete_credential(
     }
 }
 
+async fn require_credentials_auth(
+    headers: &HeaderMap,
+    state: &AppState,
+) -> Result<AuthenticatedUser, (StatusCode, String)> {
+    require_authenticated_user(
+        headers,
+        Arc::clone(&state.user_repo),
+        Arc::clone(&state.workspace_repo),
+        Arc::clone(&state.api_key_repo),
+    )
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::repositories::{api_key::ApiKeyRepository, workspace::WorkspaceRepository};
     use axum::{
         body::Body,
         http::{Request, StatusCode},
     };
     use barqflow_core::traits::{ICredentialTestRequest, ICredentialType};
+    use barqflow_db::users::UserRepo;
     use barqflow_registry::registry::CredentialInfo;
     use serde_json::json;
     use sqlx::PgPool;
@@ -673,6 +733,37 @@ mod tests {
 
     struct TestCredential {
         test_url: String,
+    }
+
+    async fn seed_auth_context(
+        pool: &PgPool,
+    ) -> (
+        Arc<UserRepo>,
+        Arc<WorkspaceRepository>,
+        Arc<ApiKeyRepository>,
+        String,
+    ) {
+        let user_repo = Arc::new(UserRepo::new(pool.clone()));
+        let workspace_repo = Arc::new(WorkspaceRepository::new(pool.clone()));
+        let api_key_repo = Arc::new(ApiKeyRepository::new(pool.clone()));
+
+        let user = user_repo
+            .create(
+                "owner@example.com",
+                "hashed-password",
+                Some("Owner".to_string()),
+                Some("User".to_string()),
+                "admin",
+            )
+            .await
+            .unwrap();
+        workspace_repo
+            .create_workspace("Ops", user.id)
+            .await
+            .unwrap();
+
+        let token = crate::auth::generate_jwt(&user.id.to_string(), "admin").unwrap();
+        (user_repo, workspace_repo, api_key_repo, token)
     }
 
     #[async_trait::async_trait]
@@ -720,9 +811,13 @@ mod tests {
             })
             .unwrap();
 
+        let (user_repo, workspace_repo, api_key_repo, token) = seed_auth_context(&pool).await;
         let state = AppState {
             credential_repo: Arc::new(CredentialRepository::new(pool)),
             credential_registry: Arc::new(registry),
+            user_repo,
+            workspace_repo,
+            api_key_repo,
         };
 
         let app = credential_routes(state);
@@ -731,9 +826,6 @@ mod tests {
             "cred_type": "testAuth",
             "data": {}
         });
-
-        let token =
-            crate::auth::generate_jwt("00000000-0000-0000-0000-000000000000", "admin").unwrap();
 
         let request = Request::builder()
             .uri("/credentials/test")
@@ -756,9 +848,13 @@ mod tests {
 
         let registry = CredentialRegistry::new();
         let repo = Arc::new(CredentialRepository::new(pool.clone()));
+        let (user_repo, workspace_repo, api_key_repo, token) = seed_auth_context(&pool).await;
         let state = AppState {
             credential_repo: Arc::clone(&repo),
             credential_registry: Arc::new(registry),
+            user_repo,
+            workspace_repo,
+            api_key_repo,
         };
         let app = credential_routes(state);
 
@@ -774,8 +870,6 @@ mod tests {
             .await
             .unwrap();
 
-        let token =
-            crate::auth::generate_jwt("00000000-0000-0000-0000-000000000000", "admin").unwrap();
         let update_body = json!({
             "name": "OpenAI Prod Renamed",
             "data": {
@@ -825,9 +919,13 @@ mod tests {
             .unwrap();
 
         let repo = Arc::new(CredentialRepository::new(pool.clone()));
+        let (user_repo, workspace_repo, api_key_repo, token) = seed_auth_context(&pool).await;
         let state = AppState {
             credential_repo: Arc::clone(&repo),
             credential_registry: Arc::new(registry),
+            user_repo,
+            workspace_repo,
+            api_key_repo,
         };
         let app = credential_routes(state);
 
@@ -835,9 +933,6 @@ mod tests {
             .create("Saved Credential", "testAuth", json!({"token":"abc"}))
             .await
             .unwrap();
-
-        let token =
-            crate::auth::generate_jwt("00000000-0000-0000-0000-000000000000", "admin").unwrap();
 
         let request = Request::builder()
             .uri(format!("/credentials/{}/test", created.id))

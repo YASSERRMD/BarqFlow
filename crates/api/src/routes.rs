@@ -1,7 +1,8 @@
-use crate::repositories::{
-    credential::CredentialRepository, execution::ExecutionRepository, workflow::WorkflowRepository,
-};
 use crate::execution_events::ExecutionEventHub;
+use crate::repositories::{
+    api_key::ApiKeyRepository, credential::CredentialRepository, execution::ExecutionRepository,
+    workflow::WorkflowRepository, workspace::WorkspaceRepository,
+};
 use axum::Router;
 use barqflow_db::users::UserRepo;
 use std::collections::HashMap;
@@ -25,6 +26,7 @@ use crate::controllers::{
     credentials::{credential_routes, AppState as CredState},
     executions::{execution_routes, AppState as ExecState},
     health::{health_routes, AppState as HealthState},
+    identity::{identity_routes, AppState as IdentityState},
     nodes::{node_routes, AppState as NodeState},
     oauth2::{oauth2_routes, OAuth2State},
     settings::{settings_routes, AppState as SettingsState},
@@ -39,6 +41,8 @@ pub struct AppState {
     pub credential_repo: Arc<CredentialRepository>,
     pub exec_repo: Arc<ExecutionRepository>,
     pub user_repo: Arc<UserRepo>,
+    pub workspace_repo: Arc<WorkspaceRepository>,
+    pub api_key_repo: Arc<ApiKeyRepository>,
     pub node_registry: Arc<barqflow_registry::registry::NodeRegistry>,
     pub credential_registry: Arc<barqflow_registry::registry::CredentialRegistry>,
     pub webhook_registry: WebhookRegistry,
@@ -52,10 +56,20 @@ pub fn create_router(state: AppState) -> Router {
     let rest_routes = Router::new()
         .merge(user_routes(UserState {
             user_repo: Arc::clone(&state.user_repo),
+            workspace_repo: Arc::clone(&state.workspace_repo),
+            api_key_repo: Arc::clone(&state.api_key_repo),
+        }))
+        .merge(identity_routes(IdentityState {
+            user_repo: Arc::clone(&state.user_repo),
+            workspace_repo: Arc::clone(&state.workspace_repo),
+            api_key_repo: Arc::clone(&state.api_key_repo),
         }))
         .merge(workflow_routes(WfState {
             workflow_repo: Arc::clone(&state.workflow_repo),
             credential_repo: Arc::clone(&state.credential_repo),
+            user_repo: Arc::clone(&state.user_repo),
+            workspace_repo: Arc::clone(&state.workspace_repo),
+            api_key_repo: Arc::clone(&state.api_key_repo),
             node_registry: Arc::clone(&state.node_registry),
             webhook_registry: Arc::clone(&state.webhook_registry),
             job_scheduler: state.job_scheduler.clone(),
@@ -66,12 +80,18 @@ pub fn create_router(state: AppState) -> Router {
             workflow_repo: Arc::clone(&state.workflow_repo),
             node_registry: Arc::clone(&state.node_registry),
             credential_repo: Arc::clone(&state.credential_repo),
+            user_repo: Arc::clone(&state.user_repo),
+            workspace_repo: Arc::clone(&state.workspace_repo),
+            api_key_repo: Arc::clone(&state.api_key_repo),
             active_executions: Arc::clone(&state.active_executions),
             execution_events: state.execution_events.clone(),
         }))
         .merge(credential_routes(CredState {
             credential_repo: Arc::clone(&state.credential_repo),
             credential_registry: Arc::clone(&state.credential_registry),
+            user_repo: Arc::clone(&state.user_repo),
+            workspace_repo: Arc::clone(&state.workspace_repo),
+            api_key_repo: Arc::clone(&state.api_key_repo),
         }))
         .merge(oauth2_routes(OAuth2State {
             credential_repo: Arc::clone(&state.credential_repo),
@@ -79,6 +99,9 @@ pub fn create_router(state: AppState) -> Router {
         .merge(settings_routes(SettingsState {
             node_registry: Arc::clone(&state.node_registry),
             credential_registry: Arc::clone(&state.credential_registry),
+            user_repo: Arc::clone(&state.user_repo),
+            workspace_repo: Arc::clone(&state.workspace_repo),
+            api_key_repo: Arc::clone(&state.api_key_repo),
         }))
         .merge(health_routes(HealthState {
             webhook_registry: Arc::clone(&state.webhook_registry),

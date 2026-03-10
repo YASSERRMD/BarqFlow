@@ -1,18 +1,19 @@
-use barqflow_api::AppState as ApiState;
-use barqflow_db::users::UserRepo;
+use barqflow_api::active_workflows::ActiveCronJobs;
+use barqflow_api::controllers::webhooks::{new_webhook_registry, WebhookRegistry};
 use barqflow_api::execution_events::ExecutionEventHub;
 use barqflow_api::repositories::{
-    credential::CredentialRepository, execution::ExecutionRepository,
+    api_key::ApiKeyRepository, credential::CredentialRepository, execution::ExecutionRepository,
     static_data::StaticDataRepository, workflow::WorkflowRepository,
+    workspace::WorkspaceRepository,
 };
+use barqflow_api::routes::ActiveExecutionManager;
+use barqflow_api::AppState as ApiState;
+use barqflow_db::users::UserRepo;
+use barqflow_registry::registry::CredentialRegistry;
+use barqflow_registry::registry::NodeRegistry;
 use sqlx::PgPool;
 use std::sync::Arc;
-use barqflow_registry::registry::NodeRegistry;
-use barqflow_registry::registry::CredentialRegistry;
-use barqflow_api::controllers::webhooks::{WebhookRegistry, new_webhook_registry};
-use barqflow_api::active_workflows::ActiveCronJobs;
 use tokio_cron_scheduler::JobScheduler;
-use barqflow_api::routes::ActiveExecutionManager;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -22,6 +23,8 @@ pub struct AppState {
     pub credential_repo: Arc<CredentialRepository>,
     pub static_data_repo: Arc<StaticDataRepository>,
     pub user_repo: Arc<UserRepo>,
+    pub workspace_repo: Arc<WorkspaceRepository>,
+    pub api_key_repo: Arc<ApiKeyRepository>,
     pub node_registry: Arc<NodeRegistry>,
     pub credential_registry: Arc<CredentialRegistry>,
     pub webhook_registry: WebhookRegistry,
@@ -35,14 +38,15 @@ impl AppState {
     pub async fn new(pool: PgPool) -> anyhow::Result<Self> {
         let node_registry = Arc::new(NodeRegistry::new());
         barqflow_nodes::register_all_nodes(&node_registry);
-        
+
         // Setup Credential Registry
         let credential_registry = Arc::new(CredentialRegistry::new());
         barqflow_nodes::register_all_credentials(&credential_registry);
 
         // Setup Scheduler and active execution map
         let job_scheduler = JobScheduler::new().await?;
-        let active_executions = Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+        let active_executions =
+            Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
         let active_cron_jobs = Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
         let execution_events = ExecutionEventHub::new();
 
@@ -52,7 +56,9 @@ impl AppState {
             execution_repo: Arc::new(ExecutionRepository::new(pool.clone())),
             credential_repo: Arc::new(CredentialRepository::new(pool.clone())),
             static_data_repo: Arc::new(StaticDataRepository::new(pool.clone())),
-            user_repo: Arc::new(UserRepo::new(pool)),
+            user_repo: Arc::new(UserRepo::new(pool.clone())),
+            workspace_repo: Arc::new(WorkspaceRepository::new(pool.clone())),
+            api_key_repo: Arc::new(ApiKeyRepository::new(pool)),
             node_registry,
             credential_registry,
             webhook_registry: new_webhook_registry(),
@@ -69,6 +75,8 @@ impl AppState {
             credential_repo: Arc::clone(&self.credential_repo),
             exec_repo: Arc::clone(&self.execution_repo),
             user_repo: Arc::clone(&self.user_repo),
+            workspace_repo: Arc::clone(&self.workspace_repo),
+            api_key_repo: Arc::clone(&self.api_key_repo),
             node_registry: Arc::clone(&self.node_registry),
             credential_registry: Arc::clone(&self.credential_registry),
             webhook_registry: Arc::clone(&self.webhook_registry),

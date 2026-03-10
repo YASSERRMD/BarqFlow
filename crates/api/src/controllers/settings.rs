@@ -1,6 +1,8 @@
 use crate::auth::Claims;
 use crate::contracts::RuntimeSettingsResponse;
+use crate::repositories::{api_key::ApiKeyRepository, workspace::WorkspaceRepository};
 use axum::{extract::State, routing::get, Json, Router};
+use barqflow_db::users::UserRepo;
 use chrono::Utc;
 use std::sync::Arc;
 
@@ -8,6 +10,9 @@ use std::sync::Arc;
 pub struct AppState {
     pub node_registry: Arc<barqflow_registry::registry::NodeRegistry>,
     pub credential_registry: Arc<barqflow_registry::registry::CredentialRegistry>,
+    pub user_repo: Arc<UserRepo>,
+    pub workspace_repo: Arc<WorkspaceRepository>,
+    pub api_key_repo: Arc<ApiKeyRepository>,
 }
 
 pub fn settings_routes(state: AppState) -> Router {
