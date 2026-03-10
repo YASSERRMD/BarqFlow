@@ -1,7 +1,7 @@
 use crate::integration::common::{
     build_standard_output, build_url, ensure_required_string, execute_prepared_request,
     get_optional_param, get_optional_string_param, get_string_param, get_u64_param, parse_body,
-    parse_kv_pairs, run_count, PreparedRequest,
+    parse_kv_pairs, resolve_auth_token, run_count, PreparedRequest,
 };
 use async_trait::async_trait;
 use barqflow_core::errors::BarqError;
@@ -50,12 +50,14 @@ impl INodeType for MondayNode {
             let base_url =
                 get_string_param(context, "baseUrl", item_index, "https://api.monday.com").await;
             let timeout_ms = get_u64_param(context, "timeout", item_index, 60_000).await;
-            let auth_token = ensure_required_string(
+            let auth_token = resolve_auth_token(
+                context,
                 "Monday.com",
-                "Auth Token",
-                get_optional_string_param(context, "authToken", item_index).await,
-                "Add a Monday.com API token in the node configuration.",
-            )?;
+                item_index,
+                "mondayApi",
+                &["authToken"],
+            )
+            .await?;
 
             let mut headers = get_optional_param(context, "headers", item_index)
                 .await

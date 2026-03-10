@@ -65,10 +65,15 @@ export interface CredentialReference {
   displayName: string
 }
 
+export type NodeSupportTier = 'supported' | 'beta' | 'hidden'
+
 export interface NodeSchemaContract {
   name: string
   displayName: string
   description: string
+  category: string
+  supportTier: NodeSupportTier
+  supportNote?: string | null
   isTrigger: boolean
   typeVersion: number
   maxInputs: number
@@ -86,6 +91,20 @@ export interface NodeCatalogEntry {
   isTrigger: boolean
   schema: NodeSchemaContract
   category: string
+  supportTier: NodeSupportTier
+  supportNote?: string | null
+}
+
+export interface NodeDynamicOptionsRequest {
+  nodeType: string
+  propertyName: string
+  currentParameters: Record<string, unknown>
+}
+
+export interface NodeDynamicOptionsResponse {
+  options: NodePropertyOption[]
+  source: string
+  note?: string | null
 }
 
 export interface NodeCredentialBinding {

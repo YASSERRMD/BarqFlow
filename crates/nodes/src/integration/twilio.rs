@@ -1,7 +1,8 @@
 use crate::integration::common::{
     build_standard_output, build_url, ensure_required_string, execute_prepared_request,
     get_optional_param, get_optional_string_param, get_string_param, get_u64_param, parse_body,
-    parse_kv_pairs, run_count, PreparedRequest,
+    parse_kv_pairs, resolve_auth_token, resolve_parameter_from_node_or_credentials, run_count,
+    PreparedRequest,
 };
 use async_trait::async_trait;
 use barqflow_core::errors::BarqError;
@@ -49,18 +50,19 @@ impl INodeType for TwilioNode {
                 get_string_param(context, "baseUrl", item_index, "https://api.twilio.com").await;
             let timeout_ms = get_u64_param(context, "timeout", item_index, 60_000).await;
 
-            let account_sid = ensure_required_string(
+            let account_sid = resolve_parameter_from_node_or_credentials(
+                context,
                 "Twilio",
+                "accountSid",
                 "Account SID",
-                get_optional_string_param(context, "accountSid", item_index).await,
-                "Set Twilio account SID.",
-            )?;
-            let auth_token = ensure_required_string(
-                "Twilio",
-                "Auth Token",
-                get_optional_string_param(context, "authToken", item_index).await,
-                "Set Twilio auth token.",
-            )?;
+                item_index,
+                "twilioApi",
+                &["accountSid"],
+            )
+            .await?;
+            let auth_token =
+                resolve_auth_token(context, "Twilio", item_index, "twilioApi", &["authToken"])
+                    .await?;
             let auth_header = format!(
                 "Basic {}",
                 STANDARD.encode(format!("{}:{}", account_sid, auth_token))
@@ -172,6 +174,35 @@ mod tests {
         context.add_param("to", json!("+1555111"));
         context.add_param("from", json!("+1555222"));
         context.add_param("message", json!("hello"));
+
+        let result = TwilioNode::new().execute(&context).await.unwrap();
+        mock.assert_async().await;
+        assert_eq!(
+            result[0][0].json.0.get("status").and_then(|v| v.as_u64()),
+            Some(201)
+        );
+    }
+
+    #[tokio::test]
+    async fn twilio_uses_bound_credential_when_node_secrets_are_empty() {
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock("POST", "/2010-04-01/Accounts/AC123/Messages.json")
+            .match_header("authorization", Matcher::Regex("Basic .+".to_string()))
+            .with_status(201)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"sid":"SM1"}"#)
+            .create_async()
+            .await;
+
+        let mut context = MockContext::new("Twilio", "barqflow-nodes.twilio");
+        context.add_param("operation", json!("sendSms"));
+        context.add_param("baseUrl", json!(server.url()));
+        context.add_param("to", json!("+1555111"));
+        context.add_param("from", json!("+1555222"));
+        context.add_param("message", json!("hello"));
+        context.add_credential("twilioApi", "accountSid", json!("AC123"));
+        context.add_credential("twilioApi", "authToken", json!("secret"));
 
         let result = TwilioNode::new().execute(&context).await.unwrap();
         mock.assert_async().await;

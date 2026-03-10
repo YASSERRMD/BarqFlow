@@ -8,8 +8,13 @@ const props = defineProps<{
   isPropertyVisible: (prop: any) => boolean
   collectionDrafts: Record<string, string>
   collectionErrors: Record<string, string>
+  resolvedPropertyOptions: (prop: any) => any[]
+  dynamicPropertyLoading: Record<string, boolean>
+  dynamicPropertyErrors: Record<string, string | null>
+  dynamicPropertyNotes: Record<string, string | null>
   onCollectionInput: (propName: string, event: Event) => void
   formatCollectionDraft: (propName: string) => void
+  refreshDynamicOptions: (propName: string) => void
 }>()
 </script>
 
@@ -77,10 +82,52 @@ const props = defineProps<{
               v-model="props.node.data.properties[prop.name]"
               class="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
             >
-              <option v-for="opt in prop.options || []" :key="opt.value" :value="opt.value">
+              <option v-for="opt in props.resolvedPropertyOptions(prop)" :key="opt.value" :value="opt.value">
                 {{ opt.name }}
               </option>
             </select>
+          </div>
+
+          <div v-else-if="props.propertyType(prop) === 'loadOptions'" class="space-y-2">
+            <div class="flex items-center gap-2">
+              <select
+                v-model="props.node.data.properties[prop.name]"
+                class="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              >
+                <option
+                  v-for="opt in props.resolvedPropertyOptions(prop)"
+                  :key="opt.value"
+                  :value="opt.value"
+                >
+                  {{ opt.name }}
+                </option>
+              </select>
+              <button
+                type="button"
+                class="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
+                @click="props.refreshDynamicOptions(prop.name)"
+              >
+                {{ props.dynamicPropertyLoading[prop.name] ? 'Loading…' : 'Reload' }}
+              </button>
+            </div>
+            <p
+              v-if="props.dynamicPropertyErrors[prop.name]"
+              class="text-xs text-amber-700"
+            >
+              {{ props.dynamicPropertyErrors[prop.name] }}
+            </p>
+            <p
+              v-else-if="props.dynamicPropertyNotes[prop.name]"
+              class="text-xs text-slate-500"
+            >
+              {{ props.dynamicPropertyNotes[prop.name] }}
+            </p>
+            <input
+              v-model="props.node.data.properties[prop.name]"
+              type="text"
+              :placeholder="prop.placeholder || 'Enter a custom value if your model is not listed'"
+              class="w-full rounded-md border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-brand-500 focus:bg-white focus:ring-1 focus:ring-brand-500"
+            />
           </div>
 
           <div v-else-if="props.propertyType(prop) === 'boolean'" class="mt-2 flex items-center">

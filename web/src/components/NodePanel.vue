@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { X, Play, Trash2, Info, Settings2 } from 'lucide-vue-next'
 import { useNodeStore } from '../stores/nodes'
 import { listCredentials } from '../features/credentials/api'
+import { resolveNodeDynamicOptions } from '../features/nodes/api'
 import NdvTabBar from '../features/ndv/components/NdvTabBar.vue'
 import NdvParametersTab from '../features/ndv/components/NdvParametersTab.vue'
 import NdvCredentialsTab from '../features/ndv/components/NdvCredentialsTab.vue'
@@ -36,6 +37,11 @@ const collectionDrafts = ref<Record<string, string>>({})
 const collectionErrors = ref<Record<string, string>>({})
 const activeCollectionNodeId = ref<string | null>(null)
 const activeTab = ref('parameters')
+const dynamicPropertyOptions = ref<Record<string, any[]>>({})
+const dynamicPropertyLoading = ref<Record<string, boolean>>({})
+const dynamicPropertyErrors = ref<Record<string, string | null>>({})
+const dynamicPropertyNotes = ref<Record<string, string | null>>({})
+let dynamicOptionsTimer: number | null = null
 
 const FALLBACK_NODE_CREDENTIALS: Record<
   string,
@@ -210,6 +216,10 @@ function propertyType(prop: any): string {
   return ''
 }
 
+function supportsDynamicOptions(prop: any): boolean {
+  return propertyType(prop) === 'loadOptions'
+}
+
 function valueMatches(left: any, right: any): boolean {
   return JSON.stringify(left) === JSON.stringify(right)
 }
@@ -357,6 +367,10 @@ watch(
     localNotice.value = null
     ensureNodeCredentialMap()
     ensureNodePropertyMap()
+    dynamicPropertyOptions.value = {}
+    dynamicPropertyErrors.value = {}
+    dynamicPropertyLoading.value = {}
+    dynamicPropertyNotes.value = {}
   },
 )
 
@@ -375,8 +389,21 @@ watch(
   () => `${String(props.node?.id || '')}:${String((nodeSchema.value as any)?.name || '')}`,
   () => {
     syncCollectionDrafts(true)
+    refreshDynamicOptions()
   },
   { immediate: true },
+)
+
+watch(
+  () => JSON.stringify(props.node?.data?.properties || {}),
+  () => {
+    if (dynamicOptionsTimer) {
+      window.clearTimeout(dynamicOptionsTimer)
+    }
+    dynamicOptionsTimer = window.setTimeout(() => {
+      refreshDynamicOptions()
+    }, 300)
+  },
 )
 
 function getCategoryColor(type: string) {
@@ -432,7 +459,15 @@ function hasSelectedRequiredCredentialForNode(): boolean {
 
 function shouldBypassTokenPropertyRequirement(prop: any): boolean {
   const propName = String(prop?.name || '')
-  if (propName !== 'authToken' && propName !== 'botToken') {
+  if (
+    propName !== 'authToken' &&
+    propName !== 'botToken' &&
+    propName !== 'apiKey' &&
+    propName !== 'accessToken' &&
+    propName !== 'apiToken' &&
+    propName !== 'accountSid' &&
+    propName !== 'privateToken'
+  ) {
     return false
   }
 
@@ -479,6 +514,15 @@ const canTestNode = computed(
 )
 
 const currentRunData = computed(() => props.node?.data?.runData || null)
+const supportTier = computed(
+  () => props.node?.data?.schema?.supportTier || (nodeSchema.value as any)?.supportTier || 'beta',
+)
+const supportNote = computed(
+  () =>
+    props.node?.data?.schema?.supportNote ||
+    (nodeSchema.value as any)?.supportNote ||
+    null,
+)
 
 const tabs = computed(() => [
   {
@@ -571,6 +615,71 @@ function applyMockData() {
   activeTab.value = 'parameters'
 }
 
+function resolvedPropertyOptions(prop: any) {
+  if (supportsDynamicOptions(prop)) {
+    return dynamicPropertyOptions.value[String(prop?.name || '')] || []
+  }
+
+  return prop?.options || []
+}
+
+async function loadDynamicOptionsForProperty(prop: any) {
+  if (!props.node || !supportsDynamicOptions(prop)) return
+
+  const propName = String(prop?.name || '')
+  if (!propName) return
+
+  dynamicPropertyLoading.value[propName] = true
+  dynamicPropertyErrors.value[propName] = null
+
+  try {
+    const response = await resolveNodeDynamicOptions({
+      nodeType: String(props.node.data.type || props.node.data.schema?.name || ''),
+      propertyName: propName,
+      currentParameters: props.node.data.properties || {},
+    })
+
+    dynamicPropertyOptions.value[propName] = response.data.options || []
+    dynamicPropertyNotes.value[propName] = response.data.note || null
+
+    if (
+      props.node.data.properties?.[propName] === undefined &&
+      response.data.options?.[0]?.value !== undefined
+    ) {
+      props.node.data.properties[propName] = response.data.options[0].value
+    }
+  } catch (err: any) {
+    dynamicPropertyErrors.value[propName] =
+      err?.response?.data?.message || err?.response?.data || err?.message || 'Failed to load options.'
+    dynamicPropertyNotes.value[propName] = null
+  } finally {
+    dynamicPropertyLoading.value[propName] = false
+  }
+}
+
+function refreshDynamicOptionsForProperty(propName: string) {
+  const schemaProperties = Array.isArray((nodeSchema.value as any)?.properties)
+    ? (nodeSchema.value as any).properties
+    : []
+  const target = schemaProperties.find((prop: any) => String(prop?.name || '') === propName)
+  if (target) {
+    loadDynamicOptionsForProperty(target)
+  }
+}
+
+function refreshDynamicOptions() {
+  const schemaProperties = Array.isArray((nodeSchema.value as any)?.properties)
+    ? (nodeSchema.value as any).properties
+    : []
+
+  schemaProperties
+    .filter((prop: any) => supportsDynamicOptions(prop))
+    .filter((prop: any) => isPropertyVisible(prop))
+    .forEach((prop: any) => {
+      loadDynamicOptionsForProperty(prop)
+    })
+}
+
 function onDeleteNode() {
   if (!props.node?.id) return
   emit('delete-node', String(props.node.id))
@@ -636,11 +745,22 @@ function openCredentialsPage(credentialType?: string, displayName?: string) {
 
       <div class="flex-1 space-y-6 overflow-y-auto px-5 py-5 sm:px-6 sm:py-6">
         <div
-          class="flex gap-3 rounded-2xl border border-sky-100 bg-sky-50/80 p-4 text-sm text-sky-900"
+          :class="[
+            'flex gap-3 rounded-2xl border p-4 text-sm',
+            supportTier === 'supported'
+              ? 'border-sky-100 bg-sky-50/80 text-sky-900'
+              : 'border-amber-200 bg-amber-50 text-amber-900',
+          ]"
         >
-          <Info class="mt-0.5 h-4 w-4 shrink-0 text-sky-600" />
+          <Info
+            :class="[
+              'mt-0.5 h-4 w-4 shrink-0',
+              supportTier === 'supported' ? 'text-sky-600' : 'text-amber-700',
+            ]"
+          />
           <p>
             {{
+              supportNote ||
               node.data.description ||
               'Configure this node to control its parameters, bindings, and runtime behavior.'
             }}
@@ -657,8 +777,13 @@ function openCredentialsPage(credentialType?: string, displayName?: string) {
           :is-property-visible="isPropertyVisible"
           :collection-drafts="collectionDrafts"
           :collection-errors="collectionErrors"
+          :resolved-property-options="resolvedPropertyOptions"
+          :dynamic-property-loading="dynamicPropertyLoading"
+          :dynamic-property-errors="dynamicPropertyErrors"
+          :dynamic-property-notes="dynamicPropertyNotes"
           :on-collection-input="onCollectionInput"
           :format-collection-draft="formatCollectionDraft"
+          :refresh-dynamic-options="refreshDynamicOptionsForProperty"
         />
 
         <NdvCredentialsTab
