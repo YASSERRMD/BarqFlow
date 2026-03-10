@@ -12,6 +12,84 @@ impl CodeNode {
     pub fn new() -> Self {
         Self
     }
+
+    fn wrap_items(items: &[Value]) -> Result<rhai::Array, BarqError> {
+        let mut items_array = rhai::Array::new();
+
+        for item in items {
+            match rhai::serde::to_dynamic(item.clone()) {
+                Ok(dynamic_json) => {
+                    let mut wrapper = Map::new();
+                    wrapper.insert("json".into(), dynamic_json);
+                    items_array.push(wrapper.into());
+                }
+                Err(error) => {
+                    return Err(BarqError::NodeOperationError {
+                        node_name: "Code".into(),
+                        message: format!("Failed to serialize input for Rhai: {}", error),
+                    });
+                }
+            }
+        }
+
+        Ok(items_array)
+    }
+
+    fn dynamic_map_to_execution_data(map: Map) -> Result<INodeExecutionData, BarqError> {
+        let target_map = match map.get("json") {
+            Some(json_field) if json_field.is_map() => json_field.clone().cast::<Map>(),
+            _ => map,
+        };
+
+        let payload = rhai::serde::from_dynamic::<Value>(&target_map.into()).map_err(|error| {
+            BarqError::NodeOperationError {
+                node_name: "Code".into(),
+                message: format!("Failed to parse return item from Rhai Sandbox: {}", error),
+            }
+        })?;
+
+        Ok(INodeExecutionData::new(IDataObject::from(payload)))
+    }
+
+    fn dynamic_to_execution_items(result: Dynamic) -> Result<Vec<INodeExecutionData>, BarqError> {
+        if result.is_unit() {
+            return Ok(Vec::new());
+        }
+
+        if result.is_map() {
+            return Ok(vec![Self::dynamic_map_to_execution_data(result.cast::<Map>())?]);
+        }
+
+        if result.is_array() {
+            let arr = result.into_array().unwrap_or_default();
+            let mut output_items = Vec::new();
+
+            for item in arr {
+                if item.is_unit() {
+                    continue;
+                }
+
+                if item.is_map() {
+                    output_items.push(Self::dynamic_map_to_execution_data(item.cast::<Map>())?);
+                    continue;
+                }
+
+                return Err(BarqError::NodeOperationError {
+                    node_name: "Code".into(),
+                    message:
+                        "Rhai output array must contain structured objects or { json: ... } wrappers."
+                            .into(),
+                });
+            }
+
+            return Ok(output_items);
+        }
+
+        Err(BarqError::NodeOperationError {
+            node_name: "Code".into(),
+            message: "Rhai script must return an object or an array of objects.".into(),
+        })
+    }
 }
 
 impl Default for CodeNode {
@@ -28,6 +106,30 @@ impl INodeType for CodeNode {
             "description": "Execute custom Rhai scripts securely",
             "displayName": "Code",
             "properties": [
+                {
+                    "name": "mode",
+                    "displayName": "Mode",
+                    "type": "options",
+                    "default": "runOnceForAllItems"
+                },
+                {
+                    "name": "language",
+                    "displayName": "Language",
+                    "type": "options",
+                    "default": "javascript"
+                },
+                {
+                    "name": "jsCode",
+                    "displayName": "JavaScript Code",
+                    "type": "string",
+                    "default": "items"
+                },
+                {
+                    "name": "pythonCode",
+                    "displayName": "Python Code",
+                    "type": "string",
+                    "default": "items"
+                },
                 {
                     "name": "code",
                     "displayName": "Code",
@@ -79,11 +181,17 @@ impl INodeType for CodeNode {
             });
         }
 
+        let mode = context
+            .get_node_parameter("mode", None)
+            .await
+            .ok()
+            .and_then(|v| v.as_str().map(|s| s.to_string()))
+            .unwrap_or_else(|| "runOnceForAllItems".to_string());
+
         // We receive the previous items
-        let previous_items = match context.get_input_data(0).await {
-            Ok(data) => data,
-            Err(_) => vec![],
-        };
+        let previous_items = context.get_input_data(0).await.unwrap_or_default();
+        let previous_json_items: Vec<Value> =
+            previous_items.iter().map(|item| Value::Object(item.json.0.clone())).collect();
 
         // Ensure Rhai execution is isolated (no OS access, etc.)
         // By default, `Engine::new()` avoids exposing OS boundaries unless manually registered
@@ -92,88 +200,50 @@ impl INodeType for CodeNode {
         // Limit maximum operations to prevent infinite loops
         engine.set_max_operations(100_000);
 
-        // Convert the input list to Rhai format
-        let mut items_array = rhai::Array::new();
-        for item in previous_items {
-            match rhai::serde::to_dynamic(item.json.0.clone()) {
-                Ok(dyn_map) => {
-                    let mut wrapper = Map::new();
-                    wrapper.insert("json".into(), dyn_map); // Typical N8N style `items[0].json` wrapper
-                    items_array.push(wrapper.into());
-                }
-                Err(e) => {
-                    return Err(BarqError::NodeOperationError {
+        let output_items = if mode == "runOnceForEachItem" {
+            let source_items = if previous_json_items.is_empty() {
+                vec![json!({})]
+            } else {
+                previous_json_items.clone()
+            };
+
+            let mut collected = Vec::new();
+            for item in source_items {
+                let items_array = Self::wrap_items(std::slice::from_ref(&item))?;
+                let first_item = items_array
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| Dynamic::from_map(Map::new()));
+
+                let mut scope = Scope::new();
+                scope.push("items", Dynamic::from_array(items_array));
+                scope.push_dynamic("item", first_item);
+
+                let result = engine.eval_with_scope::<Dynamic>(&mut scope, &code).map_err(|error| {
+                    BarqError::NodeOperationError {
                         node_name: "Code".into(),
-                        message: format!("Failed to serialize input for Rhai: {}", e),
-                    });
-                }
-            }
-        }
-
-        let mut scope = Scope::new();
-        scope.push("items", Dynamic::from_array(items_array));
-
-        let result: Dynamic = match engine.eval_with_scope::<Dynamic>(&mut scope, &code) {
-            Ok(v) => v,
-            Err(e) => {
-                return Err(BarqError::NodeOperationError {
-                    node_name: "Code".into(),
-                    message: format!("Rhai execution error: {}", e),
-                });
-            }
-        };
-
-        let mut output_items = Vec::new();
-
-        // Ensure structured return mapping: force result back to Vec<INodeExecutionData>
-        if result.is_array() {
-            let arr = result.into_array().unwrap();
-            for item in arr {
-                if item.is_map() {
-                    let map = item.cast::<Map>();
-
-                    // Allow unwrapping the `.json` structure N8N style, or handle raw map if provided directly.
-                    let target_map = match map.get("json") {
-                        Some(json_field) => {
-                            if json_field.is_map() {
-                                json_field.clone().cast::<Map>()
-                            } else {
-                                map.clone()
-                            }
-                        }
-                        None => map.clone(),
-                    };
-
-                    match rhai::serde::from_dynamic::<Value>(&target_map.into()) {
-                        Ok(val) => {
-                            output_items.push(INodeExecutionData::new(IDataObject::from(val)));
-                        }
-                        Err(e) => {
-                            return Err(BarqError::NodeOperationError {
-                                node_name: "Code".into(),
-                                message: format!(
-                                    "Failed to parse return item from Rhai Sandbox: {}",
-                                    e
-                                ),
-                            });
-                        }
+                        message: format!("Rhai execution error: {}", error),
                     }
-                } else if item.is_unit() {
-                    continue;
-                } else {
-                    return Err(BarqError::NodeOperationError {
-                        node_name: "Code".into(),
-                        message: "Rhai output array must contain valid structured objects (maps)"
-                            .into(),
-                    });
-                }
+                })?;
+
+                collected.extend(Self::dynamic_to_execution_items(result)?);
             }
+
+            collected
         } else {
-            return Err(BarqError::NodeOperationError {
-                node_name: "Code".into(),
-                message: "Rhai script must return an Array of objects".into(),
-            });
-        }
+            let items_array = Self::wrap_items(&previous_json_items)?;
+            let mut scope = Scope::new();
+            scope.push("items", Dynamic::from_array(items_array));
+
+            let result = engine.eval_with_scope::<Dynamic>(&mut scope, &code).map_err(|error| {
+                BarqError::NodeOperationError {
+                    node_name: "Code".into(),
+                    message: format!("Rhai execution error: {}", error),
+                }
+            })?;
+
+            Self::dynamic_to_execution_items(result)?
+        };
 
         Ok(vec![output_items])
     }
@@ -189,6 +259,7 @@ mod tests {
     struct MockCodeContext {
         js_code: String,
         language: String,
+        mode: String,
         inputs: Vec<INodeExecutionData>,
     }
 
@@ -201,6 +272,7 @@ mod tests {
         ) -> Result<GenericValue, BarqError> {
             match parameter_name {
                 "language" => Ok(serde_json::json!(self.language)),
+                "mode" => Ok(serde_json::json!(self.mode)),
                 "jsCode" | "code" => Ok(serde_json::json!(self.js_code)),
                 "pythonCode" => Ok(serde_json::json!("items")),
                 _ => Err(BarqError::NodeOperationError {
@@ -256,6 +328,7 @@ mod tests {
             "#
             .to_string(),
             language: "javascript".to_string(),
+            mode: "runOnceForAllItems".to_string(),
             inputs: vec![INodeExecutionData::new(IDataObject::from(
                 json!({ "test": true }),
             ))],
@@ -290,6 +363,7 @@ mod tests {
             "#
             .to_string(),
             language: "javascript".to_string(),
+            mode: "runOnceForAllItems".to_string(),
             inputs: vec![],
         };
 
@@ -314,6 +388,7 @@ mod tests {
             "#
             .to_string(),
             language: "javascript".to_string(),
+            mode: "runOnceForAllItems".to_string(),
             inputs: vec![],
         };
 
@@ -335,6 +410,7 @@ mod tests {
         let ctx = MockCodeContext {
             js_code: "items".to_string(),
             language: "python".to_string(),
+            mode: "runOnceForAllItems".to_string(),
             inputs: vec![],
         };
 
@@ -345,5 +421,29 @@ mod tests {
             }
             _ => panic!("Expected NodeOperationError"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_run_once_for_each_item_mode_returns_one_item_per_input() {
+        let node = CodeNode::new();
+
+        let ctx = MockCodeContext {
+            js_code: r#"
+                item.json.processed = true;
+                item
+            "#
+            .to_string(),
+            language: "javascript".to_string(),
+            mode: "runOnceForEachItem".to_string(),
+            inputs: vec![
+                INodeExecutionData::new(IDataObject::from(json!({ "id": 1 }))),
+                INodeExecutionData::new(IDataObject::from(json!({ "id": 2 }))),
+            ],
+        };
+
+        let result = node.execute(&ctx).await.unwrap();
+        assert_eq!(result[0].len(), 2);
+        assert_eq!(result[0][0].json.0["processed"], true);
+        assert_eq!(result[0][1].json.0["processed"], true);
     }
 }

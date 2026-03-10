@@ -174,6 +174,72 @@ impl INodeType for SetNode {
 
 pub struct FilterNode;
 
+impl FilterNode {
+    fn parse_conditions(value: &Value) -> Vec<Value> {
+        if value.is_null() {
+            return Vec::new();
+        }
+
+        if let Some(array) = value.as_array() {
+            return array.clone();
+        }
+
+        if let Some(object) = value.as_object() {
+            if let Some(array) = object.get("conditions").and_then(|v| v.as_array()) {
+                return array.clone();
+            }
+        }
+
+        if let Some(raw) = value.as_str() {
+            if let Ok(parsed) = serde_json::from_str::<Value>(raw) {
+                return Self::parse_conditions(&parsed);
+            }
+        }
+
+        Vec::new()
+    }
+
+    fn numeric_value(value: &Value) -> Option<f64> {
+        value
+            .as_f64()
+            .or_else(|| value.as_str().and_then(|s| s.parse::<f64>().ok()))
+    }
+
+    fn evaluate_condition(operation: &str, value1: &Value, value2: Option<&Value>) -> bool {
+        let value1_str = value1.as_str().unwrap_or("");
+        let value1_num = Self::numeric_value(value1);
+
+        match operation {
+            "exists" => !value1.is_null() && value1.as_str().map(|s| !s.is_empty()).unwrap_or(true),
+            "notExists" => {
+                value1.is_null() || value1.as_str().map(|s| s.is_empty()).unwrap_or(false)
+            }
+            "contains" => value2
+                .and_then(|v| v.as_str())
+                .map(|needle| value1_str.contains(needle))
+                .unwrap_or(false),
+            "larger" => value2
+                .and_then(Self::numeric_value)
+                .and_then(|rhs| value1_num.map(|lhs| lhs > rhs))
+                .unwrap_or(false),
+            "largerEqual" => value2
+                .and_then(Self::numeric_value)
+                .and_then(|rhs| value1_num.map(|lhs| lhs >= rhs))
+                .unwrap_or(false),
+            "smaller" => value2
+                .and_then(Self::numeric_value)
+                .and_then(|rhs| value1_num.map(|lhs| lhs < rhs))
+                .unwrap_or(false),
+            "smallerEqual" => value2
+                .and_then(Self::numeric_value)
+                .and_then(|rhs| value1_num.map(|lhs| lhs <= rhs))
+                .unwrap_or(false),
+            "notEquals" => value2.map(|v| value1 != v).unwrap_or(!value1.is_null()),
+            _ => value2.map(|v| value1 == v).unwrap_or(!value1.is_null()),
+        }
+    }
+}
+
 #[async_trait]
 impl INodeType for FilterNode {
     fn get_description(&self) -> IDataObject {
@@ -194,35 +260,67 @@ impl INodeType for FilterNode {
             .await
             .map(|v| v.as_str().unwrap_or("equals").to_string())
             .unwrap_or_else(|_| "equals".to_string());
+        let combine_operation = context
+            .get_node_parameter("combineOperation", None)
+            .await
+            .map(|v| v.as_str().unwrap_or("all").to_string())
+            .unwrap_or_else(|_| "all".to_string());
 
         let mut output_items = Vec::new();
 
         for (item_index, item) in input_data.iter().enumerate() {
-            let v1 = context
-                .get_node_parameter_at_item("value1", item_index, None)
+            let configured_conditions = context
+                .get_node_parameter_at_item("conditions", item_index, None)
                 .await
-                .unwrap_or(serde_json::Value::Null);
+                .ok()
+                .map(|v| FilterNode::parse_conditions(&v))
+                .unwrap_or_default();
 
-            let mut keep = true;
+            let keep = if configured_conditions.is_empty() {
+                let value1 = context
+                    .get_node_parameter_at_item("value1", item_index, None)
+                    .await
+                    .unwrap_or(serde_json::Value::Null);
+                let value2 = context
+                    .get_node_parameter_at_item("value2", item_index, None)
+                    .await
+                    .ok();
 
-            if operation == "exists" {
-                keep = !v1.is_null();
-            } else if operation == "notExists" {
-                keep = v1.is_null();
-            } else if let Ok(v2) = context
-                .get_node_parameter_at_item("value2", item_index, None)
-                .await
-            {
-                let v1_str = v1.as_str().unwrap_or("");
-                let v2_str = v2.as_str().unwrap_or("");
-                if operation == "equals" {
-                    keep = v1 == v2;
-                } else if operation == "notEquals" {
-                    keep = v1 != v2;
-                } else if operation == "contains" {
-                    keep = v1_str.contains(v2_str);
+                FilterNode::evaluate_condition(&operation, &value1, value2.as_ref())
+            } else {
+                let condition_results: Vec<bool> = configured_conditions
+                    .iter()
+                    .map(|condition| {
+                        let op = condition
+                            .get("operation")
+                            .and_then(|v| v.as_str())
+                            .or_else(|| {
+                                condition
+                                    .get("operator")
+                                    .and_then(|v| v.get("operation"))
+                                    .and_then(|v| v.as_str())
+                            })
+                            .unwrap_or("equals");
+
+                        let value1 = condition
+                            .get("value1")
+                            .or_else(|| condition.get("leftValue"))
+                            .cloned()
+                            .unwrap_or(Value::Null);
+                        let value2 = condition
+                            .get("value2")
+                            .or_else(|| condition.get("rightValue"));
+
+                        FilterNode::evaluate_condition(op, &value1, value2)
+                    })
+                    .collect();
+
+                if combine_operation == "any" {
+                    condition_results.into_iter().any(|matched| matched)
+                } else {
+                    condition_results.into_iter().all(|matched| matched)
                 }
-            }
+            };
 
             if keep {
                 output_items.push(item.clone());
@@ -441,6 +539,28 @@ mod tests {
         let result = node.execute(&context).await.unwrap();
 
         assert_eq!(result[0].len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_filter_node_conditions_any_mode() {
+        let input = vec![INodeExecutionData::new(IDataObject::from(
+            serde_json::json!({"status": "ready"}),
+        ))];
+
+        let mut context = MockContext::new(input);
+        context.add_param("combineOperation", serde_json::json!("any"));
+        context.add_param(
+            "conditions",
+            serde_json::json!([
+                { "value1": "queued", "operation": "equals", "value2": "ready" },
+                { "value1": 10, "operation": "larger", "value2": 5 }
+            ]),
+        );
+
+        let node = FilterNode;
+        let result = node.execute(&context).await.unwrap();
+
+        assert_eq!(result[0].len(), 1);
     }
 
     #[tokio::test]
