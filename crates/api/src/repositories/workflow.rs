@@ -412,10 +412,13 @@ impl WorkflowRepository {
         let tag = self.ensure_tag_tx(&mut tx, name).await?;
         tx.commit().await?;
 
-        Ok(TagRecordEntity {
-            tag,
-            workflow_count: 0,
-        })
+        Ok(self
+            .find_tag_record_by_id(tag.id)
+            .await?
+            .unwrap_or(TagRecordEntity {
+                tag,
+                workflow_count: 0,
+            }))
     }
 
     pub async fn delete_tag(&self, id: Uuid) -> Result<bool> {
@@ -526,6 +529,31 @@ impl WorkflowRepository {
             .into_iter()
             .map(|row| (row.workflow_id, row.latest_version.unwrap_or_default()))
             .collect())
+    }
+
+    async fn find_tag_record_by_id(&self, id: Uuid) -> Result<Option<TagRecordEntity>> {
+        let row = sqlx::query_as::<_, TagCountRow>(
+            r#"
+            SELECT t.id, t.name, t.created_at, t.updated_at, COUNT(wt.workflow_id) AS workflow_count
+            FROM tags t
+            LEFT JOIN workflow_tags wt ON wt.tag_id = t.id
+            WHERE t.id = $1
+            GROUP BY t.id, t.name, t.created_at, t.updated_at
+            "#,
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|row| TagRecordEntity {
+            tag: TagEntity {
+                id: row.id,
+                name: row.name,
+                created_at: row.created_at,
+                updated_at: row.updated_at,
+            },
+            workflow_count: row.workflow_count,
+        }))
     }
 
     async fn insert_workflow_tx(
