@@ -8,6 +8,7 @@ pub mod crypto;
 pub mod db;
 pub mod execution_dispatch;
 pub mod execution_events;
+pub mod extension_runtime;
 pub mod extensions;
 pub mod governance;
 pub mod observability;

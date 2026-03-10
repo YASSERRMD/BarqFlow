@@ -1,5 +1,6 @@
 use crate::contracts::{
-    ExtensionBundleResponse, ExtensionPermissionScopeResponse, ExtensionProvidedAssetsResponse,
+    ExtensionActionResponse, ExtensionBundleResponse, ExtensionPermissionScopeResponse,
+    ExtensionProvidedAssetsResponse,
 };
 use crate::workflow_templates::find_workflow_template;
 use base64::Engine as _;
@@ -49,6 +50,8 @@ struct ExtensionManifest {
     #[serde(default)]
     capabilities: Vec<String>,
     #[serde(default)]
+    actions: Vec<ExtensionActionManifest>,
+    #[serde(default)]
     permissions: ExtensionPermissionManifest,
     #[serde(default)]
     provides: ExtensionProvidesManifest,
@@ -76,6 +79,16 @@ struct ExtensionProvidesManifest {
     templates: Vec<String>,
     #[serde(default)]
     panels: Vec<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExtensionActionManifest {
+    id: String,
+    name: String,
+    description: String,
+    #[serde(default)]
+    required_capabilities: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -252,6 +265,16 @@ fn load_manifest(
         homepage: manifest.homepage,
         entrypoint: manifest.entrypoint,
         capabilities: dedup_sorted(manifest.capabilities),
+        actions: manifest
+            .actions
+            .into_iter()
+            .map(|action| ExtensionActionResponse {
+                id: action.id,
+                name: action.name,
+                description: action.description,
+                required_capabilities: dedup_sorted(action.required_capabilities),
+            })
+            .collect(),
         permissions: ExtensionPermissionScopeResponse {
             network: dedup_sorted(manifest.permissions.network),
             credentials: dedup_sorted(manifest.permissions.credentials),
@@ -460,6 +483,23 @@ fn validate_manifest(
                 "Capability '{}' is not part of the current allow-list.",
                 capability
             ));
+        }
+    }
+
+    for action in &manifest.actions {
+        if action.id.trim().is_empty() {
+            warnings.push("Runtime action is missing a stable id.".to_string());
+        }
+        if action.name.trim().is_empty() {
+            warnings.push("Runtime action is missing a display name.".to_string());
+        }
+        for capability in &action.required_capabilities {
+            if !SUPPORTED_CAPABILITIES.contains(&capability.as_str()) {
+                warnings.push(format!(
+                    "Runtime action '{}' requires unsupported capability '{}'.",
+                    action.id, capability
+                ));
+            }
         }
     }
 

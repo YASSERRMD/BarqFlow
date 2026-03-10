@@ -663,6 +663,7 @@ mod tests {
             homepage: None,
             entrypoint: None,
             capabilities: vec![],
+            actions: vec![],
             permissions: ExtensionPermissionScopeResponse {
                 network: vec![],
                 credentials: vec![],
