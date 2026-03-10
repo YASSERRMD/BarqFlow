@@ -208,6 +208,27 @@ async fn resolve_secret_from_parameter_or_credentials(
     })
 }
 
+pub(crate) async fn resolve_parameter_from_node_or_credentials(
+    context: &dyn IExecuteFunctions,
+    node_name: &str,
+    parameter_name: &str,
+    field_label: &str,
+    item_index: usize,
+    credential_type: &str,
+    credential_fields: &[&str],
+) -> Result<String, BarqError> {
+    resolve_secret_from_parameter_or_credentials(
+        context,
+        node_name,
+        parameter_name,
+        field_label,
+        item_index,
+        credential_type,
+        credential_fields,
+    )
+    .await
+}
+
 fn first_non_empty_credential_value(
     credentials: &HashMap<String, Value>,
     fields: &[&str],

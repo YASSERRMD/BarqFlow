@@ -219,6 +219,65 @@ impl ICredentialType for BarqDbApiCredential {
     }
 }
 
+pub struct TwilioApiCredential;
+
+#[async_trait]
+impl ICredentialType for TwilioApiCredential {
+    fn get_description(&self) -> ICredentialProperties {
+        ICredentialProperties {
+            name: "twilioApi".to_string(),
+            display_name: "Twilio API".to_string(),
+            notice: Some("Used by Twilio integration nodes".to_string()),
+            properties: vec![
+                INodeProperty {
+                    display_name: "Account SID".to_string(),
+                    name: "accountSid".to_string(),
+                    r#type: NodePropertyType::String,
+                    default: None,
+                    description: Some("Twilio account SID".to_string()),
+                    hint: None,
+                    required: true,
+                    options: None,
+                    display_options: None,
+                },
+                INodeProperty {
+                    display_name: "Auth Token".to_string(),
+                    name: "authToken".to_string(),
+                    r#type: NodePropertyType::String,
+                    default: None,
+                    description: Some("Twilio auth token".to_string()),
+                    hint: None,
+                    required: true,
+                    options: None,
+                    display_options: None,
+                },
+            ],
+            documentation_url: Some(
+                "https://www.twilio.com/docs/usage/requests-to-twilio".to_string(),
+            ),
+            authenticate: None,
+        }
+    }
+
+    async fn test_credential(
+        &self,
+        credential_data: &HashMap<String, GenericValue>,
+    ) -> Result<bool, BarqError> {
+        let sid_ok = credential_data
+            .get("accountSid")
+            .and_then(|value| value.as_str())
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false);
+        let token_ok = credential_data
+            .get("authToken")
+            .and_then(|value| value.as_str())
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false);
+
+        Ok(sid_ok && token_ok)
+    }
+}
+
 pub struct TokenCredential {
     pub name: &'static str,
     pub display_name: &'static str,
@@ -290,6 +349,11 @@ pub fn register_all_credentials(registry: &CredentialRegistry) {
     let _ = registry.register_credential(CredentialInfo {
         name: "barqDbApi".to_string(),
         cred_impl: Arc::new(BarqDbApiCredential),
+    });
+
+    let _ = registry.register_credential(CredentialInfo {
+        name: "twilioApi".to_string(),
+        cred_impl: Arc::new(TwilioApiCredential),
     });
 
     let token_credentials = vec![
@@ -501,6 +565,26 @@ pub fn register_all_credentials(registry: &CredentialRegistry) {
             authenticate_header: Some("Authorization"),
         },
         TokenCredential {
+            name: "clickUpApi",
+            display_name: "ClickUp API",
+            notice: "Used by ClickUp integration nodes",
+            token_field: "authToken",
+            token_label: "Auth Token",
+            documentation_url: Some("https://developer.clickup.com/docs/authentication"),
+            authenticate_header: Some("Authorization"),
+        },
+        TokenCredential {
+            name: "mondayApi",
+            display_name: "Monday.com API",
+            notice: "Used by Monday.com integration nodes",
+            token_field: "authToken",
+            token_label: "Auth Token",
+            documentation_url: Some(
+                "https://developer.monday.com/api-reference/docs/authentication",
+            ),
+            authenticate_header: Some("Authorization"),
+        },
+        TokenCredential {
             name: "mysqlApi",
             display_name: "MySQL API",
             notice: "Used by MySQL integration nodes",
@@ -577,6 +661,15 @@ pub fn register_all_credentials(registry: &CredentialRegistry) {
             authenticate_header: Some("Authorization"),
         },
         TokenCredential {
+            name: "shopifyApi",
+            display_name: "Shopify Admin API",
+            notice: "Used by Shopify integration nodes",
+            token_field: "accessToken",
+            token_label: "Access Token",
+            documentation_url: Some("https://shopify.dev/docs/api/admin-rest"),
+            authenticate_header: None,
+        },
+        TokenCredential {
             name: "paypalApi",
             display_name: "PayPal API",
             notice: "Used by PayPal integration nodes",
@@ -625,6 +718,15 @@ pub fn register_all_credentials(registry: &CredentialRegistry) {
             documentation_url: Some("https://developers.freshdesk.com/api/"),
             authenticate_header: None,
         },
+        TokenCredential {
+            name: "pipedriveApi",
+            display_name: "Pipedrive API",
+            notice: "Used by Pipedrive integration nodes",
+            token_field: "apiToken",
+            token_label: "API Token",
+            documentation_url: Some("https://developers.pipedrive.com/docs/api/v1"),
+            authenticate_header: None,
+        },
     ];
 
     for credential in token_credentials {
@@ -668,6 +770,8 @@ mod tests {
         assert!(registry.get_credential("googleSheetsApi").is_some());
         assert!(registry.get_credential("oneDriveApi").is_some());
         assert!(registry.get_credential("linearApi").is_some());
+        assert!(registry.get_credential("clickUpApi").is_some());
+        assert!(registry.get_credential("mondayApi").is_some());
         assert!(registry.get_credential("mysqlApi").is_some());
         assert!(registry.get_credential("redisApi").is_some());
         assert!(registry.get_credential("zendeskApi").is_some());
@@ -676,10 +780,13 @@ mod tests {
         assert!(registry.get_credential("zoomApi").is_some());
         assert!(registry.get_credential("trelloApi").is_some());
         assert!(registry.get_credential("outlookApi").is_some());
+        assert!(registry.get_credential("shopifyApi").is_some());
         assert!(registry.get_credential("paypalApi").is_some());
         assert!(registry.get_credential("intercomApi").is_some());
         assert!(registry.get_credential("xeroApi").is_some());
         assert!(registry.get_credential("mailchimpApi").is_some());
         assert!(registry.get_credential("freshdeskApi").is_some());
+        assert!(registry.get_credential("pipedriveApi").is_some());
+        assert!(registry.get_credential("twilioApi").is_some());
     }
 }

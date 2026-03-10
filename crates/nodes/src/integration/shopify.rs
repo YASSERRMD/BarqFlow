@@ -1,7 +1,7 @@
 use crate::integration::common::{
     build_standard_output, build_url, ensure_required_string, execute_prepared_request,
     get_optional_param, get_optional_string_param, get_string_param, get_u64_param, parse_body,
-    parse_kv_pairs, run_count, PreparedRequest,
+    parse_kv_pairs, resolve_parameter_from_node_or_credentials, run_count, PreparedRequest,
 };
 use async_trait::async_trait;
 use barqflow_core::errors::BarqError;
@@ -56,12 +56,16 @@ impl INodeType for ShopifyNode {
             )
             .await;
             let timeout_ms = get_u64_param(context, "timeout", item_index, 60_000).await;
-            let access_token = ensure_required_string(
+            let access_token = resolve_parameter_from_node_or_credentials(
+                context,
                 "Shopify",
+                "accessToken",
                 "Access Token",
-                get_optional_string_param(context, "accessToken", item_index).await,
-                "Add a Shopify Admin API access token.",
-            )?;
+                item_index,
+                "shopifyApi",
+                &["accessToken"],
+            )
+            .await?;
 
             let mut headers = get_optional_param(context, "headers", item_index)
                 .await
@@ -161,6 +165,31 @@ mod tests {
         context.add_param("operation", json!("listProducts"));
         context.add_param("baseUrl", json!(server.url()));
         context.add_param("accessToken", json!("shopify-token"));
+
+        let result = ShopifyNode::new().execute(&context).await.unwrap();
+        mock.assert_async().await;
+        assert_eq!(
+            result[0][0].json.0.get("status").and_then(|v| v.as_u64()),
+            Some(200)
+        );
+    }
+
+    #[tokio::test]
+    async fn shopify_uses_bound_credential_when_access_token_is_missing() {
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock("GET", "/admin/api/2024-01/products.json")
+            .match_header("x-shopify-access-token", "shopify-token")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"products":[]}"#)
+            .create_async()
+            .await;
+
+        let mut context = MockContext::new("Shopify", "barqflow-nodes.shopify");
+        context.add_param("operation", json!("listProducts"));
+        context.add_param("baseUrl", json!(server.url()));
+        context.add_credential("shopifyApi", "accessToken", json!("shopify-token"));
 
         let result = ShopifyNode::new().execute(&context).await.unwrap();
         mock.assert_async().await;
