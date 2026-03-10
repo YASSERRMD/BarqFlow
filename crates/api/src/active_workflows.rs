@@ -1,14 +1,12 @@
 use crate::controllers::webhooks::{WebhookEndpoint, WebhookRegistry};
-use crate::credentials_provider::RepositoryCredentialProvider;
-use crate::repositories::credential::CredentialRepository;
-use crate::repositories::governance::GovernanceRepository;
 use crate::repositories::workflow::WorkflowRepository;
-use crate::subworkflow_executor::RepositorySubWorkflowExecutor;
-use barqflow_core::schema::{INode, INodeConnections, IWorkflowSettings, WorkflowDef};
-use barqflow_core::types::{RunId, WorkflowId};
+use crate::{
+    controllers::executions::AppState as ExecutionControllerState,
+    execution_dispatch::enqueue_workflow_execution,
+    repositories::execution_dispatch::ExecutionQueueKind,
+};
+use barqflow_core::schema::INode;
 use barqflow_db::models::WorkflowEntity;
-use barqflow_exec::runner::{ExecutionConfig, WorkflowRunContext, WorkflowRunner};
-use barqflow_registry::registry::NodeRegistry;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -21,9 +19,7 @@ pub type ActiveCronJobs = Arc<RwLock<HashMap<Uuid, Vec<Uuid>>>>;
 #[derive(Clone)]
 pub struct ActiveWorkflowManager {
     pub workflow_repo: Arc<WorkflowRepository>,
-    pub credential_repo: Arc<CredentialRepository>,
-    pub governance_repo: Arc<GovernanceRepository>,
-    pub node_registry: Arc<NodeRegistry>,
+    pub execution_dispatch_state: ExecutionControllerState,
     pub webhook_registry: WebhookRegistry,
     pub job_scheduler: JobScheduler,
     pub active_cron_jobs: ActiveCronJobs,
@@ -32,18 +28,14 @@ pub struct ActiveWorkflowManager {
 impl ActiveWorkflowManager {
     pub fn new(
         workflow_repo: Arc<WorkflowRepository>,
-        credential_repo: Arc<CredentialRepository>,
-        governance_repo: Arc<GovernanceRepository>,
-        node_registry: Arc<NodeRegistry>,
+        execution_dispatch_state: ExecutionControllerState,
         webhook_registry: WebhookRegistry,
         job_scheduler: JobScheduler,
         active_cron_jobs: ActiveCronJobs,
     ) -> Self {
         Self {
             workflow_repo,
-            credential_repo,
-            governance_repo,
-            node_registry,
+            execution_dispatch_state,
             webhook_registry,
             job_scheduler,
             active_cron_jobs,
@@ -195,65 +187,27 @@ impl ActiveWorkflowManager {
                 .to_string();
 
             let workflow_clone = workflow.clone();
-            let nodes_clone = nodes.clone();
-            let node_registry = Arc::clone(&self.node_registry);
-            let credential_repo = Arc::clone(&self.credential_repo);
-            let governance_repo = Arc::clone(&self.governance_repo);
-            let workflow_repo = Arc::clone(&self.workflow_repo);
+            let execution_dispatch_state = self.execution_dispatch_state.clone();
 
             let job = Job::new_async(cron_expr.as_str(), move |_uuid, _l| {
                 let workflow_clone = workflow_clone.clone();
-                let nodes_clone = nodes_clone.clone();
-                let node_registry = Arc::clone(&node_registry);
-                let credential_repo = Arc::clone(&credential_repo);
-                let governance_repo = Arc::clone(&governance_repo);
-                let workflow_repo = Arc::clone(&workflow_repo);
+                let execution_dispatch_state = execution_dispatch_state.clone();
 
                 Box::pin(async move {
-                    let connections: HashMap<String, INodeConnections> =
-                        serde_json::from_value(workflow_clone.connections.clone())
-                            .unwrap_or_default();
-                    let settings: IWorkflowSettings =
-                        serde_json::from_value(workflow_clone.settings.clone()).unwrap_or_default();
-
-                    let workflow_def = WorkflowDef {
-                        id: WorkflowId(workflow_clone.id),
-                        name: workflow_clone.name.clone(),
-                        nodes: nodes_clone.clone(),
-                        connections: connections.into_iter().collect(),
-                        active: workflow_clone.active,
-                        settings,
-                    };
-
-                    let credential_provider = Arc::new(RepositoryCredentialProvider::new(
-                        Arc::clone(&credential_repo),
-                        Arc::clone(&governance_repo),
-                        &nodes_clone,
-                    ));
-                    let subworkflow_executor = Arc::new(RepositorySubWorkflowExecutor::new(
-                        Arc::clone(&workflow_repo),
-                        Arc::clone(&credential_repo),
-                        Arc::clone(&governance_repo),
-                        Arc::clone(&node_registry),
-                    ));
-                    let runner = WorkflowRunner::new(node_registry, ExecutionConfig::default())
-                        .with_credential_provider(credential_provider)
-                        .with_subworkflow_executor(subworkflow_executor);
-                    let ctx = WorkflowRunContext {
-                        run_id: RunId::new(),
-                        workflow: workflow_def,
-                        static_data: None,
-                        manual: false,
-                        execution_id: None,
-                        parent_execution_id: None,
-                        cancellation_token: None,
-                        stop_after_node_id: None,
-                        event_sequence_start: 0,
-                    };
-
-                    if let Err(err) = runner.run_workflow(ctx).await {
+                    if let Err((_, err)) = enqueue_workflow_execution(
+                        &execution_dispatch_state,
+                        workflow_clone.workspace_id,
+                        &workflow_clone,
+                        ExecutionQueueKind::Trigger,
+                        "cron",
+                        false,
+                        None,
+                        None,
+                    )
+                    .await
+                    {
                         warn!(
-                            "Scheduled workflow '{}' execution failed: {}",
+                            "Scheduled workflow '{}' enqueue failed: {}",
                             workflow_clone.id, err
                         );
                     }

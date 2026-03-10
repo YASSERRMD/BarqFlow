@@ -1,5 +1,6 @@
 use crate::active_workflows::ActiveCronJobs;
 use crate::controllers::webhooks::{WebhookEndpoint, WebhookRegistry};
+use crate::repositories::execution_dispatch::ExecutionDispatchRepository;
 use crate::operations::{ExecutionDispatchMode, OperationsRuntime};
 use crate::routes::ActiveExecutionManager;
 use axum::{extract::State, http::StatusCode, routing::get, Json, Router};
@@ -15,6 +16,7 @@ pub struct AppState {
     pub active_executions: ActiveExecutionManager,
     pub node_registry: std::sync::Arc<barqflow_registry::registry::NodeRegistry>,
     pub credential_registry: std::sync::Arc<barqflow_registry::registry::CredentialRegistry>,
+    pub execution_dispatch_repo: std::sync::Arc<ExecutionDispatchRepository>,
     pub operations_runtime: OperationsRuntime,
 }
 
@@ -156,6 +158,12 @@ async fn get_runtime_health(
     State(state): State<AppState>,
 ) -> Result<Json<RuntimeHealthResponse>, (StatusCode, String)> {
     let dispatch = state.operations_runtime.dispatch_metrics_snapshot().await;
+    let queued_executions = state
+        .execution_dispatch_repo
+        .count_open_items()
+        .await
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+        .max(0) as usize;
     let pruning = state.operations_runtime.pruning_snapshot().await;
     let telemetry = state.operations_runtime.telemetry_snapshot();
     let active_executions = state.active_executions.read().await.len();
@@ -179,7 +187,7 @@ async fn get_runtime_health(
         server_time: Utc::now(),
         dispatch_mode: dispatch_mode_label(dispatch.mode),
         active_executions,
-        queued_executions: dispatch.queued_count,
+        queued_executions,
         worker_concurrency: dispatch.worker_concurrency,
         queue_capacity: dispatch.queue_capacity,
         webhook_endpoint_count,
@@ -197,6 +205,12 @@ async fn get_runtime_metrics(
     State(state): State<AppState>,
 ) -> Result<Json<RuntimeMetricsResponse>, (StatusCode, String)> {
     let dispatch = state.operations_runtime.dispatch_metrics_snapshot().await;
+    let queued_count = state
+        .execution_dispatch_repo
+        .count_open_items()
+        .await
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+        .max(0) as usize;
     let (webhook_endpoint_count, webhook_workflow_count) = {
         let registry = state.webhook_registry.read().map_err(|_| {
             (
@@ -217,7 +231,7 @@ async fn get_runtime_metrics(
             mode: dispatch_mode_label(dispatch.mode),
             worker_concurrency: dispatch.worker_concurrency,
             queue_capacity: dispatch.queue_capacity,
-            queued_count: dispatch.queued_count,
+            queued_count,
             running_count: dispatch.running_count,
             total_enqueued: dispatch.total_enqueued,
             total_started: dispatch.total_started,
@@ -280,6 +294,9 @@ mod tests {
         let node_registry = std::sync::Arc::new(barqflow_registry::registry::NodeRegistry::new());
         let credential_registry =
             std::sync::Arc::new(barqflow_registry::registry::CredentialRegistry::new());
+        let dispatch_pool = sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://barqflow:barqflow@localhost/barqflow")
+            .expect("lazy dispatch pool");
 
         AppState {
             webhook_registry,
@@ -287,6 +304,9 @@ mod tests {
             active_executions,
             node_registry,
             credential_registry,
+            execution_dispatch_repo: std::sync::Arc::new(ExecutionDispatchRepository::new(
+                dispatch_pool,
+            )),
             operations_runtime: OperationsRuntime::from_env(),
         }
     }
