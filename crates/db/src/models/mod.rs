@@ -5,6 +5,8 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct CredentialEntity {
     pub id: Uuid,
+    pub workspace_id: Uuid,
+    pub owner_user_id: Option<Uuid>,
     pub name: String,
     pub cred_type: String,
     pub data: serde_json::Value,
@@ -21,6 +23,8 @@ pub struct CredentialEntity {
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct WorkflowEntity {
     pub id: Uuid,
+    pub workspace_id: Uuid,
+    pub owner_user_id: Option<Uuid>,
     pub name: String,
     pub active: bool,
     pub nodes: serde_json::Value,
@@ -33,7 +37,28 @@ pub struct WorkflowEntity {
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct TagEntity {
     pub id: Uuid,
+    pub workspace_id: Uuid,
     pub name: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct WorkspaceEntity {
+    pub id: Uuid,
+    pub name: String,
+    pub slug: String,
+    pub created_by_user_id: Option<Uuid>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct WorkspaceMembershipEntity {
+    pub id: Uuid,
+    pub workspace_id: Uuid,
+    pub user_id: Uuid,
+    pub role: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -92,6 +117,22 @@ pub struct UserEntity {
     pub first_name: Option<String>,
     pub last_name: Option<String>,
     pub global_role: String,
+    pub active_workspace_id: Option<Uuid>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct ApiKeyEntity {
+    pub id: Uuid,
+    pub workspace_id: Uuid,
+    pub user_id: Uuid,
+    pub name: String,
+    pub key_prefix: String,
+    pub key_hash: String,
+    pub last_used_at: Option<DateTime<Utc>>,
+    pub expires_at: Option<DateTime<Utc>>,
+    pub revoked_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

@@ -15,7 +15,7 @@ impl UserRepo {
     pub async fn get_by_id(&self, id: Uuid) -> Result<Option<UserEntity>> {
         sqlx::query_as::<_, UserEntity>(
             r#"
-            SELECT id, email, password_hash, first_name, last_name, global_role, created_at, updated_at
+            SELECT id, email, password_hash, first_name, last_name, global_role, active_workspace_id, created_at, updated_at
             FROM users
             WHERE id = $1
             "#
@@ -28,7 +28,7 @@ impl UserRepo {
     pub async fn get_by_email(&self, email: &str) -> Result<Option<UserEntity>> {
         sqlx::query_as::<_, UserEntity>(
             r#"
-            SELECT id, email, password_hash, first_name, last_name, global_role, created_at, updated_at
+            SELECT id, email, password_hash, first_name, last_name, global_role, active_workspace_id, created_at, updated_at
             FROM users
             WHERE email = $1
             "#
@@ -51,9 +51,11 @@ impl UserRepo {
 
         sqlx::query_as::<_, UserEntity>(
             r#"
-            INSERT INTO users (id, email, password_hash, first_name, last_name, global_role, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            RETURNING id, email, password_hash, first_name, last_name, global_role, created_at, updated_at
+            INSERT INTO users (
+                id, email, password_hash, first_name, last_name, global_role, active_workspace_id, created_at, updated_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, NULL, $7, $8)
+            RETURNING id, email, password_hash, first_name, last_name, global_role, active_workspace_id, created_at, updated_at
             "#
         )
         .bind(id)
@@ -65,6 +67,50 @@ impl UserRepo {
         .bind(now)
         .bind(now)
         .fetch_one(&self.pool)
+        .await
+    }
+
+    pub async fn update_password(
+        &self,
+        id: Uuid,
+        password_hash: &str,
+    ) -> Result<Option<UserEntity>> {
+        let now = Utc::now();
+
+        sqlx::query_as::<_, UserEntity>(
+            r#"
+            UPDATE users
+            SET password_hash = $1, updated_at = $2
+            WHERE id = $3
+            RETURNING id, email, password_hash, first_name, last_name, global_role, active_workspace_id, created_at, updated_at
+            "#
+        )
+        .bind(password_hash)
+        .bind(now)
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    pub async fn set_active_workspace(
+        &self,
+        user_id: Uuid,
+        workspace_id: Uuid,
+    ) -> Result<Option<UserEntity>> {
+        let now = Utc::now();
+
+        sqlx::query_as::<_, UserEntity>(
+            r#"
+            UPDATE users
+            SET active_workspace_id = $1, updated_at = $2
+            WHERE id = $3
+            RETURNING id, email, password_hash, first_name, last_name, global_role, active_workspace_id, created_at, updated_at
+            "#
+        )
+        .bind(workspace_id)
+        .bind(now)
+        .bind(user_id)
+        .fetch_optional(&self.pool)
         .await
     }
 }
