@@ -1,6 +1,4 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import WorkflowEditor from '../views/WorkflowEditor.vue'
-import ExecutionViewer from '../views/ExecutionViewer.vue'
 
 const router = createRouter({
     history: createWebHistory(),
@@ -22,12 +20,12 @@ const router = createRouter({
         {
             path: '/workflow/:id',
             name: 'WorkflowEditor',
-            component: WorkflowEditor
+            component: () => import('../views/WorkflowEditor.vue')
         },
         {
             path: '/executions',
             name: 'Executions',
-            component: ExecutionViewer
+            component: () => import('../views/ExecutionViewer.vue')
         },
         {
             path: '/observability',
