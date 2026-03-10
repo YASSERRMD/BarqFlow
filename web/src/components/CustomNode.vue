@@ -69,7 +69,8 @@ const primaryLabel = computed(() => {
             :class="{
               'bg-blue-500 animate-pulse': data.status === 'running',
               'bg-green-500': data.status === 'success',
-              'bg-red-500': data.status === 'error'
+              'bg-red-500': data.status === 'error',
+              'bg-amber-500': data.status === 'waiting'
             }"></span>
        <span class="text-xs font-medium text-slate-600 capitalize">{{ data.status }}</span>
     </div>
