@@ -131,6 +131,18 @@ const FALLBACK_NODE_CREDENTIALS: Record<
   'barqflow-nodes.paypal': [
     { credentialType: 'paypalApi', displayName: 'PayPal API', required: true },
   ],
+  'barqflow-nodes.intercom': [
+    { credentialType: 'intercomApi', displayName: 'Intercom API', required: true },
+  ],
+  'barqflow-nodes.xero': [
+    { credentialType: 'xeroApi', displayName: 'Xero API', required: true },
+  ],
+  'barqflow-nodes.mailchimp': [
+    { credentialType: 'mailchimpApi', displayName: 'Mailchimp API', required: true },
+  ],
+  'barqflow-nodes.freshdesk': [
+    { credentialType: 'freshdeskApi', displayName: 'Freshdesk API', required: true },
+  ],
 }
 
 const nodeSchema = computed(() => {
