@@ -1,6 +1,6 @@
 use barqflow_db::models::ExecutionLogEntity;
 use chrono::{DateTime, Utc};
-use sqlx::{PgPool, Result};
+use sqlx::{PgPool, Postgres, QueryBuilder, Result};
 use uuid::Uuid;
 
 pub struct ExecutionLogRepository {
@@ -76,6 +76,42 @@ impl ExecutionLogRepository {
         .bind(limit as i64)
         .fetch_all(&self.pool)
         .await
+    }
+
+    pub async fn list_recent_for_workflow_ids(
+        &self,
+        workflow_ids: &[Uuid],
+        since: DateTime<Utc>,
+        limit: usize,
+    ) -> Result<Vec<ExecutionLogEntity>> {
+        if workflow_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut query_builder = QueryBuilder::<Postgres>::new(
+            r#"
+            SELECT id, execution_id, workflow_id, level, event_type, message, node_id, node_name, payload, created_at
+            FROM execution_logs
+            WHERE workflow_id IN (
+            "#,
+        );
+
+        let mut separated = query_builder.separated(", ");
+        for workflow_id in workflow_ids {
+            separated.push_bind(workflow_id);
+        }
+        separated.push_unseparated(")");
+
+        query_builder
+            .push(" AND created_at >= ")
+            .push_bind(since)
+            .push(" ORDER BY created_at ASC LIMIT ")
+            .push_bind(limit as i64);
+
+        query_builder
+            .build_query_as::<ExecutionLogEntity>()
+            .fetch_all(&self.pool)
+            .await
     }
 
     pub async fn count_prunable_for_executions_before(&self, before: DateTime<Utc>) -> Result<u64> {

@@ -4,6 +4,7 @@ pub mod health;
 pub mod identity;
 pub mod nodes;
 pub mod oauth2;
+pub mod observability;
 pub mod settings;
 pub mod studio;
 pub mod users;

@@ -470,6 +470,125 @@ pub struct OperationsOverviewResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct LatencyBucketResponse {
+    pub label: String,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeLatencyHistogramResponse {
+    pub workflow_id: Uuid,
+    pub workflow_name: String,
+    pub node_name: String,
+    pub node_type: String,
+    pub samples: usize,
+    pub failed_runs: usize,
+    pub avg_duration_ms: u64,
+    pub p95_duration_ms: u64,
+    pub max_duration_ms: u64,
+    pub histogram: Vec<LatencyBucketResponse>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowBottleneckResponse {
+    pub workflow_id: Uuid,
+    pub workflow_name: String,
+    pub node_name: String,
+    pub node_type: String,
+    pub samples: usize,
+    pub failure_count: usize,
+    pub avg_duration_ms: u64,
+    pub p95_duration_ms: u64,
+    pub contribution_rate: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FailureClusterResponse {
+    pub cluster_key: String,
+    pub workflow_id: Option<Uuid>,
+    pub workflow_name: Option<String>,
+    pub node_name: Option<String>,
+    pub node_type: Option<String>,
+    pub level: String,
+    pub event_type: Option<String>,
+    pub message: String,
+    pub failure_count: usize,
+    pub affected_execution_count: usize,
+    pub last_seen_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialHealthResponse {
+    pub credential_id: Uuid,
+    pub name: String,
+    pub credential_type: String,
+    pub health: String,
+    pub issues: Vec<String>,
+    pub last_test_status: Option<String>,
+    pub last_tested_at: Option<DateTime<Utc>>,
+    pub last_used_at: Option<DateTime<Utc>>,
+    pub rotated_at: Option<DateTime<Utc>>,
+    pub usage_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionFlamegraphSpanResponse {
+    pub node_name: String,
+    pub node_type: String,
+    pub offset_ms: u64,
+    pub duration_ms: u64,
+    pub status: String,
+    pub started_at: DateTime<Utc>,
+    pub finished_at: DateTime<Utc>,
+    pub input_items: usize,
+    pub output_items: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionFlamegraphResponse {
+    pub execution_id: Uuid,
+    pub workflow_id: Uuid,
+    pub workflow_name: String,
+    pub status: String,
+    pub started_at: DateTime<Utc>,
+    pub stopped_at: Option<DateTime<Utc>>,
+    pub total_duration_ms: u64,
+    pub spans: Vec<ExecutionFlamegraphSpanResponse>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObservabilityOverviewResponse {
+    pub workspace_id: Uuid,
+    pub generated_at: DateTime<Utc>,
+    pub window_hours: u32,
+    pub workflow_count: usize,
+    pub execution_count: usize,
+    pub terminal_execution_count: usize,
+    pub successful_execution_count: usize,
+    pub failed_execution_count: usize,
+    pub stopped_execution_count: usize,
+    pub queued_execution_count: usize,
+    pub running_execution_count: usize,
+    pub waiting_execution_count: usize,
+    pub success_rate: f64,
+    pub failure_rate: f64,
+    pub average_execution_duration_ms: u64,
+    pub node_latency_histograms: Vec<NodeLatencyHistogramResponse>,
+    pub workflow_bottlenecks: Vec<WorkflowBottleneckResponse>,
+    pub failure_clusters: Vec<FailureClusterResponse>,
+    pub credential_health: Vec<CredentialHealthResponse>,
+    pub execution_flamegraphs: Vec<ExecutionFlamegraphResponse>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PruneExecutionsResponse {
     pub cutoff: DateTime<Utc>,
     pub ran_at: DateTime<Utc>,
