@@ -4,7 +4,6 @@ use barqflow_db::pool::init_db_pool;
 use crate::state::AppState;
 use crate::boot::run_boot_sequence;
 use std::net::SocketAddr;
-use std::sync::Arc;
 
 /// Start the BarqFlow server.
 ///
