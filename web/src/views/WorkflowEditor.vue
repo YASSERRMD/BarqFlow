@@ -68,6 +68,36 @@ const NODE_CREDENTIAL_REQUIREMENTS: Record<
   'barqflow-nodes.telegram': [
     { credentialType: 'telegramApi', displayName: 'Telegram Bot API', required: true },
   ],
+  'barqflow-nodes.airtable': [
+    { credentialType: 'airtableApi', displayName: 'Airtable API', required: true },
+  ],
+  'barqflow-nodes.awsS3': [
+    { credentialType: 'awsS3Api', displayName: 'AWS S3 API', required: true },
+  ],
+  'barqflow-nodes.bitbucket': [
+    { credentialType: 'bitbucketApi', displayName: 'Bitbucket API', required: true },
+  ],
+  'barqflow-nodes.calendly': [
+    { credentialType: 'calendlyApi', displayName: 'Calendly API', required: true },
+  ],
+  'barqflow-nodes.dropbox': [
+    { credentialType: 'dropboxApi', displayName: 'Dropbox API', required: true },
+  ],
+  'barqflow-nodes.gitlab': [
+    { credentialType: 'gitlabApi', displayName: 'GitLab API', required: true },
+  ],
+  'barqflow-nodes.gmail': [
+    { credentialType: 'gmailApi', displayName: 'Gmail API', required: true },
+  ],
+  'barqflow-nodes.googleDrive': [
+    { credentialType: 'googleDriveApi', displayName: 'Google Drive API', required: true },
+  ],
+  'barqflow-nodes.googleSheets': [
+    { credentialType: 'googleSheetsApi', displayName: 'Google Sheets API', required: true },
+  ],
+  'barqflow-nodes.oneDrive': [
+    { credentialType: 'oneDriveApi', displayName: 'OneDrive API', required: true },
+  ],
 }
 
 function normalizeNodeCredentials(rawCredentials: any, nodeId: string): Record<string, string> {

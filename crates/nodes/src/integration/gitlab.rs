@@ -1,7 +1,7 @@
 use crate::integration::common::{
     build_standard_output, build_url, ensure_required_string, execute_prepared_request,
     get_optional_param, get_optional_string_param, get_string_param, get_u64_param, parse_body,
-    parse_kv_pairs, require_auth_token, run_count, PreparedRequest,
+    parse_kv_pairs, resolve_auth_token, run_count, PreparedRequest,
 };
 use async_trait::async_trait;
 use barqflow_core::errors::BarqError;
@@ -49,10 +49,14 @@ impl INodeType for GitlabNode {
             let base_url =
                 get_string_param(context, "baseUrl", item_index, "https://gitlab.com").await;
             let timeout_ms = get_u64_param(context, "timeout", item_index, 60_000).await;
-            let token = require_auth_token(
+            let token = resolve_auth_token(
+                context,
                 "GitLab",
-                get_optional_string_param(context, "authToken", item_index).await,
-            )?;
+                item_index,
+                "gitlabApi",
+                &["accessToken", "privateToken", "apiKey"],
+            )
+            .await?;
 
             let mut headers = get_optional_param(context, "headers", item_index)
                 .await
@@ -164,6 +168,32 @@ mod tests {
         context.add_param("baseUrl", json!(server.url()));
         context.add_param("authToken", json!("glpat"));
         context.add_param("projectId", json!("123"));
+
+        let result = GitlabNode::new().execute(&context).await.unwrap();
+        mock.assert_async().await;
+        assert_eq!(
+            result[0][0].json.0.get("status").and_then(|v| v.as_u64()),
+            Some(200)
+        );
+    }
+
+    #[tokio::test]
+    async fn gitlab_uses_bound_credential_when_auth_token_is_empty() {
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock("GET", "/api/v4/projects/123")
+            .match_header("private-token", "glpat")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"id":123}"#)
+            .create_async()
+            .await;
+
+        let mut context = MockContext::new("GitLab", "barqflow-nodes.gitlab");
+        context.add_param("operation", json!("getProject"));
+        context.add_param("baseUrl", json!(server.url()));
+        context.add_param("projectId", json!("123"));
+        context.add_credential("gitlabApi", "privateToken", json!("glpat"));
 
         let result = GitlabNode::new().execute(&context).await.unwrap();
         mock.assert_async().await;
