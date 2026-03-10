@@ -21,24 +21,34 @@ import {
   changePassword,
   createApiKey,
   createWorkspace,
+  getOperationsOverview,
   getRuntimeSettings,
   listApiKeys,
   listWorkspaceMembers,
   listWorkspaces,
+  pruneExecutions,
   revokeApiKey,
   selectWorkspace,
-  type RuntimeSettings,
 } from '../features/settings/api'
-import type { ApiKeyCreateResult, ApiKeyRecord, WorkspaceMember, WorkspaceSummary } from '../types/contracts'
+import type {
+  ApiKeyCreateResult,
+  ApiKeyRecord,
+  OperationsOverview,
+  RuntimeSettings,
+  WorkspaceMember,
+  WorkspaceSummary,
+} from '../types/contracts'
 
 const authStore = useAuthStore()
 
 const runtime = ref<RuntimeSettings | null>(null)
+const operations = ref<OperationsOverview | null>(null)
 const workspaces = ref<WorkspaceSummary[]>([])
 const members = ref<WorkspaceMember[]>([])
 const apiKeys = ref<ApiKeyRecord[]>([])
 
 const loading = ref(false)
+const pruningLoading = ref(false)
 const error = ref<string | null>(null)
 const successMessage = ref<string | null>(null)
 const createdApiKey = ref<ApiKeyCreateResult | null>(null)
@@ -54,6 +64,7 @@ const canWriteWorkspace = computed(() => ['owner', 'admin', 'member'].includes(a
 const canManageMembers = computed(() => ['owner', 'admin'].includes(authStore.user?.workspaceRole || ''))
 const activeApiKeysCount = computed(() => apiKeys.value.filter((key) => !key.revokedAt).length)
 const workspaceMemberCount = computed(() => members.value.length)
+const canRunPrune = computed(() => ['owner', 'admin'].includes(authStore.user?.workspaceRole || '') && !!operations.value?.pruning.enabled)
 const formattedServerTime = computed(() => {
   if (!runtime.value?.serverTime) return '-'
   return new Date(runtime.value.serverTime).toLocaleString()
@@ -68,14 +79,16 @@ async function loadSettingsSurface() {
   loading.value = true
   error.value = null
   try {
-    const [runtimeResponse, workspacesResponse, membersResponse, apiKeysResponse] = await Promise.all([
+    const [runtimeResponse, operationsResponse, workspacesResponse, membersResponse, apiKeysResponse] = await Promise.all([
       getRuntimeSettings(),
+      getOperationsOverview(),
       listWorkspaces(),
       listWorkspaceMembers(),
       listApiKeys(),
     ])
 
     runtime.value = runtimeResponse.data
+    operations.value = operationsResponse.data
     workspaces.value = workspacesResponse.data
     members.value = membersResponse.data
     apiKeys.value = apiKeysResponse.data
@@ -211,6 +224,26 @@ async function handlePasswordChange() {
     setFeedback('Password updated.')
   } catch (err: any) {
     error.value = err?.response?.data?.message || err?.response?.data || err?.message || 'Failed to update password'
+  }
+}
+
+async function handlePruneExecutions() {
+  if (!canRunPrune.value) return
+
+  pruningLoading.value = true
+  error.value = null
+  successMessage.value = null
+
+  try {
+    const response = await pruneExecutions()
+    await loadSettingsSurface()
+    setFeedback(
+      `Execution retention run completed. Deleted ${response.data.executionsDeleted} executions, ${response.data.logsDeleted} log records, and ${response.data.waitResumesDeleted} wait tokens.`,
+    )
+  } catch (err: any) {
+    error.value = err?.response?.data?.message || err?.response?.data || err?.message || 'Failed to prune execution data'
+  } finally {
+    pruningLoading.value = false
   }
 }
 
@@ -544,9 +577,19 @@ onMounted(refreshSurface)
               <div class="flex items-start justify-between gap-4">
                 <div>
                   <p class="text-sm font-semibold text-slate-950">Runtime posture</p>
-                  <p class="mt-1 text-sm text-slate-500">Instance health indicators and registry footprint for this BarqFlow deployment.</p>
+                  <p class="mt-1 text-sm text-slate-500">Runtime health, worker dispatch, telemetry hooks, and retention controls for this BarqFlow deployment.</p>
                 </div>
-                <ShieldCheck class="mt-1 h-5 w-5 text-slate-400" />
+                <div class="flex items-center gap-2">
+                  <button
+                    class="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    :disabled="!canRunPrune || pruningLoading"
+                    @click="handlePruneExecutions"
+                  >
+                    <RefreshCw :class="['h-3.5 w-3.5', pruningLoading ? 'animate-spin' : '']" />
+                    {{ pruningLoading ? 'Pruning…' : 'Run prune' }}
+                  </button>
+                  <ShieldCheck class="mt-1 h-5 w-5 text-slate-400" />
+                </div>
               </div>
 
               <div class="mt-5 grid gap-3">
@@ -582,6 +625,97 @@ onMounted(refreshSurface)
                     {{ runtime?.encryptionKeyConfigured ? 'Configured' : 'Missing' }}
                   </p>
                 </div>
+                <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <div class="flex items-center gap-2 text-sm font-medium text-slate-500">
+                    <Server class="h-4 w-4" />
+                    Execution dispatch
+                  </div>
+                  <p class="mt-2 text-base font-semibold capitalize text-slate-950">
+                    {{ operations?.dispatch.mode || runtime?.executionMode || '-' }}
+                  </p>
+                  <p class="mt-1 text-xs text-slate-500">
+                    {{ operations?.dispatch.runningCount ?? 0 }} running, {{ operations?.dispatch.queuedCount ?? 0 }} queued, {{ runtime?.workerConcurrency || 0 }} workers
+                  </p>
+                </div>
+                <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <div class="flex items-center gap-2 text-sm font-medium text-slate-500">
+                    <Workflow class="h-4 w-4" />
+                    Queue capacity
+                  </div>
+                  <p class="mt-2 text-base font-semibold text-slate-950">
+                    {{ operations?.dispatch.queueCapacity ?? runtime?.queueCapacity ?? 0 }}
+                  </p>
+                  <p class="mt-1 text-xs text-slate-500">
+                    {{ operations?.dispatch.totalEnqueued ?? 0 }} enqueued since start
+                  </p>
+                </div>
+                <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <div class="flex items-center gap-2 text-sm font-medium text-slate-500">
+                    <CheckCircle2 class="h-4 w-4" />
+                    Telemetry and tracing
+                  </div>
+                  <p class="mt-2 text-base font-semibold text-slate-950">
+                    {{ operations?.telemetry.enabled || runtime?.tracingEnabled ? 'Enabled' : 'Disabled' }}
+                  </p>
+                  <p class="mt-1 text-xs text-slate-500">
+                    {{ operations?.telemetry.format || runtime?.traceFormat || 'pretty' }} format via {{ operations?.telemetry.requestIdHeader || 'x-request-id' }}
+                  </p>
+                </div>
+                <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <div class="flex items-center gap-2 text-sm font-medium text-slate-500">
+                    <AlertTriangle class="h-4 w-4" />
+                    Execution retention
+                  </div>
+                  <p class="mt-2 text-base font-semibold text-slate-950">
+                    {{ operations?.pruning.enabled || runtime?.pruningEnabled ? `${operations?.pruning.retentionDays || runtime?.executionRetentionDays || 0} days` : 'Disabled' }}
+                  </p>
+                  <p class="mt-1 text-xs text-slate-500">
+                    Last run {{ operations?.pruning.lastRunAt ? new Date(operations.pruning.lastRunAt).toLocaleString() : 'not yet executed' }}
+                  </p>
+                </div>
+              </div>
+
+              <div class="mt-5 rounded-[1.75rem] border border-slate-200 bg-slate-50 p-4">
+                <div class="grid gap-3 md:grid-cols-2">
+                  <div>
+                    <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Dispatch totals</p>
+                    <div class="mt-3 grid gap-3 sm:grid-cols-3">
+                      <div class="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                        <p class="text-[11px] uppercase tracking-[0.16em] text-slate-400">Started</p>
+                        <p class="mt-1 text-lg font-semibold text-slate-950">{{ operations?.dispatch.totalStarted ?? 0 }}</p>
+                      </div>
+                      <div class="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                        <p class="text-[11px] uppercase tracking-[0.16em] text-slate-400">Finished</p>
+                        <p class="mt-1 text-lg font-semibold text-slate-950">{{ operations?.dispatch.totalFinished ?? 0 }}</p>
+                      </div>
+                      <div class="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                        <p class="text-[11px] uppercase tracking-[0.16em] text-slate-400">Rejected</p>
+                        <p class="mt-1 text-lg font-semibold text-slate-950">{{ operations?.dispatch.totalFailedToDispatch ?? 0 }}</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div>
+                    <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Trigger footprint</p>
+                    <div class="mt-3 grid gap-3 sm:grid-cols-3">
+                      <div class="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                        <p class="text-[11px] uppercase tracking-[0.16em] text-slate-400">Active runs</p>
+                        <p class="mt-1 text-lg font-semibold text-slate-950">{{ operations?.activeExecutions ?? 0 }}</p>
+                      </div>
+                      <div class="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                        <p class="text-[11px] uppercase tracking-[0.16em] text-slate-400">Webhooks</p>
+                        <p class="mt-1 text-lg font-semibold text-slate-950">{{ operations?.webhookEndpointCount ?? 0 }}</p>
+                      </div>
+                      <div class="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                        <p class="text-[11px] uppercase tracking-[0.16em] text-slate-400">Cron jobs</p>
+                        <p class="mt-1 text-lg font-semibold text-slate-950">{{ operations?.cronJobCount ?? 0 }}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <p v-if="!operations?.pruning.enabled && !runtime?.pruningEnabled" class="mt-4 text-xs text-slate-500">
+                  Automatic execution retention is disabled for this deployment.
+                </p>
               </div>
             </div>
           </div>
