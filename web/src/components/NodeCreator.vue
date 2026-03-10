@@ -16,34 +16,68 @@ const emit = defineEmits<{
 const nodeStore = useNodeStore()
 const searchQuery = ref('')
 const activeCategory = ref('All')
-const categories = ['All', 'Triggers', 'Integrations', 'Data & Logic', 'Core']
+const supportFilter = ref<'supported' | 'beta' | 'all'>('supported')
+
+const categories = computed(() => {
+  const values = new Set(nodeStore.nodeTypes.map((node: any) => node.category || 'Core'))
+  return ['All', ...Array.from(values).sort()]
+})
+
+const supportFilters = [
+  { id: 'supported', label: 'Production' },
+  { id: 'beta', label: 'Beta' },
+  { id: 'all', label: 'All' },
+] as const
 
 const filteredNodes = computed(() => {
-  let nodes = nodeStore.nodeTypes;
-  
+  let nodes = nodeStore.nodeTypes
+
+  if (supportFilter.value !== 'all') {
+    nodes = nodes.filter((node: any) => node.supportTier === supportFilter.value)
+  }
+
   if (searchQuery.value) {
-    const q = searchQuery.value.toLowerCase();
-    nodes = nodes.filter((n: any) => 
-      n.name.toLowerCase().includes(q) || n.description.toLowerCase().includes(q) || n.schema?.name?.toLowerCase().includes(q)
-    );
+    const q = searchQuery.value.toLowerCase()
+    nodes = nodes.filter(
+      (n: any) =>
+        n.name.toLowerCase().includes(q) ||
+        n.description.toLowerCase().includes(q) ||
+        n.schema?.name?.toLowerCase().includes(q) ||
+        n.supportNote?.toLowerCase().includes(q),
+    )
   }
-  
+
   if (activeCategory.value !== 'All') {
-    nodes = nodes.filter((n: any) => n.category === activeCategory.value);
+    nodes = nodes.filter((n: any) => n.category === activeCategory.value)
   }
-  
-  const grouped: Record<string, any[]> = {};
+
+  const grouped: Record<string, any[]> = {}
   nodes.forEach((n: any) => {
-    const cat = n.category || 'Core';
-    if (!grouped[cat]) grouped[cat] = [];
-    grouped[cat].push(n);
-  });
-  
-  return grouped;
+    const cat = n.category || 'Core'
+    if (!grouped[cat]) grouped[cat] = []
+    grouped[cat].push(n)
+  })
+
+  Object.values(grouped).forEach((items) => {
+    items.sort((left: any, right: any) => left.name.localeCompare(right.name))
+  })
+
+  return grouped
 })
 
 function onDragStart(event: DragEvent, nodeTypeObj: any) {
   emit('dragstart', event, nodeTypeObj)
+}
+
+function supportBadgeClass(tier: string) {
+  switch (tier) {
+    case 'supported':
+      return 'bg-emerald-100 text-emerald-700'
+    case 'beta':
+      return 'bg-amber-100 text-amber-700'
+    default:
+      return 'bg-slate-100 text-slate-600'
+  }
 }
 </script>
 
@@ -76,6 +110,18 @@ function onDragStart(event: DragEvent, nodeTypeObj: any) {
           placeholder="Search nodes..."
           class="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
         />
+      </div>
+
+      <div class="mb-3 flex gap-2">
+        <button
+          v-for="filter in supportFilters"
+          :key="filter.id"
+          @click="supportFilter = filter.id"
+          class="rounded-full px-3 py-1.5 text-xs font-semibold transition-colors"
+          :class="supportFilter === filter.id ? 'bg-slate-950 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'"
+        >
+          {{ filter.label }}
+        </button>
       </div>
       
       <!-- Category Tabs -->
@@ -111,11 +157,22 @@ function onDragStart(event: DragEvent, nodeTypeObj: any) {
                   <component :is="getNodeVisuals(nt.schema?.name || '').icon" class="w-5 h-5" />
                 </div>
                 <div class="flex-1 min-w-0">
-                  <h4 class="text-[13px] font-bold text-slate-900 truncate">{{ nt.name }}</h4>
+                  <div class="flex items-center gap-2">
+                    <h4 class="text-[13px] font-bold text-slate-900 truncate">{{ nt.name }}</h4>
+                    <span
+                      class="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.16em]"
+                      :class="supportBadgeClass(nt.supportTier)"
+                    >
+                      {{ nt.supportTier }}
+                    </span>
+                  </div>
                   <p class="text-[10px] text-slate-500 font-medium uppercase tracking-wider">{{ nt.kind }}</p>
                 </div>
               </div>
               <p class="text-[11px] text-slate-500 line-clamp-2 mt-1 px-1 leading-snug">{{ nt.description }}</p>
+              <p v-if="nt.supportNote" class="px-1 text-[11px] leading-snug text-slate-400">
+                {{ nt.supportNote }}
+              </p>
             </div>
           </div>
         </div>
