@@ -1,7 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { Plus, Search, Shield, Key, Lock, X, Trash2, Edit2, FlaskConical, CheckCircle2, XCircle, Loader2 } from 'lucide-vue-next'
-import api from '../api'
+import {
+  createCredential,
+  deleteCredentialById,
+  listCredentials,
+  listCredentialTypes,
+  testCredentialType,
+  testSavedCredentialById,
+  updateCredential,
+} from '../features/credentials/api'
 
 const credentials = ref<any[]>([])
 const credentialTypes = ref<any[]>([])
@@ -155,7 +163,7 @@ function changeType() {
 
 async function fetchCredentials() {
   try {
-    const res = await api.get('/credentials')
+    const res = await listCredentials()
     credentials.value = res.data
   } catch (err) {
     console.error(err)
@@ -212,7 +220,7 @@ function compactCredentialData(raw: Record<string, any>) {
 
 async function fetchCredentialTypes() {
   try {
-    const res = await api.get('/credentials/types')
+    const res = await listCredentialTypes()
     credentialTypes.value = res.data
   } catch (err) {
     console.error(err)
@@ -227,7 +235,7 @@ async function testCredential() {
   modalSuccess.value = null
 
   try {
-    const res = await api.post('/credentials/test', {
+    const res = await testCredentialType({
       credentialType: selectedType.value.name,
       data: newCredentialData.value,
     })
@@ -267,12 +275,12 @@ async function saveCredential() {
         throw new Error('Missing credential id for edit operation')
       }
 
-      await api.put(`/credentials/${editingCredentialId.value}`, {
+      await updateCredential(editingCredentialId.value, {
         name: newCredentialName.value,
         data: dataPayload,
       })
     } else {
-      await api.post('/credentials', {
+      await createCredential({
         name: newCredentialName.value,
         credentialType: selectedType.value.name,
         data: dataPayload,
@@ -301,7 +309,7 @@ async function testSavedCredential(id: string) {
   }
 
   try {
-    const res = await api.post(`/credentials/${id}/test`)
+    const res = await testSavedCredentialById(id)
     const valid = !!res.data?.valid
     rowTestResult.value = {
       ...rowTestResult.value,
@@ -333,7 +341,7 @@ async function deleteCredential(id: string) {
   if (!confirmed) return
 
   try {
-    await api.delete(`/credentials/${id}`)
+    await deleteCredentialById(id)
     credentials.value = credentials.value.filter((c) => c.id !== id)
     delete rowTestResult.value[id]
     delete rowTestLoading.value[id]

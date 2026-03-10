@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { Clock, CheckCircle2, XCircle, Loader2, Search, RefreshCw, RotateCcw, Square, Trash2, X } from 'lucide-vue-next'
-import api from '../api'
+import {
+  deleteExecution as deleteExecutionRequest,
+  listExecutions,
+  retryExecution as retryExecutionRequest,
+  stopExecution as stopExecutionRequest,
+} from '../features/executions/api'
 
 interface ExecutionEntity {
   id: string
@@ -95,7 +100,7 @@ async function fetchExecutions() {
   loading.value = true
   error.value = null
   try {
-    const res = await api.get('/executions', { params: { limit: 100 } })
+    const res = await listExecutions({ limit: 100 })
     executions.value = res.data
 
     if (selectedExecution.value) {
@@ -113,7 +118,7 @@ async function retryExecution(id: string) {
   actionLoading.value = true
   error.value = null
   try {
-    await api.post(`/executions/${id}/retry`)
+    await retryExecutionRequest(id)
     await fetchExecutions()
   } catch (err: any) {
     error.value = err?.response?.data || err?.message || 'Failed to retry execution'
@@ -126,7 +131,7 @@ async function stopExecution(id: string) {
   actionLoading.value = true
   error.value = null
   try {
-    await api.post(`/executions/${id}/stop`)
+    await stopExecutionRequest(id)
     await fetchExecutions()
   } catch (err: any) {
     error.value = err?.response?.data || err?.message || 'Failed to stop execution'
@@ -142,7 +147,7 @@ async function deleteExecution(id: string) {
   actionLoading.value = true
   error.value = null
   try {
-    await api.delete(`/executions/${id}`)
+    await deleteExecutionRequest(id)
     executions.value = executions.value.filter((exec) => exec.id !== id)
     if (selectedExecution.value?.id === id) {
       selectedExecution.value = null

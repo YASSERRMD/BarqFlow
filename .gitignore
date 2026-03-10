@@ -9,6 +9,8 @@ web/dist/
 web/src/**/*.vue.js
 web/src/**/*.vue.js.map
 web/src/**/*.js.map
+web/src/features/**/*.js
+web/src/types/*.js
 web/src/main.js
 web/src/router/index.js
 web/src/api/index.js

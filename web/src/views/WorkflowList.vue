@@ -3,7 +3,7 @@ import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Plus, Search, MoreVertical, Calendar, Trash2, Edit2, Loader2, Workflow, Power, Copy } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { useWorkflowStore } from '../stores/workflows'
-import api from '../api'
+import { listExecutions } from '../features/executions/api'
 
 const router = useRouter()
 const workflowStore = useWorkflowStore()
@@ -66,7 +66,7 @@ async function fetchWorkflows() {
 
 async function fetchExecutionMetadata() {
   try {
-    const response = await api.get('/executions', { params: { limit: 500 } })
+    const response = await listExecutions({ limit: 500 })
     const executions = Array.isArray(response.data) ? response.data : []
     const nextMap: Record<string, any> = {}
 
