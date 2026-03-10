@@ -1,3 +1,4 @@
+pub mod contracts;
 pub mod credentials;
 pub mod errors;
 pub mod properties;
