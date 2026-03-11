@@ -1,142 +1,249 @@
 <div align="center">
   <img src="web/public/logo.png" alt="BarqFlow Logo" width="120" height="120" />
   <h1>BarqFlow</h1>
-  <p><strong>Rust-based workflow automation platform with a Vue 3 visual editor</strong></p>
+  <p><strong>Rust-native workflow automation and orchestration platform</strong></p>
+  <p>Visual workflow design, queue-backed execution, workspace-aware operations, and signed extension packs in a single control plane.</p>
+
+  <p>
+    <img alt="Rust" src="https://img.shields.io/badge/Rust-1.88%2B-000000?logo=rust" />
+    <img alt="Vue" src="https://img.shields.io/badge/Vue-3.5-42b883?logo=vue.js&logoColor=white" />
+    <img alt="Axum" src="https://img.shields.io/badge/Axum-0.8-5e4cdb" />
+    <img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-15%2B-336791?logo=postgresql&logoColor=white" />
+    <img alt="License" src="https://img.shields.io/badge/License-BUSL--1.1-blue" />
+  </p>
 </div>
 
 ## Overview
-BarqFlow is a workflow automation engine built with Rust (Axum/Tokio) and Vue 3.
 
-It is inspired by node-based automation products, including n8n, at the product and UX level (visual canvas, trigger/action model, workflow graph execution). It is an independent implementation in this repository and is not a copy/paste of n8n source code.
+BarqFlow is a Rust-first automation platform for building, operating, and governing workflow-driven integrations.
 
-## What BarqFlow Includes
-- Workflow execution engine with graph traversal, branching, and scoped node test execution
-- REST API under `/rest` for users, workflows, executions, credentials, settings, and health
-- Webhook runtime under `/webhook/{path}`
-- Wait/resume execution flow with resume tokens
-- Runtime execution stop/cancellation support
-- Node registry + schema-driven node forms in the editor
-- Credential storage with encrypted payloads (`BARQFLOW_ENCRYPTION_KEY`)
-- JWT-based auth with hardened production secret handling
-- Dockerized deployment path
+The repository combines:
 
-## Runtime Endpoints
-- API base: `/rest`
-- Webhook base: `/webhook`
-- Static UI assets are served from `web/dist` by the backend in production mode
+- a full-screen visual workflow designer
+- a schema-driven node detail experience
+- a queue-backed execution engine with separate run and trigger workers
+- credential lifecycle and secret binding workflows
+- workspace-aware access control and admin surfaces
+- observability and governance consoles
+- an automation studio for prompt-to-workflow drafting and signed built-in extension packs
+
+BarqFlow is inspired by modern node-based automation products at the workflow UX level, but it is implemented as its own Rust/Vue platform in this repository.
+
+## Product Surfaces
+
+### Workflow Operations
+- Workflow catalog with search, tags, templates, import/export, and history
+- Full-screen editor with visual graph design and node detail tabs
+- Workflow activation, trigger management, and execution launch controls
+
+### Execution and Runtime
+- Durable execution dispatch queue
+- Separate worker lanes for manual runs and trigger-driven runs
+- Execution event streaming, history, retry, stop, and resume flows
+- Webhook and cron trigger handling
+
+### Credential and Identity
+- Encrypted credential storage
+- Credential testing, rotation, lifecycle metadata, and external secret bindings
+- Workspace-aware identity, membership, and API key management
+
+### Observability and Governance
+- Execution log inspection and live timelines
+- Observability dashboards for latency, bottlenecks, failures, and credential health
+- Governance controls for policies, approvals, promotions, and audit visibility
+
+### Automation Studio
+- Prompt-to-workflow draft generation
+- Signed built-in extension pack discovery
+- Capability-scoped extension action invocation for trusted bundles
 
 ## Architecture
-```text
-crates/
-  core/        Shared types, traits, schema contracts
-  flow/        Expression engine and flow helpers
-  exec/        Workflow runner, context, checkpointing
-  registry/    Node/Credential registries
-  nodes/       Node implementations and node schema registration
-  db/          Database models and access layer
-  api/         Axum controllers, routes, repositories
-  server/      Boot sequence and app state wiring
-bin/
-  barqflow/    CLI entry wrapper
-web/
-  src/         Vue 3 + Pinia + Vue Router UI
-  public/      Static assets
-docker/
-  Dockerfile
-  docker-compose.yml
+
+```mermaid
+flowchart LR
+    Browser["Vue 3 Control Plane"] --> API["Axum REST API / Webhook Runtime"]
+    API --> Auth["Auth / Workspaces / Governance"]
+    API --> Queue["Execution Dispatch Queue"]
+    API --> Registry["Node and Credential Registry"]
+    Queue --> Workers["Run Workers / Trigger Workers"]
+    Workers --> Nodes["Node Runtime / Integrations / Code"]
+    API --> Postgres["PostgreSQL"]
+    Workers --> Postgres
+    Registry --> Nodes
 ```
 
-## Quick Start (Docker)
+## Technology Stack
+
+- Backend: Rust, Axum, Tokio, SQLx, PostgreSQL
+- Frontend: Vue 3, TypeScript, Pinia, Vue Router, Vue Flow, Tailwind CSS
+- Runtime: queue-backed execution workers, cron scheduling, webhook dispatch, SSE execution streams
+- Security: JWT auth, encrypted credentials, signed extension manifests, workspace scoping
+
+## Repository Layout
+
+```text
+bin/
+  barqflow/                 CLI wrapper
+crates/
+  api/                      REST controllers, routes, repositories, governance, observability
+  core/                     Shared contracts, types, traits, schema primitives
+  db/                       Database pool helpers and models
+  exec/                     Workflow runner, runtime context, polling, checkpoints
+  flow/                     Graph helpers and expression handling
+  nodes/                    Built-in nodes, credentials, trigger/runtime implementations
+  polling/                  Polling-related crate support
+  registry/                 Node and credential registries
+  server/                   Boot sequence and top-level app state
+extensions/
+  ai-automation-pack/       Built-in signed AI extension pack
+  ops-observability-pack/   Built-in signed operations extension pack
+web/
+  public/                   Static assets
+  src/                      Vue application, views, feature modules, contracts
+```
+
+## Core Capabilities
+
+| Area | Current Coverage |
+|---|---|
+| Workflow design | Visual canvas, node detail view, parameter/settings/run-data tabs |
+| Execution control | Manual run, test node, stop, retry, wait/resume, streamed events |
+| Runtime scale | Durable queue, run/trigger worker split, queue metrics |
+| Credentials | CRUD, testing, rotation, bindings, external secret references |
+| Identity | Login, registration, workspaces, members, API keys |
+| Operations | Execution monitor, runtime settings, structured logs |
+| Observability | Latency histograms, bottleneck ranking, failure clustering |
+| Governance | Audit posture, policies, approvals, promotion controls |
+| Extensibility | Signed built-in extension packs with capability-scoped actions |
+| AI workflow drafting | Prompt-based starter workflow generation in Automation Studio |
+
+## Quick Start
+
+### Option 1: Docker
+
 ```bash
 git clone https://github.com/YASSERRMD/BarqFlow.git
 cd BarqFlow
 ./deploy.sh
 ```
 
-Then open:
-- `http://localhost:3000`
+Then open `http://localhost:3000`.
 
-## Local Development
-### Prerequisites
+### Option 2: Local Development
+
+#### Prerequisites
+
 - Rust `1.88+`
 - Node.js `20+`
-- `pnpm`
+- npm `10+`
 - PostgreSQL `15+`
 
-### Environment Variables
-Set these in `.env` (root):
+#### 1. Configure environment
 
-| Variable | Required | Notes |
-|---|---|---|
-| `DATABASE_URL` | Yes | PostgreSQL connection string |
-| `BARQFLOW_ENCRYPTION_KEY` | Yes | Must be exactly 32 characters |
-| `PORT` | No | Default `3000` |
-| `RUST_LOG` | No | Example: `info,barqflow=debug` |
-| `JWT_SECRET` | Required in production | In development, an ephemeral secret is generated if missing |
-| `BARQFLOW_ENV` | No | Use `production` to enforce strict JWT secret requirement |
+Create a root `.env` file:
 
-### Database Migrations
+```bash
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/barqflow
+BARQFLOW_ENCRYPTION_KEY=replace-with-32-byte-secret-key
+JWT_SECRET=replace-with-strong-jwt-secret
+PORT=3000
+RUST_LOG=info,barqflow=debug
+BARQFLOW_ENV=development
+```
+
+#### 2. Run database migrations
+
 ```bash
 cargo install sqlx-cli --no-default-features --features rustls,postgres
 sqlx migrate run --source crates/api/migrations
 ```
 
-### Run Backend
+#### 3. Start the backend
+
 ```bash
 cargo run -p barqflow-server
 ```
 
-### Run Frontend (dev server)
+#### 4. Start the frontend
+
 ```bash
 cd web
-pnpm install
-pnpm dev
+npm install
+npm run dev
 ```
 
-### Build Frontend for Backend Static Serving
+The frontend dev server runs on `http://localhost:3001` and proxies API and webhook traffic to the Rust backend on port `3000`.
+
+## Production Build
+
+Build the frontend for backend static serving:
+
 ```bash
 cd web
-pnpm build
+npm install
+npm run build
 ```
 
-## API Surface (Current)
-- Auth/User
-  - `POST /rest/users`
-  - `POST /rest/login`
-  - `GET /rest/users/me`
-- Workflows
-  - `GET/POST /rest/workflows`
-  - `GET/PUT/DELETE /rest/workflows/{id}`
-  - `PUT /rest/workflows/{id}/activate`
-  - `POST /rest/workflows/{id}/duplicate`
-- Executions
-  - `GET /rest/executions`
-  - `POST /rest/executions/workflow/{workflow_id}`
-  - `POST /rest/executions/workflow/{workflow_id}/test-node/{node_id}`
-  - `POST /rest/executions/{id}/stop`
-  - `POST /rest/executions/{id}/retry`
-  - `POST /rest/executions/{id}/resume/{resume_token}`
-- Credentials
-  - `GET/POST /rest/credentials`
-  - `DELETE /rest/credentials/{id}`
-  - `GET /rest/credentials/types`
-  - `POST /rest/credentials/test`
-- Nodes
-  - `GET /rest/nodes`
-- Health
-  - `GET /rest/health/triggers`
-- Webhook
-  - `ANY /webhook/{path}`
+The production backend serves compiled frontend assets from `web/dist`.
 
-## Production Notes
-- Keep `JWT_SECRET` and `BARQFLOW_ENCRYPTION_KEY` managed in a secrets manager.
-- Do not commit `.env` files with real secrets.
-- Frontend build artifacts (`web/dist`) are generated during deployment/build.
+## Runtime and Configuration Notes
 
-## Contributing
-- Follow the repository git workflow conventions in `git_workflow.md`.
-- Keep changes atomic and tested.
-- Prefer adding or updating tests with behavior changes.
+### Required secrets
+
+| Variable | Required | Notes |
+|---|---|---|
+| `DATABASE_URL` | Yes | PostgreSQL connection string |
+| `BARQFLOW_ENCRYPTION_KEY` | Yes | Must be exactly 32 characters |
+| `JWT_SECRET` | Required in production | Development may use an ephemeral fallback |
+
+### Common runtime controls
+
+| Variable | Default | Purpose |
+|---|---:|---|
+| `PORT` | `3000` | HTTP server port |
+| `RUST_LOG` | `info` | Rust logging filter |
+| `BARQFLOW_ENV` | `development` | Enables production enforcement paths |
+| `BARQFLOW_EXECUTION_RUN_WORKER_CONCURRENCY` | `4` | Run worker pool size |
+| `BARQFLOW_EXECUTION_TRIGGER_WORKER_CONCURRENCY` | `2` | Trigger worker pool size |
+| `BARQFLOW_EXECUTION_QUEUE_CAPACITY` | `128` | Queue backpressure ceiling |
+| `BARQFLOW_EXECUTION_POLL_INTERVAL_MS` | `750` | Dispatch worker polling interval |
+| `BARQFLOW_EXECUTION_WORKER_LEASE_SECONDS` | `300` | Queue lease timeout |
+| `BARQFLOW_TRACING_ENABLED` | `true` | Request/runtime tracing toggle |
+| `BARQFLOW_EXTENSION_TRUSTED_KEYS_FILE` | `extensions/trusted-public-keys.json` | Trusted public key manifest for extension verification |
+
+## HTTP Surface
+
+### REST base
+- `/rest`
+
+### Webhook base
+- `/webhook`
+
+### Major API domains
+- auth and user profile
+- workspaces and membership
+- workflows, templates, history, and diff
+- executions, logs, and event streams
+- credentials and credential types
+- settings and runtime posture
+- observability overview
+- governance controls
+- automation studio and extension runtime actions
+
+## Development Workflow
+
+- Follow the phased git workflow in [`git_workflow.md`](git_workflow.md)
+- Keep changes small, atomic, and committed per task
+- Use branch names prefixed with `codex/` for automation-driven work
+- Do not merge or push directly to `main`
+
+## Security Notes
+
+- Do not commit real `.env` files or live secrets
+- Keep `JWT_SECRET` and `BARQFLOW_ENCRYPTION_KEY` in a secrets manager in production
+- Treat extension trust keys as controlled deployment artifacts
+- Review credential bindings and governance policies before enabling production workflows
 
 ## License
-See [LICENSE](LICENSE). If you are packaging or redistributing, validate license metadata across repository files and Cargo package metadata.
+
+BarqFlow is licensed under `BUSL-1.1`. See [LICENSE](LICENSE) for the governing terms.
