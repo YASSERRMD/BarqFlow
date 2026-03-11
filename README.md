@@ -29,6 +29,18 @@ The repository combines:
 
 BarqFlow is inspired by modern node-based automation products at the workflow UX level, but it is implemented as its own Rust/Vue platform in this repository.
 
+## Preferred Deployment Path
+
+Docker deployment is the recommended way to run BarqFlow.
+
+The repository already includes:
+
+- a deployment helper in [`deploy.sh`](deploy.sh)
+- a container build in [`docker/Dockerfile`](docker/Dockerfile)
+- a multi-service environment in [`docker/docker-compose.yml`](docker/docker-compose.yml)
+
+Use local Rust and frontend development only when you are actively modifying the platform.
+
 ## Product Surfaces
 
 ### Workflow Operations
@@ -117,9 +129,16 @@ web/
 | Extensibility | Signed built-in extension packs with capability-scoped actions |
 | AI workflow drafting | Prompt-based starter workflow generation in Automation Studio |
 
-## Quick Start
+## Docker Deployment
 
-### Option 1: Docker
+This is the preferred approach for running BarqFlow.
+
+### Prerequisites
+
+- Docker
+- Docker Compose
+
+### Standard deployment
 
 ```bash
 git clone https://github.com/YASSERRMD/BarqFlow.git
@@ -127,9 +146,43 @@ cd BarqFlow
 ./deploy.sh
 ```
 
+The deployment script performs three steps:
+
+1. Stops existing BarqFlow containers
+2. Rebuilds the images with `docker/docker-compose.yml`
+3. Starts the stack in detached mode
+
 Then open `http://localhost:3000`.
 
-### Option 2: Local Development
+### What the Docker stack starts
+
+- `db`: PostgreSQL 15
+- `engine`: the BarqFlow Rust server plus compiled frontend assets
+
+### Manual Docker Compose workflow
+
+```bash
+git clone https://github.com/YASSERRMD/BarqFlow.git
+cd BarqFlow
+docker-compose -f docker/docker-compose.yml down
+docker-compose -f docker/docker-compose.yml build --no-cache
+docker-compose -f docker/docker-compose.yml up -d
+```
+
+Then open `http://localhost:3000`.
+
+### Docker configuration notes
+
+- The compose file currently exposes:
+  - PostgreSQL on `5432`
+  - BarqFlow on `3000`
+- The default compose file includes development-style inline secrets and should be replaced or overridden for real production deployments.
+- For production, set strong values for:
+  - `JWT_SECRET`
+  - `BARQFLOW_ENCRYPTION_KEY`
+  - `DATABASE_URL` as needed for your deployment target
+
+## Local Development
 
 #### Prerequisites
 
@@ -174,7 +227,7 @@ npm run dev
 
 The frontend dev server runs on `http://localhost:3001` and proxies API and webhook traffic to the Rust backend on port `3000`.
 
-## Production Build
+## Frontend Production Build
 
 Build the frontend for backend static serving:
 
