@@ -16,7 +16,7 @@ members = [
 version      = "0.1.0"
 edition      = "2021"
 authors      = ["Permus Software House <dev@permus.io>"]
-license      = "BUSL-1.1"
+license      = "Elastic-2.0"
 repository   = "https://github.com/permus/barqflow"
 rust-version = "1.88"
 
