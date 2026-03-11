@@ -9,7 +9,7 @@
     <img alt="Vue" src="https://img.shields.io/badge/Vue-3.5-42b883?logo=vue.js&logoColor=white" />
     <img alt="Axum" src="https://img.shields.io/badge/Axum-0.8-5e4cdb" />
     <img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-15%2B-336791?logo=postgresql&logoColor=white" />
-    <img alt="License" src="https://img.shields.io/badge/License-BUSL--1.1-blue" />
+    <img alt="License" src="https://img.shields.io/badge/License-Elastic--2.0-blue" />
   </p>
 </div>
 
@@ -299,4 +299,6 @@ The production backend serves compiled frontend assets from `web/dist`.
 
 ## License
 
-BarqFlow is licensed under `BUSL-1.1`. See [LICENSE](LICENSE) for the governing terms.
+BarqFlow is licensed under `Elastic License 2.0`.
+
+This repository is source-available, but it is not licensed for offering BarqFlow as a hosted or managed commercial service. See [LICENSE](LICENSE) for the governing terms.
