@@ -33,13 +33,30 @@ impl CryptoService {
         let key_str = env::var("BARQFLOW_ENCRYPTION_KEY")
             .map_err(|_| CryptoError::MissingKey("BARQFLOW_ENCRYPTION_KEY".into()))?;
 
+        Self::from_key_str(&key_str)
+    }
+
+    pub fn from_key_str(key_str: &str) -> Result<Self, CryptoError> {
         if key_str.len() != 32 {
             return Err(CryptoError::InvalidKey(
-                "Key must be exactly 32 bytes".into(),
+                "BARQFLOW_ENCRYPTION_KEY must be exactly 32 bytes".into(),
             ));
         }
 
-        let key = Key::<Aes256Gcm>::from_slice(key_str.as_bytes());
+        let bytes = key_str.as_bytes();
+
+        // Reject keys that are obviously low-entropy (all same byte or all zeros).
+        let first = bytes[0];
+        let all_same = bytes.iter().all(|&b| b == first);
+        if all_same {
+            return Err(CryptoError::InvalidKey(
+                "BARQFLOW_ENCRYPTION_KEY appears to have very low entropy (all bytes identical). \
+                 Use a cryptographically random 32-byte key."
+                    .into(),
+            ));
+        }
+
+        let key = Key::<Aes256Gcm>::from_slice(bytes);
         let cipher = Aes256Gcm::new(key);
 
         Ok(Self { cipher })
@@ -111,11 +128,7 @@ mod tests {
 
     #[test]
     fn test_encryption_decryption() {
-        env::set_var(
-            "BARQFLOW_ENCRYPTION_KEY",
-            "test_key_must_be_exactly_32_byte",
-        );
-        let crypto = CryptoService::new().unwrap();
+        let crypto = CryptoService::from_key_str("test_key_must_be_exactly_32_byte").unwrap();
 
         let secret = "my_super_secret_api_key_123";
         let encrypted = crypto.encrypt(secret).unwrap();
@@ -130,11 +143,7 @@ mod tests {
 
     #[test]
     fn test_encrypt_decrypt_value() {
-        env::set_var(
-            "BARQFLOW_ENCRYPTION_KEY",
-            "test_key_must_be_exactly_32_byte",
-        );
-        let crypto = CryptoService::new().unwrap();
+        let crypto = CryptoService::from_key_str("test_key_must_be_exactly_32_byte").unwrap();
 
         let secret_obj = json!({
             "api_key": "sk-1234567890",
@@ -155,5 +164,18 @@ mod tests {
         env::remove_var("BARQFLOW_ENCRYPTION_KEY");
         let result = CryptoService::new();
         assert!(matches!(result, Err(CryptoError::MissingKey(_))));
+    }
+
+    #[test]
+    fn test_low_entropy_key_is_rejected() {
+        let all_same = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"; // 32 × 'a'
+        let result = CryptoService::from_key_str(all_same);
+        assert!(matches!(result, Err(CryptoError::InvalidKey(_))));
+    }
+
+    #[test]
+    fn test_wrong_length_key_is_rejected() {
+        let result = CryptoService::from_key_str("short");
+        assert!(matches!(result, Err(CryptoError::InvalidKey(_))));
     }
 }

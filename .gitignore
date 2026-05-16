@@ -1,4 +1,5 @@
 tmp/
+docker/.env
 git_workflow.md
 plan.md
 plan2.md
