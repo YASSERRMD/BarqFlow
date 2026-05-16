@@ -155,9 +155,91 @@ pub async fn binary_exists(config: &BinaryStorageConfig, id: &str) -> bool {
     tokio::fs::metadata(&file_path).await.is_ok()
 }
 
+/// Store binary data under an execution-scoped subdirectory.
+///
+/// Files are stored at `<root>/<execution_id>/<uuid>` so all artifacts for
+/// one execution can be cleaned up with a single [`delete_execution_artifacts`]
+/// call when the execution completes.
+pub async fn store_binary_for_execution(
+    config: &BinaryStorageConfig,
+    execution_id: Uuid,
+    data: bytes::Bytes,
+) -> io::Result<String> {
+    let exec_dir = config.root_dir.join(execution_id.to_string());
+    fs::create_dir_all(&exec_dir)?;
+
+    let id = Uuid::new_v4().to_string();
+    let file_path = exec_dir.join(&id);
+
+    let mut file = tokio::fs::File::create(&file_path).await?;
+    file.write_all(&data).await?;
+    file.sync_all().await?;
+
+    Ok(id)
+}
+
+/// Delete all binary artifacts stored for a specific execution.
+///
+/// Removes the entire `<root>/<execution_id>` subdirectory and returns the
+/// number of files that were deleted. Returns `0` without error if no
+/// artifacts existed for that execution.
+pub async fn delete_execution_artifacts(
+    config: &BinaryStorageConfig,
+    execution_id: Uuid,
+) -> io::Result<u64> {
+    let exec_dir = config.root_dir.join(execution_id.to_string());
+    if !exec_dir.exists() {
+        return Ok(0);
+    }
+
+    let mut count = 0u64;
+    let mut entries = tokio::fs::read_dir(&exec_dir).await?;
+    while let Some(_entry) = entries.next_entry().await? {
+        count += 1;
+    }
+
+    tokio::fs::remove_dir_all(&exec_dir).await?;
+    Ok(count)
+}
+
+/// Delete flat binary artifacts (created via [`store_binary_to_fs`]) whose
+/// modification time is older than `max_age` from now.
+///
+/// Skips subdirectories (which belong to the execution-scoped layout).
+/// Returns the number of files deleted.
+pub async fn delete_artifacts_older_than(
+    config: &BinaryStorageConfig,
+    max_age: std::time::Duration,
+) -> io::Result<u64> {
+    if !config.root_dir.exists() {
+        return Ok(0);
+    }
+
+    let cutoff = std::time::SystemTime::now()
+        .checked_sub(max_age)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "max_age overflow"))?;
+
+    let mut deleted = 0u64;
+    let mut entries = tokio::fs::read_dir(&config.root_dir).await?;
+    while let Some(entry) = entries.next_entry().await? {
+        let meta = entry.metadata().await?;
+        if !meta.is_file() {
+            continue;
+        }
+        if let Ok(modified) = meta.modified() {
+            if modified < cutoff && tokio::fs::remove_file(entry.path()).await.is_ok() {
+                deleted += 1;
+            }
+        }
+    }
+
+    Ok(deleted)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
     use tempfile::TempDir;
 
     #[tokio::test]
@@ -213,5 +295,75 @@ mod tests {
 
         let exists = binary_exists(&config, "nonexistent").await;
         assert!(!exists);
+    }
+
+    #[tokio::test]
+    async fn test_store_and_delete_execution_artifacts() {
+        let temp_dir = TempDir::new().unwrap();
+        let config = BinaryStorageConfig::new(temp_dir.path());
+        let exec_id = Uuid::new_v4();
+
+        let id1 = store_binary_for_execution(&config, exec_id, bytes::Bytes::from("file1"))
+            .await
+            .unwrap();
+        let id2 = store_binary_for_execution(&config, exec_id, bytes::Bytes::from("file2"))
+            .await
+            .unwrap();
+
+        let exec_dir = config.root_dir.join(exec_id.to_string());
+        assert!(exec_dir.join(&id1).exists());
+        assert!(exec_dir.join(&id2).exists());
+
+        let deleted = delete_execution_artifacts(&config, exec_id).await.unwrap();
+        assert_eq!(deleted, 2);
+        assert!(!exec_dir.exists());
+    }
+
+    #[tokio::test]
+    async fn test_delete_execution_artifacts_missing_dir_returns_zero() {
+        let temp_dir = TempDir::new().unwrap();
+        let config = BinaryStorageConfig::new(temp_dir.path());
+
+        let count = delete_execution_artifacts(&config, Uuid::new_v4())
+            .await
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_delete_artifacts_older_than_removes_old_files() {
+        let temp_dir = TempDir::new().unwrap();
+        let config = BinaryStorageConfig::new(temp_dir.path());
+
+        let id = store_binary_to_fs(&config, bytes::Bytes::from("old data"))
+            .await
+            .unwrap();
+        assert!(binary_exists(&config, &id).await);
+
+        // Duration::ZERO means cutoff == now; every file whose mtime < now is deleted.
+        let deleted = delete_artifacts_older_than(&config, Duration::ZERO)
+            .await
+            .unwrap();
+        assert_eq!(deleted, 1);
+        assert!(!binary_exists(&config, &id).await);
+    }
+
+    #[tokio::test]
+    async fn test_delete_artifacts_older_than_skips_subdirectories() {
+        let temp_dir = TempDir::new().unwrap();
+        let config = BinaryStorageConfig::new(temp_dir.path());
+        let exec_id = Uuid::new_v4();
+
+        // Store one execution-scoped file (in a subdirectory).
+        store_binary_for_execution(&config, exec_id, bytes::Bytes::from("exec data"))
+            .await
+            .unwrap();
+
+        // Age-based cleanup must not touch execution subdirectories.
+        let deleted = delete_artifacts_older_than(&config, Duration::ZERO)
+            .await
+            .unwrap();
+        assert_eq!(deleted, 0, "should not delete files inside execution subdirs");
+        assert!(config.root_dir.join(exec_id.to_string()).exists());
     }
 }
