@@ -32,6 +32,7 @@ reqwest.workspace = true
 async-stream = "0.3"
 futures-core = "0.3"
 sha2 = "0.10"
+hmac = "0.12"
 hex = "0.4"
 rsa = { version = "0.9", features = ["sha2", "pem"] }
 

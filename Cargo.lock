@@ -295,6 +295,7 @@ dependencies = [
  "chrono",
  "futures-core",
  "hex",
+ "hmac",
  "jsonwebtoken",
  "reqwest",
  "rsa",
