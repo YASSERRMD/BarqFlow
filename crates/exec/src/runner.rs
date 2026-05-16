@@ -18,6 +18,7 @@ use petgraph::graph::NodeIndex;
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, instrument};
 
@@ -198,6 +199,25 @@ impl WorkflowRunner {
     /// A map of node name to execution result
     #[instrument(skip(self, context), fields(run_id = %context.run_id, workflow = %context.workflow.name))]
     pub async fn run_workflow(
+        &self,
+        context: WorkflowRunContext,
+    ) -> Result<HashMap<String, NodeExecutionResult>, BarqError> {
+        if let Some(max_ms) = self.config.max_execution_time_ms {
+            let duration = std::time::Duration::from_millis(max_ms);
+            return match timeout(duration, self.run_workflow_inner(context)).await {
+                Ok(result) => result,
+                Err(_elapsed) => Err(BarqError::WorkflowConfigurationError {
+                    message: format!(
+                        "Workflow execution exceeded maximum allowed time of {}ms",
+                        max_ms
+                    ),
+                }),
+            };
+        }
+        self.run_workflow_inner(context).await
+    }
+
+    async fn run_workflow_inner(
         &self,
         context: WorkflowRunContext,
     ) -> Result<HashMap<String, NodeExecutionResult>, BarqError> {
@@ -1672,6 +1692,100 @@ mod tests {
                 assert!(message.contains("Subworkflow executor is not configured"));
             }
             other => panic!("expected NodeOperationError, got {}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_run_workflow_respects_max_execution_time() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc as StdArc;
+
+        struct SlowNode {
+            started: StdArc<AtomicBool>,
+        }
+
+        #[async_trait::async_trait]
+        impl barqflow_core::traits::INodeType for SlowNode {
+            fn get_description(&self) -> IDataObject {
+                IDataObject::from(serde_json::json!({"name": "slowNode"}))
+            }
+            async fn execute(
+                &self,
+                _ctx: &dyn barqflow_core::traits::IExecuteFunctions,
+            ) -> Result<Vec<Vec<INodeExecutionData>>, BarqError> {
+                self.started.store(true, Ordering::SeqCst);
+                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                Ok(vec![])
+            }
+        }
+
+        let started = StdArc::new(AtomicBool::new(false));
+        let registry = Arc::new(NodeRegistry::new());
+        registry
+            .register_node(barqflow_registry::registry::NodeInfo {
+                name: "slowNode".to_string(),
+                display_name: "Slow Node".to_string(),
+                version: 1.0,
+                description: "sleeps forever".to_string(),
+                properties: barqflow_core::properties::INodeProperties {
+                    display_name: None,
+                    properties: vec![],
+                    required_values: None,
+                },
+                is_trigger: false,
+                max_inputs: 1,
+                node_impl: Arc::new(SlowNode { started: StdArc::clone(&started) }),
+            })
+            .unwrap();
+
+        let config = ExecutionConfig {
+            max_execution_time_ms: Some(50), // 50 ms limit
+            ..Default::default()
+        };
+        let runner = WorkflowRunner::new(registry, config);
+
+        let workflow = {
+            use barqflow_core::schema::{INode, INodeParameters, IWorkflowSettings};
+            use barqflow_core::types::{NodeId, WorkflowId};
+            CoreWorkflowDef {
+                id: WorkflowId::new(),
+                name: "Timeout Test".to_string(),
+                nodes: vec![INode {
+                    id: NodeId::new("slow"),
+                    name: "Slow".to_string(),
+                    r#type: "slowNode".to_string(),
+                    type_version: 1.0,
+                    position: [0.0, 0.0],
+                    parameters: INodeParameters::default(),
+                    credentials: vec![],
+                    disabled: false,
+                }],
+                connections: HashMap::new(),
+                active: true,
+                settings: IWorkflowSettings::default(),
+            }
+        };
+
+        let err = runner
+            .run_workflow(WorkflowRunContext {
+                run_id: RunId::new(),
+                workflow,
+                static_data: None,
+                manual: true,
+                execution_id: None,
+                parent_execution_id: None,
+                cancellation_token: None,
+                stop_after_node_id: None,
+                event_sequence_start: 0,
+            })
+            .await
+            .unwrap_err();
+
+        match err {
+            BarqError::WorkflowConfigurationError { message } => {
+                assert!(message.contains("exceeded maximum allowed time"));
+            }
+            other => panic!("expected WorkflowConfigurationError (timeout), got: {}", other),
         }
     }
 }
