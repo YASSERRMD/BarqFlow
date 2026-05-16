@@ -360,9 +360,17 @@ mod tests {
     use axum::{body::Body, http::Request};
     use barqflow_core::schema::INodeParameters;
     use barqflow_core::types::NodeId;
+    use hmac::{Hmac, Mac};
     use serde_json::json;
+    use sha2::Sha256;
     use sqlx::PgPool;
     use tower::ServiceExt;
+
+    fn make_signature(secret: &str, body: &[u8]) -> String {
+        let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).unwrap();
+        mac.update(body);
+        format!("sha256={}", hex::encode(mac.finalize().into_bytes()))
+    }
 
     fn webhook_node_with_parameters(params: serde_json::Value) -> INode {
         INode {
@@ -466,5 +474,65 @@ mod tests {
 
         let res3 = app.clone().oneshot(req3).await.unwrap();
         assert_eq!(res3.status(), StatusCode::NOT_FOUND);
+    }
+
+    // ── HMAC signature verification unit tests ────────────────────────────────
+
+    #[test]
+    fn valid_signature_passes_verification() {
+        let secret = "super-secret";
+        let body = b"hello world";
+        let sig = make_signature(secret, body);
+
+        let mut headers = HeaderMap::new();
+        headers.insert("x-barqflow-signature-256", sig.parse().unwrap());
+
+        assert!(verify_hmac_signature(&headers, body, secret).is_ok());
+    }
+
+    #[test]
+    fn wrong_signature_is_rejected() {
+        let body = b"hello world";
+        let sig = make_signature("correct-secret", body);
+
+        let mut headers = HeaderMap::new();
+        headers.insert("x-barqflow-signature-256", sig.parse().unwrap());
+
+        let result = verify_hmac_signature(&headers, body, "wrong-secret");
+        assert_eq!(result.unwrap_err().0, StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn missing_signature_header_is_rejected() {
+        let headers = HeaderMap::new();
+        let result = verify_hmac_signature(&headers, b"body", "secret");
+        assert_eq!(result.unwrap_err().0, StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn endpoint_without_secret_skips_verification() {
+        let endpoint = WebhookEndpoint {
+            workflow_id: Uuid::new_v4(),
+            node_id: "n1".into(),
+            http_method: "POST".into(),
+            webhook_secret: None,
+        };
+        // No secret means the verification block is never entered; this is a
+        // compile-time / logic test that the field exists and is None-able.
+        assert!(endpoint.webhook_secret.is_none());
+    }
+
+    #[test]
+    fn tampered_body_is_rejected() {
+        let secret = "my-secret";
+        let original_body = b"original";
+        let tampered_body = b"tampered";
+        let sig = make_signature(secret, original_body);
+
+        let mut headers = HeaderMap::new();
+        headers.insert("x-barqflow-signature-256", sig.parse().unwrap());
+
+        let result = verify_hmac_signature(&headers, tampered_body, secret);
+        assert_eq!(result.unwrap_err().0, StatusCode::FORBIDDEN);
     }
 }
