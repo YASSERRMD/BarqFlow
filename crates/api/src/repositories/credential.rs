@@ -46,7 +46,7 @@ impl CredentialRepository {
         .await?;
 
         for entity in &mut entities {
-            self.decrypt_entity_data(entity);
+            self.decrypt_entity_data(entity)?;
         }
 
         Ok(entities)
@@ -66,7 +66,7 @@ impl CredentialRepository {
         .await?;
 
         for entity in &mut entities {
-            self.decrypt_entity_data(entity);
+            self.decrypt_entity_data(entity)?;
         }
 
         Ok(entities)
@@ -85,7 +85,7 @@ impl CredentialRepository {
         .await?;
 
         if let Some(ref mut entity) = entity_opt {
-            self.decrypt_entity_data(entity);
+            self.decrypt_entity_data(entity)?;
         }
 
         Ok(entity_opt)
@@ -109,7 +109,7 @@ impl CredentialRepository {
         .await?;
 
         if let Some(ref mut entity) = entity_opt {
-            self.decrypt_entity_data(entity);
+            self.decrypt_entity_data(entity)?;
         }
 
         Ok(entity_opt)
@@ -130,7 +130,7 @@ impl CredentialRepository {
         .await?;
 
         if let Some(ref mut entity) = entity_opt {
-            self.decrypt_entity_data(entity);
+            self.decrypt_entity_data(entity)?;
         }
 
         Ok(entity_opt)
@@ -156,7 +156,7 @@ impl CredentialRepository {
         .await?;
 
         if let Some(ref mut entity) = entity_opt {
-            self.decrypt_entity_data(entity);
+            self.decrypt_entity_data(entity)?;
         }
 
         Ok(entity_opt)
@@ -176,7 +176,7 @@ impl CredentialRepository {
         .await?;
 
         for entity in &mut entities {
-            self.decrypt_entity_data(entity);
+            self.decrypt_entity_data(entity)?;
         }
 
         Ok(entities)
@@ -201,7 +201,7 @@ impl CredentialRepository {
         .await?;
 
         for entity in &mut entities {
-            self.decrypt_entity_data(entity);
+            self.decrypt_entity_data(entity)?;
         }
 
         Ok(entities)
@@ -222,7 +222,7 @@ impl CredentialRepository {
         .await?;
 
         if let Some(ref mut entity) = entity_opt {
-            self.decrypt_entity_data(entity);
+            self.decrypt_entity_data(entity)?;
         }
 
         Ok(entity_opt)
@@ -248,7 +248,7 @@ impl CredentialRepository {
         .await?;
 
         if let Some(ref mut entity) = entity_opt {
-            self.decrypt_entity_data(entity);
+            self.decrypt_entity_data(entity)?;
         }
 
         Ok(entity_opt)
@@ -650,12 +650,17 @@ impl CredentialRepository {
         Ok(serde_json::json!({ "encrypted": encrypted_base64 }))
     }
 
-    fn decrypt_entity_data(&self, entity: &mut CredentialEntity) {
+    fn decrypt_entity_data(&self, entity: &mut CredentialEntity) -> sqlx::Result<()> {
         if let Some(enc) = entity.data.get("encrypted").and_then(|v| v.as_str()) {
-            if let Ok(dec) = self.crypto.decrypt_value(enc) {
-                entity.data = dec;
-            }
+            let dec = self.crypto.decrypt_value(enc).map_err(|e| {
+                sqlx::Error::Protocol(format!(
+                    "Decryption failed for credential {}: {}",
+                    entity.id, e
+                ))
+            })?;
+            entity.data = dec;
         }
+        Ok(())
     }
 
     async fn resolve_workspace_context_tx(
@@ -780,6 +785,40 @@ mod tests {
         assert_eq!(
             reloaded.last_test_message.as_deref(),
             Some("Credential validated")
+        );
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn test_decryption_failure_propagates_error(pool: PgPool) {
+        env::set_var(
+            "BARQFLOW_ENCRYPTION_KEY",
+            "test_key_must_be_exactly_32_byte",
+        );
+        let repo = CredentialRepository::new(pool.clone());
+
+        let created = repo
+            .create("Tamper Test", "testApi", json!({ "secret": "value" }))
+            .await
+            .unwrap();
+
+        // Overwrite the encrypted payload with garbage so decryption must fail.
+        sqlx::query("UPDATE credentials SET data = $1 WHERE id = $2")
+            .bind(json!({ "encrypted": "not_valid_base64:not_valid_cipher" }))
+            .bind(created.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let result = repo.find_by_id(created.id).await;
+        assert!(
+            result.is_err(),
+            "Expected decryption failure to propagate as Err"
+        );
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Decryption failed"),
+            "Error should mention decryption: {}",
+            err_msg
         );
     }
 
