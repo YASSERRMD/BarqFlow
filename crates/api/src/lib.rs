@@ -9,6 +9,7 @@ pub mod db;
 pub mod error;
 pub mod execution_dispatch;
 pub mod execution_events;
+pub mod execution_workers;
 pub mod extension_runtime;
 pub mod extensions;
 pub mod governance;
