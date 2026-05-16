@@ -38,6 +38,8 @@ pub struct NodeExecutionContext {
     workflow_cache: Arc<RwLock<HashMap<String, Vec<serde_json::Value>>>>,
     /// Credentials resolver for runtime secret lookup
     credential_provider: Option<Arc<dyn CredentialProvider>>,
+    /// Rhai expression engine — initialised once per context and reused across parameter evaluations.
+    expression_engine: barqflow_flow::expression::ExpressionEngine,
 }
 
 impl std::fmt::Debug for NodeExecutionContext {
@@ -45,7 +47,7 @@ impl std::fmt::Debug for NodeExecutionContext {
         f.debug_struct("NodeExecutionContext")
             .field("node", &self.node.name)
             .field("run_id", &self.run_id)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -89,6 +91,8 @@ impl NodeExecutionContext {
             run_id,
             workflow_cache,
             credential_provider,
+            expression_engine: barqflow_flow::expression::ExpressionEngine::new()
+                .with_custom_functions(),
         }
     }
 
@@ -155,17 +159,14 @@ impl NodeExecutionContext {
                         (*cache).clone()
                     };
 
-                    let engine =
-                        barqflow_flow::expression::ExpressionEngine::new().with_custom_functions();
-
                     let expr_ctx = barqflow_flow::expression::ExpressionContext {
                         json_data,
-                        binary_keys: vec![], // Binary streams mapping skipped for simplified phase 21
+                        binary_keys: vec![],
                         parameters: params_map,
                         workflow_cache: cache_snapshot,
                     };
 
-                    engine.eval_with_context(&stripped_expr, &expr_ctx)
+                    self.expression_engine.eval_with_context(&stripped_expr, &expr_ctx)
                 };
 
                 return match eval_result {
