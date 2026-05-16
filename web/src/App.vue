@@ -14,6 +14,7 @@ import {
   X,
 } from 'lucide-vue-next'
 import { useAuthStore } from './stores/auth'
+import ErrorBoundary from './components/ErrorBoundary.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -126,19 +127,23 @@ watch(
 
 <template>
   <div v-if="isAuthScreen" class="min-h-screen bg-mesh-gradient text-slate-900">
-    <RouterView v-slot="{ Component }">
-      <transition name="fade" mode="out-in">
-        <component :is="Component" />
-      </transition>
-    </RouterView>
+    <ErrorBoundary>
+      <RouterView v-slot="{ Component }">
+        <transition name="fade" mode="out-in">
+          <component :is="Component" />
+        </transition>
+      </RouterView>
+    </ErrorBoundary>
   </div>
 
   <div v-else-if="isWorkflowEditorRoute" class="h-screen w-screen overflow-hidden bg-slate-950 text-slate-900">
-    <RouterView v-slot="{ Component }">
-      <transition name="fade" mode="out-in">
-        <component :is="Component" />
-      </transition>
-    </RouterView>
+    <ErrorBoundary>
+      <RouterView v-slot="{ Component }">
+        <transition name="fade" mode="out-in">
+          <component :is="Component" />
+        </transition>
+      </RouterView>
+    </ErrorBoundary>
   </div>
 
   <div v-else class="flex h-screen w-full overflow-hidden bg-mesh-gradient text-slate-900">
@@ -243,11 +248,13 @@ watch(
       </header>
 
       <main class="min-h-0 flex-1 overflow-hidden">
-        <RouterView v-slot="{ Component }">
-          <transition name="fade" mode="out-in">
-            <component :is="Component" />
-          </transition>
-        </RouterView>
+        <ErrorBoundary>
+          <RouterView v-slot="{ Component }">
+            <transition name="fade" mode="out-in">
+              <component :is="Component" />
+            </transition>
+          </RouterView>
+        </ErrorBoundary>
       </main>
     </div>
 
