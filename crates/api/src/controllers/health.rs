@@ -1,5 +1,6 @@
 use crate::active_workflows::ActiveCronJobs;
 use crate::controllers::webhooks::{WebhookEndpoint, WebhookRegistry};
+use crate::error::ApiError;
 use crate::repositories::execution_dispatch::ExecutionDispatchRepository;
 use crate::operations::{ExecutionDispatchMode, OperationsRuntime};
 use crate::routes::ActiveExecutionManager;
@@ -116,14 +117,12 @@ pub fn health_routes(state: AppState) -> Router {
 
 async fn get_trigger_health(
     State(state): State<AppState>,
-) -> Result<Json<TriggerHealthResponse>, (StatusCode, String)> {
+) -> Result<Json<TriggerHealthResponse>, (StatusCode, ApiError)> {
     let (webhook_endpoint_count, webhook_workflow_count) = {
-        let registry = state.webhook_registry.read().map_err(|_| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Registry lock poisoned".into(),
-            )
-        })?;
+        let registry = state
+            .webhook_registry
+            .read()
+            .map_err(|_| ApiError::internal("Registry lock poisoned"))?;
         summarize_webhooks(&registry)
     };
 
@@ -156,24 +155,22 @@ async fn get_trigger_health(
 
 async fn get_runtime_health(
     State(state): State<AppState>,
-) -> Result<Json<RuntimeHealthResponse>, (StatusCode, String)> {
+) -> Result<Json<RuntimeHealthResponse>, (StatusCode, ApiError)> {
     let dispatch = state.operations_runtime.dispatch_metrics_snapshot().await;
     let queued_executions = state
         .execution_dispatch_repo
         .count_open_items()
         .await
-        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+        .map_err(|error| ApiError::internal(error.to_string()))?
         .max(0) as usize;
     let pruning = state.operations_runtime.pruning_snapshot().await;
     let telemetry = state.operations_runtime.telemetry_snapshot();
     let active_executions = state.active_executions.read().await.len();
     let webhook_endpoint_count = {
-        let registry = state.webhook_registry.read().map_err(|_| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Registry lock poisoned".into(),
-            )
-        })?;
+        let registry = state
+            .webhook_registry
+            .read()
+            .map_err(|_| ApiError::internal("Registry lock poisoned"))?;
         registry.len()
     };
     let cron_job_count = {
@@ -203,21 +200,19 @@ async fn get_runtime_health(
 
 async fn get_runtime_metrics(
     State(state): State<AppState>,
-) -> Result<Json<RuntimeMetricsResponse>, (StatusCode, String)> {
+) -> Result<Json<RuntimeMetricsResponse>, (StatusCode, ApiError)> {
     let dispatch = state.operations_runtime.dispatch_metrics_snapshot().await;
     let queued_count = state
         .execution_dispatch_repo
         .count_open_items()
         .await
-        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+        .map_err(|error| ApiError::internal(error.to_string()))?
         .max(0) as usize;
     let (webhook_endpoint_count, webhook_workflow_count) = {
-        let registry = state.webhook_registry.read().map_err(|_| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Registry lock poisoned".into(),
-            )
-        })?;
+        let registry = state
+            .webhook_registry
+            .read()
+            .map_err(|_| ApiError::internal("Registry lock poisoned"))?;
         summarize_webhooks(&registry)
     };
     let (cron_workflow_count, cron_job_count) = {
