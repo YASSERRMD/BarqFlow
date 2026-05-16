@@ -18,7 +18,9 @@ use barqflow_exec::runner::{
     ExecutionConfig, NodeExecutionResult, WorkflowRunContext, WorkflowRunner,
 };
 use barqflow_registry::registry::NodeRegistry;
+use hmac::{Hmac, Mac};
 use serde_json::json;
+use sha2::Sha256;
 use std::{
     collections::HashMap,
     sync::{Arc, RwLock},
@@ -31,6 +33,54 @@ pub struct WebhookEndpoint {
     pub workflow_id: Uuid,
     pub node_id: String,
     pub http_method: String, // "GET", "POST", "ANY", etc.
+    /// When set, incoming requests must carry a valid `X-Barqflow-Signature-256` header.
+    /// Value is the raw secret used for HMAC-SHA256 computation.
+    pub webhook_secret: Option<String>,
+}
+
+type HmacSha256 = Hmac<Sha256>;
+
+/// Verifies the `X-Barqflow-Signature-256: sha256=<hex>` header against the request body.
+/// Returns `Ok(())` when the signature matches or when no secret is configured.
+fn verify_hmac_signature(
+    headers: &HeaderMap,
+    body: &[u8],
+    secret: &str,
+) -> Result<(), (StatusCode, String)> {
+    let header_value = headers
+        .get("x-barqflow-signature-256")
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| {
+            (
+                StatusCode::FORBIDDEN,
+                "Missing X-Barqflow-Signature-256 header".into(),
+            )
+        })?;
+
+    let provided_hex = header_value
+        .strip_prefix("sha256=")
+        .ok_or_else(|| {
+            (
+                StatusCode::FORBIDDEN,
+                "Invalid signature format; expected sha256=<hex>".into(),
+            )
+        })?;
+
+    let provided_bytes = hex::decode(provided_hex).map_err(|_| {
+        (
+            StatusCode::FORBIDDEN,
+            "Signature is not valid hex".into(),
+        )
+    })?;
+
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
+        .expect("HMAC accepts any key length");
+    mac.update(body);
+
+    // constant-time comparison — verify_slice rejects if lengths differ too
+    mac.verify_slice(&provided_bytes).map_err(|_| {
+        (StatusCode::FORBIDDEN, "Signature mismatch".into())
+    })
 }
 
 /// Thread-safe registry mapping webhook paths to their bound workflow endpoints.
@@ -175,7 +225,12 @@ async fn handle_webhook(
         ));
     }
 
-    // 3. Build the trigger output payload mimicking n8n Webhook node structure
+    // 3. Verify HMAC-SHA256 signature when the endpoint has a secret configured
+    if let Some(ref secret) = endpoint.webhook_secret {
+        verify_hmac_signature(&headers, &body, secret)?;
+    }
+
+    // 4. Build the trigger output payload mimicking n8n Webhook node structure
     let body_str = String::from_utf8(body.to_vec()).unwrap_or_default();
     let parsed_body: serde_json::Value =
         serde_json::from_str(&body_str).unwrap_or_else(|_| json!({ "raw": body_str }));
@@ -197,7 +252,7 @@ async fn handle_webhook(
         "body": parsed_body,
     }));
 
-    // 4. Fetch workflow from DB and launch execution asynchronously
+    // 5. Fetch workflow from DB and launch execution asynchronously
     let wf_entity = state
         .workflow_repo
         .find_by_id(endpoint.workflow_id)
@@ -366,6 +421,7 @@ mod tests {
                     workflow_id: workflow.id,
                     node_id: "webhook1".to_string(),
                     http_method: "POST".to_string(),
+                    webhook_secret: None,
                 },
             );
         }
