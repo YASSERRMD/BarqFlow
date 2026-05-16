@@ -1,4 +1,5 @@
 import axios from 'axios';
+import router from '../router';
 
 const api = axios.create({
     baseURL: '/rest',
@@ -7,16 +8,7 @@ const api = axios.create({
     },
 });
 
-function redirectToLoginWithoutReload() {
-    if (window.location.pathname === '/login') {
-        return;
-    }
-
-    window.history.pushState({}, '', '/login');
-    window.dispatchEvent(new PopStateEvent('popstate'));
-}
-
-// Add a request interceptor to include the JWT token
+// Attach JWT token to every outgoing request.
 api.interceptors.request.use(
     (config) => {
         const token = localStorage.getItem('token');
@@ -25,23 +17,22 @@ api.interceptors.request.use(
         }
         return config;
     },
-    (error) => {
-        return Promise.reject(error);
-    }
+    (error) => Promise.reject(error),
 );
 
-// Add a response interceptor to handle unauthorized errors
+// On 401, clear the stored token and redirect to /login via Vue Router
+// so the SPA state (active route, history stack) is updated correctly.
 api.interceptors.response.use(
-    (response) => {
-        return response;
-    },
+    (response) => response,
     (error) => {
-        if (error.response && error.response.status === 401) {
+        if (error.response?.status === 401) {
             localStorage.removeItem('token');
-            redirectToLoginWithoutReload();
+            if (router.currentRoute.value.path !== '/login') {
+                router.push('/login');
+            }
         }
         return Promise.reject(error);
-    }
+    },
 );
 
 export default api;
