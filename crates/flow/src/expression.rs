@@ -295,6 +295,79 @@ impl Default for ItemAccessor {
 mod tests {
     use super::*;
 
+    fn ctx(json_data: serde_json::Value) -> ExpressionContext {
+        ExpressionContext {
+            json_data,
+            binary_keys: vec![],
+            parameters: HashMap::new(),
+            workflow_cache: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn test_null_json_value_becomes_rhai_unit() {
+        let result = ExpressionEngine::new()
+            .eval_with_context("json.nothing", &ctx(serde_json::json!({"nothing": null})));
+        assert!(result.is_ok());
+        assert_eq!(
+            result.unwrap().type_name(),
+            "()",
+            "JSON null should map to Rhai unit type"
+        );
+    }
+
+    #[test]
+    fn test_nested_object_deep_access() {
+        let result = ExpressionEngine::new().eval_with_context(
+            "json.a.b.c",
+            &ctx(serde_json::json!({"a": {"b": {"c": 42}}})),
+        );
+        assert_eq!(result.unwrap().as_int().unwrap(), 42);
+    }
+
+    #[test]
+    fn test_array_index_access() {
+        let result = ExpressionEngine::new().eval_with_context(
+            "json.items[1]",
+            &ctx(serde_json::json!({"items": ["alpha", "beta", "gamma"]})),
+        );
+        assert_eq!(result.unwrap().into_string().unwrap(), "beta");
+    }
+
+    #[test]
+    fn test_array_length() {
+        let result = ExpressionEngine::new().eval_with_context(
+            "json.tags.len()",
+            &ctx(serde_json::json!({"tags": ["a", "b", "c", "d"]})),
+        );
+        assert_eq!(result.unwrap().as_int().unwrap(), 4);
+    }
+
+    #[test]
+    fn test_boolean_json_value() {
+        let result = ExpressionEngine::new()
+            .eval_with_context("json.active", &ctx(serde_json::json!({"active": true})));
+        assert_eq!(result.unwrap().as_bool().unwrap(), true);
+    }
+
+    #[test]
+    fn test_float_json_value_comparison() {
+        let result = ExpressionEngine::new().eval_with_context(
+            "json.price > 3.0",
+            &ctx(serde_json::json!({"price": 3.14})),
+        );
+        assert_eq!(result.unwrap().as_bool().unwrap(), true);
+    }
+
+    #[test]
+    fn test_string_concatenation_from_json() {
+        let result = ExpressionEngine::new().eval_with_context(
+            "json.first + \" \" + json.last",
+            &ctx(serde_json::json!({"first": "John", "last": "Doe"})),
+        );
+        assert_eq!(result.unwrap().into_string().unwrap(), "John Doe");
+    }
+
     #[test]
     fn test_expression_extractor_single() {
         let input = "Hello {{name}}!";
