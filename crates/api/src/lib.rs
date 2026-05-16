@@ -6,6 +6,7 @@ pub mod controllers;
 pub mod credentials_provider;
 pub mod crypto;
 pub mod db;
+pub mod error;
 pub mod execution_dispatch;
 pub mod execution_events;
 pub mod extension_runtime;
