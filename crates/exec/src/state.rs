@@ -2,9 +2,12 @@ use barqflow_core::schema::INodeExecutionData;
 use barqflow_core::types::RunId;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tokio::sync::RwLock;
+
+/// Default maximum number of in-flight execution states kept in memory.
+pub const DEFAULT_STATE_CAPACITY: usize = 512;
 
 /// Enum describing the current status of an execution run
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -84,9 +87,60 @@ impl ExecutionState {
     }
 }
 
-/// Manages execution states for active workflow runs
+struct BoundedStateStore {
+    map: HashMap<RunId, ExecutionState>,
+    /// Insertion-order queue used for FIFO eviction when capacity is exceeded.
+    insertion_order: VecDeque<RunId>,
+    capacity: usize,
+}
+
+impl BoundedStateStore {
+    fn new(capacity: usize) -> Self {
+        Self {
+            map: HashMap::with_capacity(capacity),
+            insertion_order: VecDeque::with_capacity(capacity),
+            capacity,
+        }
+    }
+
+    fn insert(&mut self, id: RunId, state: ExecutionState) {
+        if !self.map.contains_key(&id) {
+            if self.map.len() >= self.capacity {
+                if let Some(oldest) = self.insertion_order.pop_front() {
+                    self.map.remove(&oldest);
+                }
+            }
+            self.insertion_order.push_back(id);
+        }
+        self.map.insert(id, state);
+    }
+
+    fn remove(&mut self, id: &RunId) -> Option<ExecutionState> {
+        let removed = self.map.remove(id);
+        if removed.is_some() {
+            self.insertion_order.retain(|k| k != id);
+        }
+        removed
+    }
+
+    fn get(&self, id: &RunId) -> Option<&ExecutionState> {
+        self.map.get(id)
+    }
+
+    fn values(&self) -> impl Iterator<Item = &ExecutionState> {
+        self.map.values()
+    }
+
+    fn len(&self) -> usize {
+        self.map.len()
+    }
+}
+
+/// Manages execution states for active workflow runs.
+///
+/// Bounded to `capacity` entries; oldest entries are evicted FIFO when full.
 pub struct ExecutionStateManager {
-    states: Arc<RwLock<HashMap<RunId, ExecutionState>>>,
+    states: Arc<RwLock<BoundedStateStore>>,
     metrics: Arc<RwLock<ExecutionMetrics>>,
 }
 
@@ -98,8 +152,12 @@ pub struct ExecutionMetrics {
 
 impl ExecutionStateManager {
     pub fn new() -> Self {
+        Self::with_capacity(DEFAULT_STATE_CAPACITY)
+    }
+
+    pub fn with_capacity(capacity: usize) -> Self {
         Self {
-            states: Arc::new(RwLock::new(HashMap::new())),
+            states: Arc::new(RwLock::new(BoundedStateStore::new(capacity))),
             metrics: Arc::new(RwLock::new(ExecutionMetrics::default())),
         }
     }
@@ -125,6 +183,10 @@ impl ExecutionStateManager {
 
     pub async fn list_active(&self) -> Vec<ExecutionState> {
         self.states.read().await.values().cloned().collect()
+    }
+
+    pub async fn len(&self) -> usize {
+        self.states.read().await.len()
     }
 
     pub async fn increment_nodes_executed(&self) {
@@ -197,5 +259,29 @@ mod tests {
 
         let active = manager.list_active().await;
         assert_eq!(active.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_capacity_evicts_oldest_entry() {
+        let manager = ExecutionStateManager::with_capacity(2);
+
+        let first = manager.create("wf1", false).await;
+        manager.create("wf2", false).await;
+        // inserting a third entry should evict `first`
+        manager.create("wf3", false).await;
+
+        assert_eq!(manager.len().await, 2);
+        assert!(manager.get(&first.id).await.is_none(), "oldest entry should be evicted");
+    }
+
+    #[tokio::test]
+    async fn test_remove_shrinks_store() {
+        let manager = ExecutionStateManager::new();
+
+        let state = manager.create("wf1", false).await;
+        assert_eq!(manager.len().await, 1);
+
+        manager.remove(&state.id).await;
+        assert_eq!(manager.len().await, 0);
     }
 }
