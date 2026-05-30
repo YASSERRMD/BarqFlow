@@ -53,7 +53,10 @@ mod tests {
         // `AppState::new` builds the credential repository, whose CryptoService
         // requires an encryption key in the environment. Provide a deterministic
         // 32-byte test key so state construction succeeds outside production.
-        std::env::set_var("BARQFLOW_ENCRYPTION_KEY", "test_key_must_be_exactly_32_byte");
+        std::env::set_var(
+            "BARQFLOW_ENCRYPTION_KEY",
+            "test_key_must_be_exactly_32_byte",
+        );
 
         // Since tests run against the DB, try connecting
         if let Ok(pool) = init_db_pool(&db_url, 1).await {
