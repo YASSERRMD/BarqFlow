@@ -1,9 +1,14 @@
+use md5::{Digest as Md5Digest, Md5};
 use regex::Regex;
+use rhai::packages::{Package, StandardPackage};
 use rhai::{Dynamic, Engine, Scope, AST};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use md5::{Digest as Md5Digest, Md5};
 use sha2::Sha256;
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
+
+/// Shared, interior-mutable workflow cache backing the `$item`/`$items` helpers.
+type SharedWorkflowCache = Arc<RwLock<HashMap<String, Vec<serde_json::Value>>>>;
 
 #[derive(Debug, Clone)]
 pub struct ExpressionContext {
@@ -13,14 +18,22 @@ pub struct ExpressionContext {
     pub workflow_cache: HashMap<String, Vec<serde_json::Value>>,
 }
 
-
 pub struct ExpressionEngine {
     engine: Engine,
+    /// Per-invocation workflow cache for the `$item`/`$items` helpers. It is
+    /// refreshed at the start of every `eval_with_context` call so the engine
+    /// itself stays immutable and evaluation only needs `&self`.
+    workflow_cache: SharedWorkflowCache,
 }
 
 impl ExpressionEngine {
     pub fn new() -> Self {
         let mut engine = Engine::new_raw();
+
+        // `new_raw()` ships without the StandardPackage, so helpers like
+        // `len()`, arithmetic, and string utilities are unavailable. Register it
+        // explicitly so expressions such as `json.tags.len()` evaluate.
+        StandardPackage::new().register_into_engine(&mut engine);
 
         engine.set_allow_looping(true);
         engine.set_allow_shadowing(true);
@@ -34,7 +47,40 @@ impl ExpressionEngine {
             tracing::debug!("Rhai print: {}", s);
         });
 
-        Self { engine }
+        let workflow_cache: SharedWorkflowCache = Arc::new(RwLock::new(HashMap::new()));
+
+        // The dollar-prefixed helpers are rewritten to item/items before
+        // evaluation because the dollar sign is a reserved token in the rhai
+        // lexer. The cached node outputs already carry their own
+        // { "json": ... } shape, so the helper returns each item verbatim
+        // rather than re-wrapping it.
+        let item_cache = workflow_cache.clone();
+        engine.register_fn("item", move |node_name: &str| -> Dynamic {
+            if let Ok(cache) = item_cache.read() {
+                if let Some(first) = cache.get(node_name).and_then(|items| items.first()) {
+                    return Self::json_to_dynamic(first);
+                }
+            }
+            Dynamic::from(rhai::Map::new())
+        });
+
+        let items_cache = workflow_cache.clone();
+        engine.register_fn("items", move |node_name: &str| -> rhai::Array {
+            let mut array = rhai::Array::new();
+            if let Ok(cache) = items_cache.read() {
+                if let Some(items) = cache.get(node_name) {
+                    for item in items {
+                        array.push(Self::json_to_dynamic(item));
+                    }
+                }
+            }
+            array
+        });
+
+        Self {
+            engine,
+            workflow_cache,
+        }
     }
 
     pub fn with_custom_functions(mut self) -> Self {
@@ -70,48 +116,37 @@ impl ExpressionEngine {
     }
 
     pub fn compile(&self, script: &str) -> Result<AST, String> {
-        let transformed_script = script
-            .replace("$json", "json")
-            .replace("$env", "env")
-            .replace("$input", "input");
+        let transformed_script = Self::transform_script(script);
         self.engine
             .compile(&transformed_script)
             .map_err(|e| e.to_string())
     }
 
+    /// Rewrites n8n-style dollar-prefixed identifiers into the plain
+    /// identifiers and helper function names the rhai engine understands. The
+    /// "items"/"item" tokens must be substituted before "json"/"input" so the
+    /// longer tokens win.
+    fn transform_script(script: &str) -> String {
+        script
+            .replace("$items", "items")
+            .replace("$item", "item")
+            .replace("$json", "json")
+            .replace("$env", "env")
+            .replace("$input", "input")
+    }
+
     pub fn eval_with_context(
-        mut self,
+        &self,
         script: &str,
         context: &ExpressionContext,
     ) -> Result<Dynamic, String> {
-        let transformed_script = script
-            .replace("$json", "json")
-            .replace("$env", "env")
-            .replace("$input", "input");
+        let transformed_script = Self::transform_script(script);
 
-        let cache = context.workflow_cache.clone();
-        self.engine.register_fn("$item", move |node_name: &str| -> rhai::Map {
-            let mut map = rhai::Map::new();
-            if let Some(items) = cache.get(node_name) {
-                if let Some(first) = items.first() {
-                    map.insert("json".into(), Self::json_to_dynamic(first));
-                }
-            }
-            map
-        });
-
-        let cache_items = context.workflow_cache.clone();
-        self.engine.register_fn("$items", move |node_name: &str| -> rhai::Array {
-            let mut array = rhai::Array::new();
-            if let Some(items) = cache_items.get(node_name) {
-                for item in items {
-                    let mut map = rhai::Map::new();
-                    map.insert("json".into(), Self::json_to_dynamic(item));
-                    array.push(Dynamic::from(map));
-                }
-            }
-            array
-        });
+        // Publish this invocation's workflow cache so the pre-registered
+        // `$item`/`$items` helpers resolve against the current node outputs.
+        if let Ok(mut cache) = self.workflow_cache.write() {
+            *cache = context.workflow_cache.clone();
+        }
 
         let mut scope = self.create_scope(context);
 
@@ -347,16 +382,14 @@ mod tests {
     fn test_boolean_json_value() {
         let result = ExpressionEngine::new()
             .eval_with_context("json.active", &ctx(serde_json::json!({"active": true})));
-        assert_eq!(result.unwrap().as_bool().unwrap(), true);
+        assert!(result.unwrap().as_bool().unwrap());
     }
 
     #[test]
     fn test_float_json_value_comparison() {
-        let result = ExpressionEngine::new().eval_with_context(
-            "json.price > 3.0",
-            &ctx(serde_json::json!({"price": 3.14})),
-        );
-        assert_eq!(result.unwrap().as_bool().unwrap(), true);
+        let result = ExpressionEngine::new()
+            .eval_with_context("json.price > 3.0", &ctx(serde_json::json!({"price": 3.15})));
+        assert!(result.unwrap().as_bool().unwrap());
     }
 
     #[test]
@@ -548,14 +581,12 @@ mod tests {
     #[test]
     fn test_item_backward_traversal() {
         let engine = ExpressionEngine::new().with_custom_functions();
-        
+
         // Mock the global execution workflow cache with historical data
         let mut workflow_cache = HashMap::new();
         workflow_cache.insert(
             "SetNode".to_string(),
-            vec![
-                serde_json::json!({"json": {"count": 99}}),
-            ]
+            vec![serde_json::json!({"json": {"count": 99}})],
         );
 
         let context = ExpressionContext {
@@ -566,8 +597,12 @@ mod tests {
         };
 
         let result = engine.eval_with_context("$item(\"SetNode\").$json.count", &context);
-        
-        assert!(result.is_ok(), "Failed to evaluate expression: {:?}", result.err());
+
+        assert!(
+            result.is_ok(),
+            "Failed to evaluate expression: {:?}",
+            result.err()
+        );
         assert_eq!(result.unwrap().as_int().unwrap(), 99);
     }
 }

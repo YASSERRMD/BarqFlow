@@ -189,6 +189,10 @@ impl ExecutionStateManager {
         self.states.read().await.len()
     }
 
+    pub async fn is_empty(&self) -> bool {
+        self.states.read().await.len() == 0
+    }
+
     pub async fn increment_nodes_executed(&self) {
         self.metrics.write().await.nodes_executed += 1;
     }
@@ -271,7 +275,10 @@ mod tests {
         manager.create("wf3", false).await;
 
         assert_eq!(manager.len().await, 2);
-        assert!(manager.get(&first.id).await.is_none(), "oldest entry should be evicted");
+        assert!(
+            manager.get(&first.id).await.is_none(),
+            "oldest entry should be evicted"
+        );
     }
 
     #[tokio::test]

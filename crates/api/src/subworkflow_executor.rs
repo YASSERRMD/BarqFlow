@@ -98,12 +98,11 @@ impl RepositorySubWorkflowExecutor {
             .nodes
             .iter()
             .filter(|node| {
-                workflow
+                !workflow
                     .connections
                     .get(&node.name)
                     .map(Self::has_outgoing_connections)
                     .unwrap_or(false)
-                    == false
             })
             .map(|node| node.name.clone())
             .collect();

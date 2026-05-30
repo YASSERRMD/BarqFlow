@@ -309,7 +309,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_webhook_poll_surfaces_runtime_configuration() {
-        let node = WebhookNode::new().with_method("POST").with_path("/incoming");
+        let node = WebhookNode::new()
+            .with_method("POST")
+            .with_path("/incoming");
         let context = mock_poll_context(HashMap::from([
             ("path".to_string(), serde_json::json!("orders/new")),
             ("httpMethod".to_string(), serde_json::json!("PATCH")),

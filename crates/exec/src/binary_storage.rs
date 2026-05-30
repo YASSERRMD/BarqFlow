@@ -363,7 +363,10 @@ mod tests {
         let deleted = delete_artifacts_older_than(&config, Duration::ZERO)
             .await
             .unwrap();
-        assert_eq!(deleted, 0, "should not delete files inside execution subdirs");
+        assert_eq!(
+            deleted, 0,
+            "should not delete files inside execution subdirs"
+        );
         assert!(config.root_dir.join(exec_id.to_string()).exists());
     }
 }

@@ -4,9 +4,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::Duration as TokioDuration;
 
-use crate::repositories::{
-    execution::ExecutionRepository, execution_log::ExecutionLogRepository,
-};
+use crate::repositories::{execution::ExecutionRepository, execution_log::ExecutionLogRepository};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -128,14 +126,12 @@ impl OperationsRuntime {
         let pruning_config = ExecutionPruningConfig {
             enabled: parse_bool_env("BARQFLOW_EXECUTION_PRUNING_ENABLED", true),
             retention_days: parse_u64_env("BARQFLOW_EXECUTION_RETENTION_DAYS", 30).max(1),
-            interval_minutes: parse_u64_env("BARQFLOW_EXECUTION_PRUNE_INTERVAL_MINUTES", 60)
-                .max(1),
+            interval_minutes: parse_u64_env("BARQFLOW_EXECUTION_PRUNE_INTERVAL_MINUTES", 60).max(1),
         };
 
         let telemetry = TelemetrySnapshot {
             enabled: parse_bool_env("BARQFLOW_TRACING_ENABLED", true),
-            format: std::env::var("BARQFLOW_TRACE_FORMAT")
-                .unwrap_or_else(|_| "pretty".to_string()),
+            format: std::env::var("BARQFLOW_TRACE_FORMAT").unwrap_or_else(|_| "pretty".to_string()),
             service_name: std::env::var("BARQFLOW_SERVICE_NAME")
                 .unwrap_or_else(|_| "barqflow-server".to_string()),
             environment: std::env::var("BARQFLOW_ENV")

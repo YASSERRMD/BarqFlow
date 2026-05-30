@@ -38,7 +38,9 @@ pub enum BarqError {
     },
 
     /// Special control-flow variant to indicate the Engine should run an error workflow because this workflow failed.
-    #[error("Execution failed and triggered error workflow '{error_workflow_id}': {original_error}")]
+    #[error(
+        "Execution failed and triggered error workflow '{error_workflow_id}': {original_error}"
+    )]
     TriggerErrorWorkflow {
         error_workflow_id: String,
         original_error: String,

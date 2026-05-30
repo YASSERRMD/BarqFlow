@@ -57,30 +57,23 @@ fn verify_hmac_signature(
             )
         })?;
 
-    let provided_hex = header_value
-        .strip_prefix("sha256=")
-        .ok_or_else(|| {
-            (
-                StatusCode::FORBIDDEN,
-                "Invalid signature format; expected sha256=<hex>".into(),
-            )
-        })?;
-
-    let provided_bytes = hex::decode(provided_hex).map_err(|_| {
+    let provided_hex = header_value.strip_prefix("sha256=").ok_or_else(|| {
         (
             StatusCode::FORBIDDEN,
-            "Signature is not valid hex".into(),
+            "Invalid signature format; expected sha256=<hex>".into(),
         )
     })?;
 
-    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
-        .expect("HMAC accepts any key length");
+    let provided_bytes = hex::decode(provided_hex)
+        .map_err(|_| (StatusCode::FORBIDDEN, "Signature is not valid hex".into()))?;
+
+    let mut mac =
+        HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC accepts any key length");
     mac.update(body);
 
     // constant-time comparison — verify_slice rejects if lengths differ too
-    mac.verify_slice(&provided_bytes).map_err(|_| {
-        (StatusCode::FORBIDDEN, "Signature mismatch".into())
-    })
+    mac.verify_slice(&provided_bytes)
+        .map_err(|_| (StatusCode::FORBIDDEN, "Signature mismatch".into()))
 }
 
 /// Thread-safe registry mapping webhook paths to their bound workflow endpoints.

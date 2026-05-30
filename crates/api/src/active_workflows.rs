@@ -137,7 +137,7 @@ impl ActiveWorkflowManager {
                 .0
                 .get("path")
                 .and_then(|p| p.as_str())
-                .unwrap_or_else(|| node.id.0.as_str())
+                .unwrap_or(node.id.0.as_str())
                 .to_string();
 
             let http_method = node
@@ -148,12 +148,21 @@ impl ActiveWorkflowManager {
                 .unwrap_or("ANY")
                 .to_string();
 
+            let webhook_secret = node
+                .parameters
+                .0
+                .get("webhookSecret")
+                .and_then(|s| s.as_str())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string());
+
             registry.insert(
                 path.clone(),
                 WebhookEndpoint {
                     workflow_id,
                     node_id: node.id.to_string(),
                     http_method,
+                    webhook_secret,
                 },
             );
 

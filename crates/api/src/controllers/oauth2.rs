@@ -1,8 +1,8 @@
 use crate::repositories::credential::CredentialRepository;
 use axum::{
     extract::{Query, State},
-    response::{Html, IntoResponse},
     http::StatusCode,
+    response::{Html, IntoResponse},
     routing::get,
     Router,
 };
@@ -140,11 +140,7 @@ async fn persist_oauth_status(
         .await;
 }
 
-fn render_callback_page(
-    success: bool,
-    credential_id: Option<&str>,
-    message: &str,
-) -> Html<String> {
+fn render_callback_page(success: bool, credential_id: Option<&str>, message: &str) -> Html<String> {
     let payload = serde_json::json!({
         "source": "barqflow-oauth2",
         "success": success,
@@ -271,10 +267,8 @@ async fn oauth2_callback_inner(
     state: OAuth2State,
 ) -> Result<OAuth2CallbackResponse, (StatusCode, Option<String>, String)> {
     // Parse the credential ID and optional CSRF token from OAuth2 `state`.
-    let (credential_id, csrf_token) =
-        parse_callback_state(&params.state).map_err(|(status_code, message)| {
-            (status_code, None, message)
-        })?;
+    let (credential_id, csrf_token) = parse_callback_state(&params.state)
+        .map_err(|(status_code, message)| (status_code, None, message))?;
 
     // Retrieve the existing credential (needed for current data e.g. client_id/secret if not in query)
     let existing = state
@@ -304,7 +298,11 @@ async fn oauth2_callback_inner(
             .map(|description| format!("OAuth provider returned {}: {}", error, description))
             .unwrap_or_else(|| format!("OAuth provider returned {}", error));
         persist_oauth_status(&state.credential_repo, credential_id, "invalid", &message).await;
-        return Err((StatusCode::BAD_REQUEST, Some(credential_id.to_string()), message));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Some(credential_id.to_string()),
+            message,
+        ));
     }
 
     if let Err((status_code, message)) = validate_state_nonce(&existing.data, csrf_token.as_deref())
@@ -382,7 +380,11 @@ async fn oauth2_callback_inner(
         let body = token_res.text().await.unwrap_or_default();
         let message = format!("Provider returned {}: {}", status, body);
         persist_oauth_status(&state.credential_repo, credential_id, "error", &message).await;
-        return Err((StatusCode::BAD_GATEWAY, Some(credential_id.to_string()), message));
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            Some(credential_id.to_string()),
+            message,
+        ));
     }
 
     let token_body: OAuth2TokenResponse = token_res.json().await.map_err(|e| {
@@ -476,8 +478,7 @@ mod tests {
 
     #[test]
     fn render_callback_page_embeds_post_message_payload() {
-        let html = render_callback_page(true, Some("cred-1"), "Connected")
-            .0;
+        let html = render_callback_page(true, Some("cred-1"), "Connected").0;
         assert!(html.contains("barqflow-oauth2"));
         assert!(html.contains("window.opener.postMessage"));
         assert!(html.contains("cred-1"));

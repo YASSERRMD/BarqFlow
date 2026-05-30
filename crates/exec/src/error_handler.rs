@@ -116,22 +116,26 @@ impl ErrorHandler {
     }
 
     /// Executes an async operation with retry logic and isolates panics per task
-    pub async fn execute_isolated_async<F, Fut, T>(&self, node_name: &str, mut operation: F) -> Result<T, BarqError>
+    pub async fn execute_isolated_async<F, Fut, T>(
+        &self,
+        node_name: &str,
+        mut operation: F,
+    ) -> Result<T, BarqError>
     where
         F: FnMut() -> Fut,
         Fut: std::future::Future<Output = Result<T, BarqError>>,
     {
-        use std::panic::AssertUnwindSafe;
         use futures::FutureExt;
-        
+        use std::panic::AssertUnwindSafe;
+
         let mut last_error = None;
 
         for attempt in 0..=self.max_retries {
             let fut = operation();
-            
+
             // Wrap in AssertUnwindSafe to catch async task panics without killing the root thread
             let execute_future = AssertUnwindSafe(fut).catch_unwind();
-            
+
             let execute_result: Result<T, BarqError> = match execute_future.await {
                 Ok(Ok(result)) => return Ok(result),
                 Ok(Err(e)) => Err(e),
@@ -143,20 +147,23 @@ impl ErrorHandler {
                     } else {
                         "Unknown panic".to_string()
                     };
-                    
+
                     Err(BarqError::NodeOperationError {
                         node_name: node_name.to_string(),
                         message: format!("Node execution panicked: {}", panic_msg),
                     })
                 }
             };
-            
+
             // Trap error and handle retries
             match execute_result {
                 Err(e) if attempt < self.max_retries => {
                     last_error = Some(e);
                     if self.retry_interval_ms > 0 {
-                        tokio::time::sleep(tokio::time::Duration::from_millis(self.retry_interval_ms)).await;
+                        tokio::time::sleep(tokio::time::Duration::from_millis(
+                            self.retry_interval_ms,
+                        ))
+                        .await;
                     }
                 }
                 Err(e) => return Err(e),

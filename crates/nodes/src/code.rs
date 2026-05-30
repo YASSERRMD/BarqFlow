@@ -57,7 +57,9 @@ impl CodeNode {
         }
 
         if result.is_map() {
-            return Ok(vec![Self::dynamic_map_to_execution_data(result.cast::<Map>())?]);
+            return Ok(vec![Self::dynamic_map_to_execution_data(
+                result.cast::<Map>(),
+            )?]);
         }
 
         if result.is_array() {
@@ -190,8 +192,10 @@ impl INodeType for CodeNode {
 
         // We receive the previous items
         let previous_items = context.get_input_data(0).await.unwrap_or_default();
-        let previous_json_items: Vec<Value> =
-            previous_items.iter().map(|item| Value::Object(item.json.0.clone())).collect();
+        let previous_json_items: Vec<Value> = previous_items
+            .iter()
+            .map(|item| Value::Object(item.json.0.clone()))
+            .collect();
 
         // Ensure Rhai execution is isolated (no OS access, etc.)
         // By default, `Engine::new()` avoids exposing OS boundaries unless manually registered
@@ -219,12 +223,12 @@ impl INodeType for CodeNode {
                 scope.push("items", Dynamic::from_array(items_array));
                 scope.push_dynamic("item", first_item);
 
-                let result = engine.eval_with_scope::<Dynamic>(&mut scope, &code).map_err(|error| {
-                    BarqError::NodeOperationError {
+                let result = engine
+                    .eval_with_scope::<Dynamic>(&mut scope, &code)
+                    .map_err(|error| BarqError::NodeOperationError {
                         node_name: "Code".into(),
                         message: format!("Rhai execution error: {}", error),
-                    }
-                })?;
+                    })?;
 
                 collected.extend(Self::dynamic_to_execution_items(result)?);
             }
@@ -235,12 +239,12 @@ impl INodeType for CodeNode {
             let mut scope = Scope::new();
             scope.push("items", Dynamic::from_array(items_array));
 
-            let result = engine.eval_with_scope::<Dynamic>(&mut scope, &code).map_err(|error| {
-                BarqError::NodeOperationError {
+            let result = engine
+                .eval_with_scope::<Dynamic>(&mut scope, &code)
+                .map_err(|error| BarqError::NodeOperationError {
                     node_name: "Code".into(),
                     message: format!("Rhai execution error: {}", error),
-                }
-            })?;
+                })?;
 
             Self::dynamic_to_execution_items(result)?
         };
@@ -339,14 +343,14 @@ mod tests {
         assert_eq!(branch.len(), 2);
 
         let first_json = &branch[0].json.0;
-        assert_eq!(first_json.get("test").unwrap().as_bool().unwrap(), true);
+        assert!(first_json.get("test").unwrap().as_bool().unwrap());
         assert_eq!(
             first_json.get("hello").unwrap().as_str().unwrap(),
             "sandbox"
         );
 
         let second_json = &branch[1].json.0;
-        assert_eq!(second_json.get("added").unwrap().as_bool().unwrap(), true);
+        assert!(second_json.get("added").unwrap().as_bool().unwrap());
     }
 
     #[tokio::test]

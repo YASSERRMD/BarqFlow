@@ -33,9 +33,8 @@ impl AppConfig {
                 .map(|s| s.trim().is_empty())
                 .unwrap_or(true)
             {
-                errors.push(
-                    "JWT_SECRET must be set to a non-empty value in production".to_string(),
-                );
+                errors
+                    .push("JWT_SECRET must be set to a non-empty value in production".to_string());
             }
 
             let enc_key = env::var("BARQFLOW_ENCRYPTION_KEY").unwrap_or_default();
@@ -91,7 +90,10 @@ fn parse_port(raw: String, errors: &mut Vec<String>) -> Option<u16> {
             None
         }
         Err(_) => {
-            errors.push(format!("PORT '{}' is not a valid port number (1–65535)", raw));
+            errors.push(format!(
+                "PORT '{}' is not a valid port number (1–65535)",
+                raw
+            ));
             None
         }
     }

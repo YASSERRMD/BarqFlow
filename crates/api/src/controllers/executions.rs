@@ -7,10 +7,14 @@ use crate::execution_events::{
 };
 use crate::operations::OperationsRuntime;
 use crate::repositories::{
-    api_key::ApiKeyRepository, credential::CredentialRepository, execution::ExecutionRepository,
+    api_key::ApiKeyRepository,
+    credential::CredentialRepository,
+    execution::ExecutionRepository,
     execution_dispatch::{ExecutionDispatchRepository, ExecutionQueueKind},
-    execution_log::ExecutionLogRepository, governance::GovernanceRepository,
-    workflow::WorkflowRepository, workspace::WorkspaceRepository,
+    execution_log::ExecutionLogRepository,
+    governance::GovernanceRepository,
+    workflow::WorkflowRepository,
+    workspace::WorkspaceRepository,
 };
 use crate::routes::{ActiveExecutionControl, ActiveExecutionManager};
 use crate::subworkflow_executor::RepositorySubWorkflowExecutor;
@@ -161,6 +165,7 @@ impl barqflow_exec::runner::ExecutionEventReporter for StateBackedExecutionEvent
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_execution_event(
     execution_id: Uuid,
     workflow_id: Uuid,
@@ -1029,8 +1034,8 @@ pub(crate) async fn execute_queued_dispatch_item(
             )
         })?;
 
-    let nodes: Vec<barqflow_core::schema::INode> =
-        serde_json::from_value(payload.nodes.clone()).map_err(|error| {
+    let nodes: Vec<barqflow_core::schema::INode> = serde_json::from_value(payload.nodes.clone())
+        .map_err(|error| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Failed to parse queued workflow nodes: {error}"),
@@ -1173,8 +1178,13 @@ async fn run_claimed_execution(
         Err(barqflow_core::errors::BarqError::SuspendExecution {
             node_name,
             wait_config,
-        }) => match build_waiting_execution_data(&state, execution_id, node_name.as_str(), wait_config)
-            .await
+        }) => match build_waiting_execution_data(
+            &state,
+            execution_id,
+            node_name.as_str(),
+            wait_config,
+        )
+        .await
         {
             Ok(waiting_data) => (
                 "waiting".to_string(),

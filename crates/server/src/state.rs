@@ -4,9 +4,9 @@ use barqflow_api::execution_events::ExecutionEventHub;
 use barqflow_api::operations::OperationsRuntime;
 use barqflow_api::repositories::{
     api_key::ApiKeyRepository, credential::CredentialRepository, execution::ExecutionRepository,
-    execution_dispatch::ExecutionDispatchRepository, execution_log::ExecutionLogRepository, governance::GovernanceRepository,
-    static_data::StaticDataRepository, workflow::WorkflowRepository,
-    workspace::WorkspaceRepository,
+    execution_dispatch::ExecutionDispatchRepository, execution_log::ExecutionLogRepository,
+    governance::GovernanceRepository, static_data::StaticDataRepository,
+    workflow::WorkflowRepository, workspace::WorkspaceRepository,
 };
 use barqflow_api::routes::ActiveExecutionManager;
 use barqflow_api::AppState as ApiState;
@@ -80,7 +80,7 @@ impl AppState {
         })
     }
 
-    pub fn into_api_state(&self) -> ApiState {
+    pub fn to_api_state(&self) -> ApiState {
         ApiState {
             workflow_repo: Arc::clone(&self.workflow_repo),
             credential_repo: Arc::clone(&self.credential_repo),

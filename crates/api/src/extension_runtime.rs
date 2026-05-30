@@ -43,7 +43,12 @@ pub async fn invoke_extension_action(
         .actions
         .iter()
         .find(|candidate| candidate.id == action_id)
-        .ok_or_else(|| format!("Extension action '{}' was not found in bundle '{}'.", action_id, bundle.id))?;
+        .ok_or_else(|| {
+            format!(
+                "Extension action '{}' was not found in bundle '{}'.",
+                action_id, bundle.id
+            )
+        })?;
 
     for capability in &action.required_capabilities {
         if !bundle.capabilities.iter().any(|value| value == capability) {
@@ -57,12 +62,18 @@ pub async fn invoke_extension_action(
     let (status, summary, output) = match (bundle.id.as_str(), action.id.as_str()) {
         ("barqflow.ops.observability-pack", "runtime-health") => {
             let webhook_count = {
-                let registry = runtime.webhook_registry.read().map_err(|_| "Webhook registry lock poisoned".to_string())?;
+                let registry = runtime
+                    .webhook_registry
+                    .read()
+                    .map_err(|_| "Webhook registry lock poisoned".to_string())?;
                 registry.len()
             };
             let cron_job_count = {
                 let cron_jobs = runtime.active_cron_jobs.read().await;
-                cron_jobs.values().map(|job_ids| job_ids.len()).sum::<usize>()
+                cron_jobs
+                    .values()
+                    .map(|job_ids| job_ids.len())
+                    .sum::<usize>()
             };
             let active_execution_count = runtime.active_executions.read().await.len();
             let queued_run_count = runtime

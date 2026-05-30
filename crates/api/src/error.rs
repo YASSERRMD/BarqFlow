@@ -65,17 +65,15 @@ pub type ApiResult<T> = Result<T, (StatusCode, ApiError)>;
 
 /// Convert a plain `(StatusCode, String)` tuple — the old error shape used
 /// throughout the codebase — into the new typed `(StatusCode, ApiError)`.
-pub fn from_string_error(code: &'static str) -> impl Fn((StatusCode, String)) -> (StatusCode, ApiError) {
+pub fn from_string_error(
+    code: &'static str,
+) -> impl Fn((StatusCode, String)) -> (StatusCode, ApiError) {
     move |(status, message)| (status, ApiError::new(code, message))
 }
 
-/// Make `(StatusCode, ApiError)` directly usable as an Axum response.
-impl IntoResponse for (StatusCode, ApiError) {
-    fn into_response(self) -> Response {
-        let (status, error) = self;
-        (status, Json(error)).into_response()
-    }
-}
+// `(StatusCode, ApiError)` is already usable as an Axum response via axum's
+// blanket `IntoResponse for (StatusCode, T) where T: IntoResponse` impl, since
+// `ApiError` implements `IntoResponse` above.
 
 #[cfg(test)]
 mod tests {
@@ -92,11 +90,17 @@ mod tests {
 
     #[test]
     fn helpers_return_correct_status_codes() {
-        assert_eq!(ApiError::internal("oops").0, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            ApiError::internal("oops").0,
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
         assert_eq!(ApiError::not_found("missing").0, StatusCode::NOT_FOUND);
         assert_eq!(ApiError::bad_request("bad").0, StatusCode::BAD_REQUEST);
         assert_eq!(ApiError::unauthorized("denied").0, StatusCode::UNAUTHORIZED);
         assert_eq!(ApiError::forbidden("no").0, StatusCode::FORBIDDEN);
-        assert_eq!(ApiError::service_unavailable("busy").0, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            ApiError::service_unavailable("busy").0,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
     }
 }

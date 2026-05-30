@@ -444,7 +444,7 @@ pub(crate) async fn execute_paginated_prepared_request(
     request: PreparedRequest,
     max_pages: usize,
 ) -> Result<IntegrationResponse, BarqError> {
-    let capped_pages = max_pages.max(1).min(20);
+    let capped_pages = max_pages.clamp(1, 20);
     let mut current_request = request;
     let mut collected_pages = Vec::new();
     let mut last_response: Option<IntegrationResponse> = None;
