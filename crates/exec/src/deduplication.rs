@@ -245,7 +245,7 @@ mod tests {
         let mut e1 = IDataObject::default();
         e1.0.insert("title".to_string(), json!("News 1"));
         e1.0.insert("body".to_string(), json!("Content 1"));
-        
+
         let mut e2 = IDataObject::default();
         e2.0.insert("title".to_string(), json!("News 2"));
         e2.0.insert("body".to_string(), json!("Content 2"));
@@ -272,14 +272,17 @@ mod tests {
         let new_evs2 = DeduplicationManager::filter_new_events(
             events2,
             DeduplicationMode::ContentHash,
-            "", 
+            "",
             &mut state,
         );
-        
+
         // e1 should be dropped. Only e3 is new.
-        assert_eq!(new_evs2.len(), 1); 
-        assert_eq!(new_evs2[0].0.get("title").unwrap().as_str().unwrap(), "News 3");
-        
+        assert_eq!(new_evs2.len(), 1);
+        assert_eq!(
+            new_evs2[0].0.get("title").unwrap().as_str().unwrap(),
+            "News 3"
+        );
+
         // Ensure state captured hashes
         assert!(state.0.contains_key("seen_hashes"));
         let hashes = state.0.get("seen_hashes").unwrap().as_array().unwrap();

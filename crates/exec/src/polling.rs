@@ -18,7 +18,10 @@ pub struct PollingEngine {
 }
 
 impl PollingEngine {
-    pub fn new(registry: Arc<NodeRegistry>, static_repo: Arc<dyn barqflow_core::traits::IStaticDataStorage>) -> Self {
+    pub fn new(
+        registry: Arc<NodeRegistry>,
+        static_repo: Arc<dyn barqflow_core::traits::IStaticDataStorage>,
+    ) -> Self {
         Self {
             registry,
             active_pollers: Arc::new(RwLock::new(HashMap::new())),
@@ -96,7 +99,11 @@ impl PollingEngine {
             loop {
                 interval_timer.tick().await;
 
-                let ctx = PollExecutionContext::new(target_node.clone(), workflow_id.0, static_repo.clone());
+                let ctx = PollExecutionContext::new(
+                    target_node.clone(),
+                    workflow_id.0,
+                    static_repo.clone(),
+                );
                 match node_impl.poll(&ctx).await {
                     Ok(mut events) => {
                         // Triggers usually return empty 2D arrays if nothing new arrived
@@ -110,7 +117,10 @@ impl PollingEngine {
                                         branch.into_iter().map(|d| d.json).collect();
 
                                     let dedup_state_key = format!("{}_dedup", target_node.id);
-                                    let dedup_opt = static_repo.get(dedup_state_key.clone(), workflow_id.0).await.unwrap_or(None);
+                                    let dedup_opt = static_repo
+                                        .get(dedup_state_key.clone(), workflow_id.0)
+                                        .await
+                                        .unwrap_or(None);
                                     let mut dedup_state = dedup_opt.unwrap_or_default();
 
                                     let filtered = DeduplicationManager::filter_new_events(
@@ -120,7 +130,9 @@ impl PollingEngine {
                                         &mut dedup_state,
                                     );
 
-                                    let _ = static_repo.upsert(dedup_state_key, workflow_id.0, dedup_state).await;
+                                    let _ = static_repo
+                                        .upsert(dedup_state_key, workflow_id.0, dedup_state)
+                                        .await;
 
                                     let new_branch: Vec<INodeExecutionData> =
                                         filtered.into_iter().map(INodeExecutionData::new).collect();
@@ -180,12 +192,12 @@ impl PollingEngine {
 #[cfg(test)]
 mod tests {
     use async_trait::async_trait;
-    use barqflow_core::traits::{IPollFunctions, INodeType};
+    use barqflow_core::traits::{INodeType, IPollFunctions};
 
     use super::*;
+    use barqflow_core::properties::INodeProperties;
     use barqflow_core::schema::{INode, INodeParameters, WorkflowDef};
     use barqflow_core::types::{NodeId, WorkflowId};
-    use barqflow_core::properties::INodeProperties;
     use barqflow_registry::registry::NodeInfo;
     use serde_json::json;
     use std::sync::atomic::{AtomicUsize, Ordering};

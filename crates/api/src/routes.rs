@@ -2,8 +2,8 @@ use crate::execution_events::ExecutionEventHub;
 use crate::operations::OperationsRuntime;
 use crate::repositories::{
     api_key::ApiKeyRepository, credential::CredentialRepository, execution::ExecutionRepository,
-    execution_dispatch::ExecutionDispatchRepository, execution_log::ExecutionLogRepository, governance::GovernanceRepository,
-    workflow::WorkflowRepository, workspace::WorkspaceRepository,
+    execution_dispatch::ExecutionDispatchRepository, execution_log::ExecutionLogRepository,
+    governance::GovernanceRepository, workflow::WorkflowRepository, workspace::WorkspaceRepository,
 };
 use axum::Router;
 use barqflow_db::users::UserRepo;

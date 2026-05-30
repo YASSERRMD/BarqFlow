@@ -7,7 +7,7 @@ use barqflow_core::types::RunId;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tracing::{debug, info};
@@ -241,7 +241,7 @@ impl CheckpointManager {
     /// Load checkpoint from filesystem.
     async fn load_from_filesystem(
         &self,
-        base_path: &PathBuf,
+        base_path: &Path,
         run_id: &RunId,
     ) -> Option<ExecutionCheckpoint> {
         // Check cache first
@@ -265,7 +265,7 @@ impl CheckpointManager {
     /// Delete checkpoint from filesystem.
     async fn delete_from_filesystem(
         &mut self,
-        base_path: &PathBuf,
+        base_path: &Path,
         run_id: &RunId,
     ) -> Result<(), String> {
         // Remove from cache

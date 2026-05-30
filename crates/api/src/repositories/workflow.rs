@@ -31,29 +31,19 @@ pub struct WorkflowRepository {
     pool: PgPool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WorkflowSortBy {
+    #[default]
     UpdatedAt,
     CreatedAt,
     Name,
 }
 
-impl Default for WorkflowSortBy {
-    fn default() -> Self {
-        Self::UpdatedAt
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SortDirection {
     Asc,
+    #[default]
     Desc,
-}
-
-impl Default for SortDirection {
-    fn default() -> Self {
-        Self::Desc
-    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -526,15 +516,15 @@ impl WorkflowRepository {
     }
 
     pub async fn list_tags(&self) -> Result<Vec<TagRecordEntity>> {
-        let rows = sqlx::query_as::<_, TagCountRow>(&format!(
+        let rows = sqlx::query_as::<_, TagCountRow>(
             r#"
             SELECT t.id, t.workspace_id, t.name, t.created_at, t.updated_at, COUNT(wt.workflow_id) AS workflow_count
             FROM tags t
             LEFT JOIN workflow_tags wt ON wt.tag_id = t.id
             GROUP BY t.id, t.workspace_id, t.name, t.created_at, t.updated_at
             ORDER BY LOWER(t.name) ASC
-            "#
-        ))
+            "#,
+        )
         .fetch_all(&self.pool)
         .await?;
 
@@ -542,7 +532,7 @@ impl WorkflowRepository {
     }
 
     pub async fn list_tags_in_workspace(&self, workspace_id: Uuid) -> Result<Vec<TagRecordEntity>> {
-        let rows = sqlx::query_as::<_, TagCountRow>(&format!(
+        let rows = sqlx::query_as::<_, TagCountRow>(
             r#"
             SELECT t.id, t.workspace_id, t.name, t.created_at, t.updated_at, COUNT(wt.workflow_id) AS workflow_count
             FROM tags t
@@ -550,8 +540,8 @@ impl WorkflowRepository {
             WHERE t.workspace_id = $1
             GROUP BY t.id, t.workspace_id, t.name, t.created_at, t.updated_at
             ORDER BY LOWER(t.name) ASC
-            "#
-        ))
+            "#,
+        )
         .bind(workspace_id)
         .fetch_all(&self.pool)
         .await?;
@@ -826,6 +816,7 @@ impl WorkflowRepository {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn insert_workflow_tx_with_scope(
         &self,
         tx: &mut Transaction<'_, Postgres>,
@@ -871,13 +862,12 @@ impl WorkflowRepository {
     ) -> Result<Option<WorkflowEntity>> {
         let now = Utc::now();
 
-        let mut sql = format!(
-            r#"
+        let mut sql = r#"
             UPDATE workflows
             SET name = $1, nodes = $2, connections = $3, settings = $4, updated_at = $5
             WHERE id = $6
             "#
-        );
+        .to_string();
         if workspace_id.is_some() {
             sql.push_str(" AND workspace_id = $7");
         }

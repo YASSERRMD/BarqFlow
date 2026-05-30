@@ -147,157 +147,6 @@ pub fn is_node_ui_exposed(name: &str) -> bool {
     )
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{
-        is_node_ui_exposed, node_documentation_url, node_support_tier, node_ui_category,
-        register_all_nodes, NodeSupportTier,
-    };
-    use barqflow_registry::registry::NodeRegistry;
-
-    fn property_names_for(registry: &NodeRegistry, node_name: &str) -> Vec<String> {
-        registry
-            .get_latest_node(node_name)
-            .unwrap_or_else(|| panic!("node '{node_name}' should be registered"))
-            .properties
-            .properties
-            .iter()
-            .map(|property| property.name.clone())
-            .collect()
-    }
-
-    #[test]
-    fn test_ui_exposure_includes_implemented_integrations() {
-        assert!(is_node_ui_exposed("barqflow-nodes.openai"));
-        assert!(is_node_ui_exposed("barqflow-nodes.postgres"));
-        assert!(is_node_ui_exposed("barqflow-nodes.slack"));
-        assert!(is_node_ui_exposed("barqflow-nodes.github"));
-        assert!(is_node_ui_exposed("barqflow-nodes.telegram"));
-        assert!(is_node_ui_exposed("barqflow-nodes.googleSheets"));
-        assert!(is_node_ui_exposed("barqflow-nodes.gmail"));
-        assert!(is_node_ui_exposed("barqflow-nodes.twilio"));
-        assert!(is_node_ui_exposed("barqflow-nodes.shopify"));
-        assert!(is_node_ui_exposed("barqflow-nodes.barqDbInsert"));
-    }
-
-    #[test]
-    fn test_node_catalog_metadata_classifies_tiers_and_hidden_entries() {
-        assert_eq!(
-            node_support_tier("barqflow-nodes.openai"),
-            Some(NodeSupportTier::Supported)
-        );
-        assert_eq!(
-            node_support_tier("barqflow-nodes.monday"),
-            Some(NodeSupportTier::Beta)
-        );
-        assert_eq!(
-            node_support_tier("barqflow-nodes.paypal"),
-            Some(NodeSupportTier::Hidden)
-        );
-        assert!(!is_node_ui_exposed("barqflow-nodes.paypal"));
-        assert_eq!(node_ui_category("barqflow-nodes.webhook"), Some("Triggers"));
-        assert_eq!(
-            node_documentation_url("barqflow-nodes.openai"),
-            Some("https://platform.openai.com/docs/overview")
-        );
-    }
-
-    #[test]
-    fn test_webhook_schema_exposes_response_configuration_properties() {
-        let registry = NodeRegistry::new();
-        register_all_nodes(&registry);
-
-        let webhook = registry
-            .get_latest_node("barqflow-nodes.webhook")
-            .expect("webhook node should be registered");
-
-        let names: Vec<String> = webhook
-            .properties
-            .properties
-            .iter()
-            .map(|p| p.name.clone())
-            .collect();
-
-        assert!(names.contains(&"path".to_string()));
-        assert!(names.contains(&"httpMethod".to_string()));
-        assert!(names.contains(&"responseMode".to_string()));
-        assert!(names.contains(&"responseCode".to_string()));
-        assert!(names.contains(&"responseData".to_string()));
-    }
-
-    #[test]
-    fn test_tier1_node_schemas_expose_runtime_parameters() {
-        let registry = NodeRegistry::new();
-        register_all_nodes(&registry);
-
-        let cases = vec![
-            (
-                "n8n-nodes-base.httpRequest",
-                vec!["url", "method", "authentication", "responseFormat"],
-            ),
-            (
-                "n8n-nodes-base.if",
-                vec![
-                    "combineOperation",
-                    "conditions",
-                    "operation",
-                    "value1",
-                    "value2",
-                ],
-            ),
-            (
-                "n8n-nodes-base.switch",
-                vec![
-                    "dataProperty",
-                    "fallbackOutput",
-                    "case0",
-                    "case1",
-                    "case2",
-                    "case3",
-                ],
-            ),
-            (
-                "n8n-nodes-base.filter",
-                vec![
-                    "combineOperation",
-                    "conditions",
-                    "operation",
-                    "value1",
-                    "value2",
-                ],
-            ),
-            (
-                "n8n-nodes-base.code",
-                vec!["mode", "language", "jsCode", "pythonCode"],
-            ),
-            ("n8n-nodes-base.manualTrigger", vec![]),
-            ("barqflow-nodes.wait", vec!["resume", "amount", "unit"]),
-            (
-                "barqflow-nodes.webhook",
-                vec!["path", "httpMethod", "responseMode"],
-            ),
-            ("barqflow-nodes.cronTrigger", vec!["cron"]),
-            (
-                "barqflow-nodes.executeWorkflow",
-                vec!["workflowId", "mode", "inputData"],
-            ),
-        ];
-
-        for (node_name, expected_properties) in cases {
-            let property_names = property_names_for(&registry, node_name);
-            for expected_property in expected_properties {
-                assert!(
-                    property_names.contains(&expected_property.to_string()),
-                    "expected '{}' schema to expose '{}', got {:?}",
-                    node_name,
-                    expected_property,
-                    property_names
-                );
-            }
-        }
-    }
-}
-
 pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) {
     use barqflow_core::properties::INodeProperties;
     use barqflow_registry::registry::NodeInfo;
@@ -10689,4 +10538,155 @@ pub fn register_all_nodes(registry: &barqflow_registry::registry::NodeRegistry) 
         max_inputs: 1,
         node_impl: Arc::new(integration::barqdb_delete::BarqDbDeleteNode::new()),
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        is_node_ui_exposed, node_documentation_url, node_support_tier, node_ui_category,
+        register_all_nodes, NodeSupportTier,
+    };
+    use barqflow_registry::registry::NodeRegistry;
+
+    fn property_names_for(registry: &NodeRegistry, node_name: &str) -> Vec<String> {
+        registry
+            .get_latest_node(node_name)
+            .unwrap_or_else(|| panic!("node '{node_name}' should be registered"))
+            .properties
+            .properties
+            .iter()
+            .map(|property| property.name.clone())
+            .collect()
+    }
+
+    #[test]
+    fn test_ui_exposure_includes_implemented_integrations() {
+        assert!(is_node_ui_exposed("barqflow-nodes.openai"));
+        assert!(is_node_ui_exposed("barqflow-nodes.postgres"));
+        assert!(is_node_ui_exposed("barqflow-nodes.slack"));
+        assert!(is_node_ui_exposed("barqflow-nodes.github"));
+        assert!(is_node_ui_exposed("barqflow-nodes.telegram"));
+        assert!(is_node_ui_exposed("barqflow-nodes.googleSheets"));
+        assert!(is_node_ui_exposed("barqflow-nodes.gmail"));
+        assert!(is_node_ui_exposed("barqflow-nodes.twilio"));
+        assert!(is_node_ui_exposed("barqflow-nodes.shopify"));
+        assert!(is_node_ui_exposed("barqflow-nodes.barqDbInsert"));
+    }
+
+    #[test]
+    fn test_node_catalog_metadata_classifies_tiers_and_hidden_entries() {
+        assert_eq!(
+            node_support_tier("barqflow-nodes.openai"),
+            Some(NodeSupportTier::Supported)
+        );
+        assert_eq!(
+            node_support_tier("barqflow-nodes.monday"),
+            Some(NodeSupportTier::Beta)
+        );
+        assert_eq!(
+            node_support_tier("barqflow-nodes.paypal"),
+            Some(NodeSupportTier::Hidden)
+        );
+        assert!(!is_node_ui_exposed("barqflow-nodes.paypal"));
+        assert_eq!(node_ui_category("barqflow-nodes.webhook"), Some("Triggers"));
+        assert_eq!(
+            node_documentation_url("barqflow-nodes.openai"),
+            Some("https://platform.openai.com/docs/overview")
+        );
+    }
+
+    #[test]
+    fn test_webhook_schema_exposes_response_configuration_properties() {
+        let registry = NodeRegistry::new();
+        register_all_nodes(&registry);
+
+        let webhook = registry
+            .get_latest_node("barqflow-nodes.webhook")
+            .expect("webhook node should be registered");
+
+        let names: Vec<String> = webhook
+            .properties
+            .properties
+            .iter()
+            .map(|p| p.name.clone())
+            .collect();
+
+        assert!(names.contains(&"path".to_string()));
+        assert!(names.contains(&"httpMethod".to_string()));
+        assert!(names.contains(&"responseMode".to_string()));
+        assert!(names.contains(&"responseCode".to_string()));
+        assert!(names.contains(&"responseData".to_string()));
+    }
+
+    #[test]
+    fn test_tier1_node_schemas_expose_runtime_parameters() {
+        let registry = NodeRegistry::new();
+        register_all_nodes(&registry);
+
+        let cases = vec![
+            (
+                "n8n-nodes-base.httpRequest",
+                vec!["url", "method", "authentication", "responseFormat"],
+            ),
+            (
+                "n8n-nodes-base.if",
+                vec![
+                    "combineOperation",
+                    "conditions",
+                    "operation",
+                    "value1",
+                    "value2",
+                ],
+            ),
+            (
+                "n8n-nodes-base.switch",
+                vec![
+                    "dataProperty",
+                    "fallbackOutput",
+                    "case0",
+                    "case1",
+                    "case2",
+                    "case3",
+                ],
+            ),
+            (
+                "n8n-nodes-base.filter",
+                vec![
+                    "combineOperation",
+                    "conditions",
+                    "operation",
+                    "value1",
+                    "value2",
+                ],
+            ),
+            (
+                "n8n-nodes-base.code",
+                vec!["mode", "language", "jsCode", "pythonCode"],
+            ),
+            ("n8n-nodes-base.manualTrigger", vec![]),
+            ("barqflow-nodes.wait", vec!["resume", "amount", "unit"]),
+            (
+                "barqflow-nodes.webhook",
+                vec!["path", "httpMethod", "responseMode"],
+            ),
+            ("barqflow-nodes.cronTrigger", vec!["cron"]),
+            (
+                "barqflow-nodes.executeWorkflow",
+                vec!["workflowId", "mode", "inputData"],
+            ),
+        ];
+
+        for (node_name, expected_properties) in cases {
+            let property_names = property_names_for(&registry, node_name);
+            for expected_property in expected_properties {
+                assert!(
+                    property_names.contains(&expected_property.to_string()),
+                    "expected '{}' schema to expose '{}', got {:?}",
+                    node_name,
+                    expected_property,
+                    property_names
+                );
+            }
+        }
+    }
 }

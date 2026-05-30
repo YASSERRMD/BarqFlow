@@ -35,7 +35,10 @@ pub fn start_dispatch_workers(state: ExecutionControllerState) {
         });
     }
 
-    info!(run_workers, trigger_workers, "Execution dispatch workers started");
+    info!(
+        run_workers,
+        trigger_workers, "Execution dispatch workers started"
+    );
 }
 
 async fn worker_loop(
@@ -78,7 +81,10 @@ async fn worker_loop(
 
                 match result {
                     Ok(()) => {
-                        let _ = state.execution_dispatch_repo.mark_completed(queue_item.id).await;
+                        let _ = state
+                            .execution_dispatch_repo
+                            .mark_completed(queue_item.id)
+                            .await;
                     }
                     Err((status, message)) => {
                         warn!(

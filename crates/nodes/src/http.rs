@@ -214,12 +214,11 @@ impl INodeType for HttpRequestNode {
                 .unwrap_or_else(|_| "autodetect".to_string());
 
             let mut is_binary = response_format == "file";
-            if response_format == "autodetect" {
-                if !content_type.starts_with("application/json")
-                    && !content_type.starts_with("text/")
-                {
-                    is_binary = true;
-                }
+            if response_format == "autodetect"
+                && !content_type.starts_with("application/json")
+                && !content_type.starts_with("text/")
+            {
+                is_binary = true;
             }
 
             if is_binary {
@@ -396,7 +395,7 @@ mod tests {
         let output = &result[0][0].json.0;
         assert_eq!(output.get("status").unwrap().as_u64().unwrap(), 200);
         let body = output.get("body").unwrap();
-        assert_eq!(body.get("success").unwrap().as_bool().unwrap(), true);
+        assert!(body.get("success").unwrap().as_bool().unwrap());
     }
 
     #[tokio::test]

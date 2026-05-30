@@ -28,8 +28,8 @@ pub async fn shutdown_signal(mut state: AppState) {
     info!("Shutdown signal received, starting graceful termination...");
     // shut down job scheduler
     info!("Stopping background job scheduler...");
-    /* 
-    tokio-cron-scheduler might not expose an explicit shutdown that blocking-waits cleanly, 
+    /*
+    tokio-cron-scheduler might not expose an explicit shutdown that blocking-waits cleanly,
     so we drop or stop it inherently if supported, or rely on normal process tear-down.
     It does have a `shutdown` method though!
     */
@@ -49,14 +49,23 @@ mod tests {
     async fn test_job_scheduler_graceful_shutdown() {
         let db_url = std::env::var("DATABASE_URL")
             .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/barqflow".to_string());
-        
+
+        // `AppState::new` builds the credential repository, whose CryptoService
+        // requires an encryption key in the environment. Provide a deterministic
+        // 32-byte test key so state construction succeeds outside production.
+        std::env::set_var("BARQFLOW_ENCRYPTION_KEY", "test_key_must_be_exactly_32_byte");
+
         // Since tests run against the DB, try connecting
         if let Ok(pool) = init_db_pool(&db_url, 1).await {
             let mut state = AppState::new(pool).await.expect("State should initialize");
-            
+
             // Start scheduler
-            state.job_scheduler.start().await.expect("Scheduler should start");
-            
+            state
+                .job_scheduler
+                .start()
+                .await
+                .expect("Scheduler should start");
+
             // Invoke the shutdown capability to ensure memory clears and threads unwind gracefully
             let res = state.job_scheduler.shutdown().await;
             assert!(res.is_ok(), "Job Scheduler failed to shut down gracefully");

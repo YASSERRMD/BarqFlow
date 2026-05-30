@@ -352,6 +352,7 @@ impl GovernanceRepository {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_promotion_request(
         &self,
         workspace_id: Uuid,
@@ -431,6 +432,7 @@ impl GovernanceRepository {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_audit_log(
         &self,
         workspace_id: Uuid,

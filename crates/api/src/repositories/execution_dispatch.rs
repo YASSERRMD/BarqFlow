@@ -27,6 +27,7 @@ impl ExecutionDispatchRepository {
         Self { pool }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create(
         &self,
         execution_id: Uuid,
@@ -242,10 +243,7 @@ impl ExecutionDispatchRepository {
         .await
     }
 
-    pub async fn count_open_items_by_kind(
-        &self,
-        queue_kind: ExecutionQueueKind,
-    ) -> Result<i64> {
+    pub async fn count_open_items_by_kind(&self, queue_kind: ExecutionQueueKind) -> Result<i64> {
         sqlx::query_scalar(
             r#"
             SELECT COUNT(*)

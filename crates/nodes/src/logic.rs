@@ -208,12 +208,12 @@ impl INodeType for SwitchNode {
             let switch_value = switch_val.as_str().unwrap_or("");
 
             let mut matched = false;
-            for i in 0..8 {
+            for (i, output) in outputs.iter_mut().enumerate().take(8) {
                 let case_prop = format!("case{}", i);
                 if let Ok(case_value) = context.get_node_parameter(&case_prop, None).await {
                     let case_str = case_value.as_str().unwrap_or("");
                     if switch_value == case_str {
-                        outputs[i].push(item.clone());
+                        output.push(item.clone());
                         matched = true;
                         break;
                     }

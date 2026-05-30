@@ -13,6 +13,9 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, span, Level};
 
+/// Shared cache of prior node outputs, keyed by node name.
+type WorkflowCache = Arc<RwLock<HashMap<String, Vec<serde_json::Value>>>>;
+
 #[async_trait]
 pub trait CredentialProvider: Send + Sync {
     async fn get_credentials(
@@ -35,7 +38,7 @@ pub struct NodeExecutionContext {
     /// Run ID for tracing
     run_id: uuid::Uuid,
     /// Execution output cache from previous nodes
-    workflow_cache: Arc<RwLock<HashMap<String, Vec<serde_json::Value>>>>,
+    workflow_cache: WorkflowCache,
     /// Credentials resolver for runtime secret lookup
     credential_provider: Option<Arc<dyn CredentialProvider>>,
     /// Rhai expression engine — initialised once per context and reused across parameter evaluations.
@@ -64,16 +67,9 @@ impl NodeExecutionContext {
         input_data: ITaskDataConnections,
         static_data: Option<IDataObject>,
         run_id: uuid::Uuid,
-        workflow_cache: Arc<RwLock<HashMap<String, Vec<serde_json::Value>>>>,
+        workflow_cache: WorkflowCache,
     ) -> Self {
-        Self::new_with_credentials(
-            node,
-            input_data,
-            static_data,
-            run_id,
-            workflow_cache,
-            None,
-        )
+        Self::new_with_credentials(node, input_data, static_data, run_id, workflow_cache, None)
     }
 
     pub fn new_with_credentials(
@@ -81,7 +77,7 @@ impl NodeExecutionContext {
         input_data: ITaskDataConnections,
         static_data: Option<IDataObject>,
         run_id: uuid::Uuid,
-        workflow_cache: Arc<RwLock<HashMap<String, Vec<serde_json::Value>>>>,
+        workflow_cache: WorkflowCache,
         credential_provider: Option<Arc<dyn CredentialProvider>>,
     ) -> Self {
         Self {
@@ -166,7 +162,8 @@ impl NodeExecutionContext {
                         workflow_cache: cache_snapshot,
                     };
 
-                    self.expression_engine.eval_with_context(&stripped_expr, &expr_ctx)
+                    self.expression_engine
+                        .eval_with_context(&stripped_expr, &expr_ctx)
                 };
 
                 return match eval_result {
@@ -241,7 +238,10 @@ impl IExecuteFunctions for NodeExecutionContext {
         &self.node
     }
 
-    async fn get_input_data(&self, input_index: usize) -> Result<Vec<INodeExecutionData>, BarqError> {
+    async fn get_input_data(
+        &self,
+        input_index: usize,
+    ) -> Result<Vec<INodeExecutionData>, BarqError> {
         let data = self.input_data.read().await;
         data.0
             .get(&input_index)
@@ -256,15 +256,16 @@ impl IExecuteFunctions for NodeExecutionContext {
         &self,
         name: &str,
     ) -> Result<HashMap<String, GenericValue>, BarqError> {
-        let provider = self.credential_provider.as_ref().ok_or_else(|| {
-            BarqError::NodeOperationError {
-                node_name: self.node.name.clone(),
-                message: format!(
-                    "Credential provider is not configured; cannot resolve '{}' for node '{}'",
-                    name, self.node.id
-                ),
-            }
-        })?;
+        let provider =
+            self.credential_provider
+                .as_ref()
+                .ok_or_else(|| BarqError::NodeOperationError {
+                    node_name: self.node.name.clone(),
+                    message: format!(
+                        "Credential provider is not configured; cannot resolve '{}' for node '{}'",
+                        name, self.node.id
+                    ),
+                })?;
 
         let creds = provider.get_credentials(&self.node.id.0, name).await?;
         self.log(&format!(
@@ -297,20 +298,33 @@ pub struct PollExecutionContext {
 }
 
 impl PollExecutionContext {
-    pub fn new(node: INode, workflow_id: uuid::Uuid, static_repo: Arc<dyn barqflow_core::traits::IStaticDataStorage>) -> Self {
-        Self { node, workflow_id, static_repo }
+    pub fn new(
+        node: INode,
+        workflow_id: uuid::Uuid,
+        static_repo: Arc<dyn barqflow_core::traits::IStaticDataStorage>,
+    ) -> Self {
+        Self {
+            node,
+            workflow_id,
+            static_repo,
+        }
     }
 }
 
 #[async_trait]
 impl barqflow_core::traits::IPollFunctions for PollExecutionContext {
     async fn get_poll_data(&self) -> Result<IDataObject, BarqError> {
-        let opt = self.static_repo.get(self.node.id.to_string(), self.workflow_id).await?;
+        let opt = self
+            .static_repo
+            .get(self.node.id.to_string(), self.workflow_id)
+            .await?;
         Ok(opt.unwrap_or_default())
     }
 
     async fn set_poll_data(&self, data: IDataObject) -> Result<(), BarqError> {
-        self.static_repo.upsert(self.node.id.to_string(), self.workflow_id, data).await
+        self.static_repo
+            .upsert(self.node.id.to_string(), self.workflow_id, data)
+            .await
     }
 
     async fn get_node_parameter(
@@ -335,7 +349,10 @@ impl barqflow_core::traits::IPollFunctions for PollExecutionContext {
         &self.node
     }
 
-    async fn get_credentials(&self, _name: &str) -> Result<HashMap<String, GenericValue>, BarqError> {
+    async fn get_credentials(
+        &self,
+        _name: &str,
+    ) -> Result<HashMap<String, GenericValue>, BarqError> {
         Ok(HashMap::new())
     }
 
@@ -356,7 +373,7 @@ pub struct NodeExecutionContextBuilder {
     input_data: Option<ITaskDataConnections>,
     static_data: Option<IDataObject>,
     run_id: Option<uuid::Uuid>,
-    workflow_cache: Option<Arc<RwLock<HashMap<String, Vec<serde_json::Value>>>>>,
+    workflow_cache: Option<WorkflowCache>,
     credential_provider: Option<Arc<dyn CredentialProvider>>,
 }
 
@@ -398,10 +415,7 @@ impl NodeExecutionContextBuilder {
         self
     }
 
-    pub fn with_workflow_cache(
-        mut self,
-        workflow_cache: Arc<RwLock<HashMap<String, Vec<serde_json::Value>>>>,
-    ) -> Self {
+    pub fn with_workflow_cache(mut self, workflow_cache: WorkflowCache) -> Self {
         self.workflow_cache = Some(workflow_cache);
         self
     }
@@ -561,7 +575,12 @@ mod tests {
     async fn test_get_input_data_inside_runtime_does_not_panic() {
         let node = create_test_node("InputNode");
         let mut input_data = ITaskDataConnections::new();
-        input_data.push(0, vec![INodeExecutionData::new(IDataObject::from(json!({ "foo": "bar" })))]);
+        input_data.push(
+            0,
+            vec![INodeExecutionData::new(IDataObject::from(
+                json!({ "foo": "bar" }),
+            ))],
+        );
 
         let context = NodeExecutionContext::new(
             node,
@@ -616,7 +635,7 @@ mod tests {
             disabled: false,
         };
 
-        let mut context = NodeExecutionContext::new(
+        let context = NodeExecutionContext::new(
             node,
             ITaskDataConnections::default(),
             None,
@@ -671,7 +690,10 @@ mod tests {
         );
 
         let creds = context.get_credentials("openAiApi").await.unwrap();
-        assert_eq!(creds.get("apiKey").and_then(|v| v.as_str()), Some("test-key-123"));
+        assert_eq!(
+            creds.get("apiKey").and_then(|v| v.as_str()),
+            Some("test-key-123")
+        );
     }
 
     #[tokio::test]
@@ -720,7 +742,9 @@ mod tests {
             let mut input_data = ITaskDataConnections::new();
             input_data.push(
                 0,
-                vec![INodeExecutionData::new(IDataObject::from(json!({ "id": 1 })))],
+                vec![INodeExecutionData::new(IDataObject::from(
+                    json!({ "id": 1 }),
+                ))],
             );
 
             let context = Arc::new(NodeExecutionContext::new(
@@ -741,7 +765,10 @@ mod tests {
             }
 
             for task in tasks {
-                let item_count = task.await.expect("task should not panic").expect("context read should succeed");
+                let item_count = task
+                    .await
+                    .expect("task should not panic")
+                    .expect("context read should succeed");
                 assert_eq!(item_count, 1);
             }
         });

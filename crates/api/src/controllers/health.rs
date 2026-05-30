@@ -1,8 +1,8 @@
 use crate::active_workflows::ActiveCronJobs;
 use crate::controllers::webhooks::{WebhookEndpoint, WebhookRegistry};
 use crate::error::ApiError;
-use crate::repositories::execution_dispatch::ExecutionDispatchRepository;
 use crate::operations::{ExecutionDispatchMode, OperationsRuntime};
+use crate::repositories::execution_dispatch::ExecutionDispatchRepository;
 use crate::routes::ActiveExecutionManager;
 use axum::{extract::State, http::StatusCode, routing::get, Json, Router};
 use chrono::{DateTime, Utc};
@@ -175,7 +175,10 @@ async fn get_runtime_health(
     };
     let cron_job_count = {
         let cron_jobs = state.active_cron_jobs.read().await;
-        cron_jobs.values().map(|job_ids| job_ids.len()).sum::<usize>()
+        cron_jobs
+            .values()
+            .map(|job_ids| job_ids.len())
+            .sum::<usize>()
     };
 
     Ok(Json(RuntimeHealthResponse {
@@ -318,6 +321,7 @@ mod tests {
                 workflow_id: workflow_a,
                 node_id: "node-a".to_string(),
                 http_method: "POST".to_string(),
+                webhook_secret: None,
             },
         );
         registry.insert(
@@ -326,6 +330,7 @@ mod tests {
                 workflow_id: workflow_a,
                 node_id: "node-b".to_string(),
                 http_method: "POST".to_string(),
+                webhook_secret: None,
             },
         );
         registry.insert(
@@ -334,6 +339,7 @@ mod tests {
                 workflow_id: workflow_b,
                 node_id: "node-c".to_string(),
                 http_method: "GET".to_string(),
+                webhook_secret: None,
             },
         );
 
@@ -363,6 +369,7 @@ mod tests {
                 workflow_id,
                 node_id: "node-a".to_string(),
                 http_method: "POST".to_string(),
+                webhook_secret: None,
             },
         );
 

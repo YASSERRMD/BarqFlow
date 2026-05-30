@@ -340,13 +340,11 @@ mod tests {
                     description: None,
                     hint: None,
                     required: true,
-                    options: Some(vec![
-                        NodePropertyOption {
-                            name: "GET".to_string(),
-                            value: json!("GET"),
-                            description: None,
-                        },
-                    ]),
+                    options: Some(vec![NodePropertyOption {
+                        name: "GET".to_string(),
+                        value: json!("GET"),
+                        description: None,
+                    }]),
                     display_options: None,
                 },
             ],
@@ -384,7 +382,7 @@ mod tests {
         let deserialized: INodeProperty = serde_json::from_str(&serialized).unwrap();
         assert_eq!(prop, deserialized);
     }
-    
+
     #[test]
     fn test_credential_serialization() {
         let auth = AuthenticateRequestProperties {
@@ -401,7 +399,7 @@ mod tests {
             authenticate: Some(auth),
         };
         let serialized = serde_json::to_string(&props).unwrap();
-        
+
         assert!(serialized.contains("\"name\":\"githubOAuth2Api\""));
         assert!(serialized.contains("\"value\":\"Bearer ={{$credentials.oauthToken}}\""));
         assert!(serialized.contains("\"name\":\"grantType\""));
@@ -410,4 +408,3 @@ mod tests {
         assert_eq!(deserialized.authenticate.unwrap().r#in, "header");
     }
 }
-

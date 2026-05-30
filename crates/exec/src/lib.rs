@@ -2,12 +2,12 @@ pub mod binary_storage;
 pub mod branching;
 pub mod checkpoint;
 pub mod context;
-pub mod storage;
 pub mod deduplication;
 pub mod error_handler;
 pub mod polling;
 pub mod runner;
 pub mod state;
+pub mod storage;
 pub mod subworkflow;
 
 pub use binary_storage::*;

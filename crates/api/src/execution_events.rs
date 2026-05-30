@@ -93,7 +93,10 @@ pub fn extract_execution_events(payload: &Value) -> Vec<ExecutionEvent> {
         return Vec::new();
     };
 
-    let Some(meta) = root.get(EXECUTION_META_KEY).and_then(|value| value.as_object()) else {
+    let Some(meta) = root
+        .get(EXECUTION_META_KEY)
+        .and_then(|value| value.as_object())
+    else {
         return Vec::new();
     };
 
@@ -101,7 +104,8 @@ pub fn extract_execution_events(payload: &Value) -> Vec<ExecutionEvent> {
         return Vec::new();
     };
 
-    let parsed = serde_json::from_value::<Vec<ExecutionEvent>>(raw_events.clone()).unwrap_or_default();
+    let parsed =
+        serde_json::from_value::<Vec<ExecutionEvent>>(raw_events.clone()).unwrap_or_default();
     sort_and_dedup_events(parsed)
 }
 
@@ -143,7 +147,10 @@ pub fn with_execution_event_history(payload: Value, events: &[ExecutionEvent]) -
     Value::Object(root)
 }
 
-pub fn merge_execution_events(existing: Vec<ExecutionEvent>, incoming: Vec<ExecutionEvent>) -> Vec<ExecutionEvent> {
+pub fn merge_execution_events(
+    existing: Vec<ExecutionEvent>,
+    incoming: Vec<ExecutionEvent>,
+) -> Vec<ExecutionEvent> {
     let mut merged = existing;
     merged.extend(incoming);
     sort_and_dedup_events(merged)

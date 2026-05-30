@@ -3,8 +3,8 @@ use crate::contracts::{
     ExtensionProvidedAssetsResponse,
 };
 use crate::workflow_templates::find_workflow_template;
-use base64::Engine as _;
 use barqflow_registry::registry::NodeRegistry;
+use base64::Engine as _;
 use rsa::pkcs1v15::{Signature, VerifyingKey};
 use rsa::pkcs8::DecodePublicKey;
 use rsa::signature::Verifier;
@@ -370,8 +370,8 @@ fn verify_manifest_signature(
             signature_path.display()
         )
     })?;
-    let signature_manifest: ExtensionSignatureManifest =
-        serde_json::from_slice(&raw_signature).map_err(|error| {
+    let signature_manifest: ExtensionSignatureManifest = serde_json::from_slice(&raw_signature)
+        .map_err(|error| {
             format!(
                 "Failed to parse extension signature {}: {error}",
                 signature_path.display()
@@ -382,17 +382,25 @@ fn verify_manifest_signature(
         return Ok(SignatureVerification {
             status: "untrusted".to_string(),
             key_id: Some(signature_manifest.key_id),
-            warning: Some("Extension signature could not be verified against the trusted keyring.".to_string()),
+            warning: Some(
+                "Extension signature could not be verified against the trusted keyring."
+                    .to_string(),
+            ),
         });
     };
 
-    if !signature_manifest.algorithm.eq_ignore_ascii_case("rsa-sha256")
+    if !signature_manifest
+        .algorithm
+        .eq_ignore_ascii_case("rsa-sha256")
         || !trusted_key.algorithm.eq_ignore_ascii_case("rsa-sha256")
     {
         return Ok(SignatureVerification {
             status: "invalid".to_string(),
             key_id: Some(signature_manifest.key_id),
-            warning: Some("Extension signature algorithm is not supported by the current runtime.".to_string()),
+            warning: Some(
+                "Extension signature algorithm is not supported by the current runtime."
+                    .to_string(),
+            ),
         });
     }
 
@@ -424,7 +432,10 @@ fn verify_manifest_signature(
         return Ok(SignatureVerification {
             status: "invalid".to_string(),
             key_id: Some(signature_manifest.key_id),
-            warning: Some("Extension signature verification failed for the current manifest bytes.".to_string()),
+            warning: Some(
+                "Extension signature verification failed for the current manifest bytes."
+                    .to_string(),
+            ),
         });
     }
 

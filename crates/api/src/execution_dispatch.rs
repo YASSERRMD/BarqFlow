@@ -23,6 +23,7 @@ pub struct QueuedExecutionPayload {
     pub static_data: Option<serde_json::Value>,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn enqueue_workflow_execution(
     state: &ExecutionControllerState,
     workspace_id: Uuid,
@@ -138,7 +139,12 @@ pub async fn enqueue_workflow_execution(
         )
         .await
         .map_err(internal_error)?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "Execution not found after queueing".to_string()))?;
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                "Execution not found after queueing".to_string(),
+            )
+        })?;
 
     Ok(updated)
 }

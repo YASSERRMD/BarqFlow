@@ -16,9 +16,9 @@ pub struct WorkflowCronScheduler {
 
 impl WorkflowCronScheduler {
     pub async fn new() -> Result<Self, BarqError> {
-        let scheduler = JobScheduler::new().await.map_err(|e| BarqError::InternalError(
-            format!("Failed to create JobScheduler: {}", e)
-        ))?;
+        let scheduler = JobScheduler::new().await.map_err(|e| {
+            BarqError::InternalError(format!("Failed to create JobScheduler: {}", e))
+        })?;
 
         Ok(Self {
             scheduler,
@@ -27,9 +27,9 @@ impl WorkflowCronScheduler {
     }
 
     pub async fn start(&self) -> Result<(), BarqError> {
-        self.scheduler.start().await.map_err(|e| BarqError::InternalError(
-            format!("Failed to start JobScheduler: {}", e)
-        ))?;
+        self.scheduler.start().await.map_err(|e| {
+            BarqError::InternalError(format!("Failed to start JobScheduler: {}", e))
+        })?;
         info!("WorkflowCronScheduler started");
         Ok(())
     }
@@ -49,25 +49,36 @@ impl WorkflowCronScheduler {
             Box::pin(async move {
                 cb();
             })
-        }).map_err(|e| BarqError::InternalError(
-            format!("Invalid cron expression '{}': {}", cron_expression, e)
-        ))?;
+        })
+        .map_err(|e| {
+            BarqError::InternalError(format!(
+                "Invalid cron expression '{}': {}",
+                cron_expression, e
+            ))
+        })?;
 
         let guid = job.guid();
 
-        self.scheduler.add(job).await.map_err(|e| BarqError::InternalError(
-            format!("Failed to add job: {}", e)
-        ))?;
+        self.scheduler
+            .add(job)
+            .await
+            .map_err(|e| BarqError::InternalError(format!("Failed to add job: {}", e)))?;
 
         let mut map = self.job_map.write().await;
         map.entry(workflow_id).or_default().push(guid);
 
-        info!("Added schedule for workflow {} with ID {}", workflow_id.0, guid);
+        info!(
+            "Added schedule for workflow {} with ID {}",
+            workflow_id.0, guid
+        );
 
         Ok(guid)
     }
 
-    pub async fn remove_workflow_schedules(&self, workflow_id: &WorkflowId) -> Result<(), BarqError> {
+    pub async fn remove_workflow_schedules(
+        &self,
+        workflow_id: &WorkflowId,
+    ) -> Result<(), BarqError> {
         let mut map = self.job_map.write().await;
         if let Some(jobs) = map.remove(workflow_id) {
             for job_id in jobs {

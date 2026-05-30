@@ -1,8 +1,8 @@
+use crate::boot::run_boot_sequence;
+use crate::state::AppState;
 use anyhow::Result;
 use barqflow_api::create_router;
 use barqflow_db::pool::init_db_pool;
-use crate::state::AppState;
-use crate::boot::run_boot_sequence;
 use std::net::SocketAddr;
 
 /// Start the BarqFlow server.
@@ -26,7 +26,7 @@ pub async fn run_server(db_url: &str, port: u16) -> Result<()> {
     }
 
     // Create router using state converted for the API layer
-    let app = create_router(state.into_api_state());
+    let app = create_router(state.to_api_state());
 
     // Bind to address
     let addr = SocketAddr::from(([0, 0, 0, 0], port));

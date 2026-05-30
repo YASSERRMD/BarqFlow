@@ -1,6 +1,6 @@
 mod boot;
-mod state;
 mod shutdown;
+mod state;
 
 use boot::run_boot_sequence;
 use state::AppState;
@@ -36,11 +36,13 @@ async fn main() {
     barqflow_api::db::run_migrations(&pool)
         .await
         .expect("Database Migrations failed");
-    
+
     info!("Database Migrations successfully completed.");
 
     // 3. Construct Global State
-    let app_state = AppState::new(pool).await.expect("Failed to create AppState");
+    let app_state = AppState::new(pool)
+        .await
+        .expect("Failed to create AppState");
 
     // 4. Run Active Boot Sequence
     if let Err(e) = run_boot_sequence(&app_state).await {
@@ -49,7 +51,7 @@ async fn main() {
     }
 
     // 5. Mount API Routes
-    let api_router = barqflow_api::create_router(app_state.into_api_state());
+    let api_router = barqflow_api::create_router(app_state.to_api_state());
 
     // 6. Bind to Port
     let port = std::env::var("PORT").unwrap_or_else(|_| "3000".to_string());
