@@ -1,0 +1,11 @@
+[advisories]
+# RUSTSEC-2023-0071 — "Marvin Attack" timing sidechannel in the `rsa` crate.
+# No fixed upgrade is available upstream. The advisory affects RSA *private-key*
+# decryption/signing, which leaks key bits through timing. BarqFlow is not exposed:
+#   * Transitively, `rsa` is pulled in by `sqlx-mysql`, which is unavoidable while
+#     MySQL support is enabled.
+#   * Our only direct use (crates/api/src/extensions.rs) is RSA-SHA256 signature
+#     *verification* with public keys, which does not perform the vulnerable
+#     private-key operations.
+# Re-evaluate and remove this ignore once a patched `rsa` release ships.
+ignore = ["RUSTSEC-2023-0071"]
