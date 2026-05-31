@@ -1,6 +1,6 @@
 <div align="center">
-  <img src="web/public/logo.png" alt="BarqFlow Logo" width="120" height="120" />
-  <h1>BarqFlow</h1>
+  <img src="docs/assets/banner.png" alt="BarqFlow" width="100%" />
+
   <p><strong>Rust-native workflow automation and orchestration platform</strong></p>
   <p>Visual workflow design, queue-backed execution, workspace-aware operations, and signed extension packs in a single control plane.</p>
 
@@ -13,33 +13,68 @@
   </p>
 </div>
 
+---
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Why BarqFlow](#why-barqflow)
+- [Architecture](#architecture)
+- [Product Surfaces](#product-surfaces)
+- [Core Capabilities](#core-capabilities)
+- [Quick Start (Docker)](#quick-start-docker)
+- [Local Development](#local-development)
+- [Configuration Reference](#configuration-reference)
+- [HTTP Surface](#http-surface)
+- [Repository Layout](#repository-layout)
+- [Technology Stack](#technology-stack)
+- [Development Workflow](#development-workflow)
+- [Security Notes](#security-notes)
+- [License](#license)
+
+---
+
 ## Overview
 
 BarqFlow is a Rust-first automation platform for building, operating, and governing workflow-driven integrations.
 
-The repository combines:
+A single control plane unifies a full-screen visual workflow designer, a queue-backed execution engine with dedicated run and trigger workers, credential lifecycle management, workspace-aware access control, and signed built-in extension packs.
 
-- a full-screen visual workflow designer
-- a schema-driven node detail experience
-- a queue-backed execution engine with separate run and trigger workers
-- credential lifecycle and secret binding workflows
-- workspace-aware access control and admin surfaces
-- observability and governance consoles
-- an automation studio for prompt-to-workflow drafting and signed built-in extension packs
+BarqFlow draws on the UX of modern node-based automation products, but it is implemented as its own Rust and Vue platform in this repository.
 
-BarqFlow is inspired by modern node-based automation products at the workflow UX level, but it is implemented as its own Rust/Vue platform in this repository.
+## Why BarqFlow
 
-## Preferred Deployment Path
+- **Rust performance and safety end to end** — the control plane, execution engine, and runtime are written in Rust on Axum and Tokio for predictable latency and memory safety.
+- **Durable, queue-backed execution** — manual runs and trigger-driven runs are dispatched through a persistent queue with separate worker lanes, leasing, and backpressure.
+- **Workspace-aware governance** — identity, membership, API keys, policies, approvals, and audit posture are first-class concerns, not bolted on.
+- **Signed extensibility** — built-in extension packs are verified against trusted public keys and run with capability-scoped actions.
+- **Container-native deployment** — a single command brings up the full stack via Docker Compose.
 
-Docker deployment is the recommended way to run BarqFlow.
+## Architecture
 
-The repository already includes:
+<div align="center">
+  <img src="docs/assets/architecture.png" alt="BarqFlow Architecture" width="100%" />
+</div>
 
-- a deployment helper in [`deploy.sh`](deploy.sh)
-- a container build in [`docker/Dockerfile`](docker/Dockerfile)
-- a multi-service environment in [`docker/docker-compose.yml`](docker/docker-compose.yml)
+The Vue 3 control plane talks to the Axum REST and webhook runtime. Platform services handle auth, workspaces, governance, and the node and credential registry, and enqueue work onto the execution dispatch queue. Run and trigger workers drain the queue, execute against the node runtime and integrations, and persist state to PostgreSQL.
 
-Use local Rust and frontend development only when you are actively modifying the platform.
+<details>
+<summary>Text fallback (Mermaid)</summary>
+
+```mermaid
+flowchart LR
+    Browser["Vue 3 Control Plane"] --> API["Axum REST API / Webhook Runtime"]
+    API --> Auth["Auth / Workspaces / Governance"]
+    API --> Queue["Execution Dispatch Queue"]
+    API --> Registry["Node and Credential Registry"]
+    Queue --> Workers["Run Workers / Trigger Workers"]
+    Workers --> Nodes["Node Runtime / Integrations / Code"]
+    API --> Postgres["PostgreSQL"]
+    Workers --> Postgres
+    Registry --> Nodes
+```
+
+</details>
 
 ## Product Surfaces
 
@@ -69,51 +104,6 @@ Use local Rust and frontend development only when you are actively modifying the
 - Signed built-in extension pack discovery
 - Capability-scoped extension action invocation for trusted bundles
 
-## Architecture
-
-```mermaid
-flowchart LR
-    Browser["Vue 3 Control Plane"] --> API["Axum REST API / Webhook Runtime"]
-    API --> Auth["Auth / Workspaces / Governance"]
-    API --> Queue["Execution Dispatch Queue"]
-    API --> Registry["Node and Credential Registry"]
-    Queue --> Workers["Run Workers / Trigger Workers"]
-    Workers --> Nodes["Node Runtime / Integrations / Code"]
-    API --> Postgres["PostgreSQL"]
-    Workers --> Postgres
-    Registry --> Nodes
-```
-
-## Technology Stack
-
-- Backend: Rust, Axum, Tokio, SQLx, PostgreSQL
-- Frontend: Vue 3, TypeScript, Pinia, Vue Router, Vue Flow, Tailwind CSS
-- Runtime: queue-backed execution workers, cron scheduling, webhook dispatch, SSE execution streams
-- Security: JWT auth, encrypted credentials, signed extension manifests, workspace scoping
-
-## Repository Layout
-
-```text
-bin/
-  barqflow/                 CLI wrapper
-crates/
-  api/                      REST controllers, routes, repositories, governance, observability
-  core/                     Shared contracts, types, traits, schema primitives
-  db/                       Database pool helpers and models
-  exec/                     Workflow runner, runtime context, polling, checkpoints
-  flow/                     Graph helpers and expression handling
-  nodes/                    Built-in nodes, credentials, trigger/runtime implementations
-  polling/                  Polling-related crate support
-  registry/                 Node and credential registries
-  server/                   Boot sequence and top-level app state
-extensions/
-  ai-automation-pack/       Built-in signed AI extension pack
-  ops-observability-pack/   Built-in signed operations extension pack
-web/
-  public/                   Static assets
-  src/                      Vue application, views, feature modules, contracts
-```
-
 ## Core Capabilities
 
 | Area | Current Coverage |
@@ -129,9 +119,9 @@ web/
 | Extensibility | Signed built-in extension packs with capability-scoped actions |
 | AI workflow drafting | Prompt-based starter workflow generation in Automation Studio |
 
-## Docker Deployment
+## Quick Start (Docker)
 
-This is the preferred approach for running BarqFlow.
+Docker deployment is the recommended way to run BarqFlow. The repository ships a deployment helper in [`deploy.sh`](deploy.sh), a container build in [`docker/Dockerfile`](docker/Dockerfile), and a multi-service environment in [`docker/docker-compose.yml`](docker/docker-compose.yml).
 
 ### Prerequisites
 
@@ -146,18 +136,7 @@ cd BarqFlow
 ./deploy.sh
 ```
 
-The deployment script performs three steps:
-
-1. Stops existing BarqFlow containers
-2. Rebuilds the images with `docker/docker-compose.yml`
-3. Starts the stack in detached mode
-
-Then open `http://localhost:3000`.
-
-### What the Docker stack starts
-
-- `db`: PostgreSQL 15
-- `engine`: the BarqFlow Rust server plus compiled frontend assets
+The deployment script stops existing BarqFlow containers, rebuilds the images with `docker/docker-compose.yml`, and starts the stack in detached mode. Then open `http://localhost:3000`.
 
 ### Manual Docker Compose workflow
 
@@ -169,29 +148,25 @@ docker-compose -f docker/docker-compose.yml build --no-cache
 docker-compose -f docker/docker-compose.yml up -d
 ```
 
-Then open `http://localhost:3000`.
+### What the stack starts
 
-### Docker configuration notes
+- `db`: PostgreSQL 15
+- `engine`: the BarqFlow Rust server plus compiled frontend assets
 
-- The compose file currently exposes:
-  - PostgreSQL on `5432`
-  - BarqFlow on `3000`
-- The default compose file includes development-style inline secrets and should be replaced or overridden for real production deployments.
-- For production, set strong values for:
-  - `JWT_SECRET`
-  - `BARQFLOW_ENCRYPTION_KEY`
-  - `DATABASE_URL` as needed for your deployment target
+The compose file exposes PostgreSQL on `5432` and BarqFlow on `3000`. The default compose file includes development-style inline secrets and must be replaced or overridden for production deployments. For production, set strong values for `JWT_SECRET`, `BARQFLOW_ENCRYPTION_KEY`, and `DATABASE_URL`.
 
 ## Local Development
 
-#### Prerequisites
+Use local Rust and frontend development only when you are actively modifying the platform.
+
+### Prerequisites
 
 - Rust `1.88+`
 - Node.js `20+`
 - npm `10+`
 - PostgreSQL `15+`
 
-#### 1. Configure environment
+### 1. Configure environment
 
 Create a root `.env` file:
 
@@ -204,20 +179,20 @@ RUST_LOG=info,barqflow=debug
 BARQFLOW_ENV=development
 ```
 
-#### 2. Run database migrations
+### 2. Run database migrations
 
 ```bash
 cargo install sqlx-cli --no-default-features --features rustls,postgres
 sqlx migrate run --source crates/api/migrations
 ```
 
-#### 3. Start the backend
+### 3. Start the backend
 
 ```bash
 cargo run -p barqflow-server
 ```
 
-#### 4. Start the frontend
+### 4. Start the frontend
 
 ```bash
 cd web
@@ -227,9 +202,7 @@ npm run dev
 
 The frontend dev server runs on `http://localhost:3001` and proxies API and webhook traffic to the Rust backend on port `3000`.
 
-## Frontend Production Build
-
-Build the frontend for backend static serving:
+### Frontend production build
 
 ```bash
 cd web
@@ -239,7 +212,7 @@ npm run build
 
 The production backend serves compiled frontend assets from `web/dist`.
 
-## Runtime and Configuration Notes
+## Configuration Reference
 
 ### Required secrets
 
@@ -266,22 +239,52 @@ The production backend serves compiled frontend assets from `web/dist`.
 
 ## HTTP Surface
 
-### REST base
-- `/rest`
-
-### Webhook base
-- `/webhook`
+| Base | Path |
+|---|---|
+| REST | `/rest` |
+| Webhook | `/webhook` |
 
 ### Major API domains
-- auth and user profile
-- workspaces and membership
-- workflows, templates, history, and diff
-- executions, logs, and event streams
-- credentials and credential types
-- settings and runtime posture
-- observability overview
-- governance controls
-- automation studio and extension runtime actions
+
+- Auth and user profile
+- Workspaces and membership
+- Workflows, templates, history, and diff
+- Executions, logs, and event streams
+- Credentials and credential types
+- Settings and runtime posture
+- Observability overview
+- Governance controls
+- Automation studio and extension runtime actions
+
+## Repository Layout
+
+```text
+bin/
+  barqflow/                 CLI wrapper
+crates/
+  api/                      REST controllers, routes, repositories, governance, observability
+  core/                     Shared contracts, types, traits, schema primitives
+  db/                       Database pool helpers and models
+  exec/                     Workflow runner, runtime context, polling, checkpoints
+  flow/                     Graph helpers and expression handling
+  nodes/                    Built-in nodes, credentials, trigger/runtime implementations
+  polling/                  Polling-related crate support
+  registry/                 Node and credential registries
+  server/                   Boot sequence and top-level app state
+extensions/
+  ai-automation-pack/       Built-in signed AI extension pack
+  ops-observability-pack/   Built-in signed operations extension pack
+web/
+  public/                   Static assets
+  src/                      Vue application, views, feature modules, contracts
+```
+
+## Technology Stack
+
+- **Backend:** Rust, Axum, Tokio, SQLx, PostgreSQL
+- **Frontend:** Vue 3, TypeScript, Pinia, Vue Router, Vue Flow, Tailwind CSS
+- **Runtime:** queue-backed execution workers, cron scheduling, webhook dispatch, SSE execution streams
+- **Security:** JWT auth, encrypted credentials, signed extension manifests, workspace scoping
 
 ## Development Workflow
 
@@ -302,3 +305,9 @@ The production backend serves compiled frontend assets from `web/dist`.
 BarqFlow is licensed under `Elastic License 2.0`.
 
 This repository is source-available, but it is not licensed for offering BarqFlow as a hosted or managed commercial service. See [LICENSE](LICENSE) for the governing terms.
+
+---
+
+<div align="center">
+  <sub>Designed and engineered by <strong>Mohamed Yasser</strong> · Solutions Architect</sub>
+</div>
