@@ -1,0 +1,135 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1500" viewBox="0 0 2400 1500" role="img" aria-labelledby="title desc">
+  <title id="title">BarqFlow Architecture</title>
+  <desc id="desc">Queue-backed execution across a Rust control plane</desc>
+  <defs>
+    <pattern id="dotGrid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1.6" fill="#1B2A4A" opacity="0.08"/>
+    </pattern>
+
+    <marker id="arrowGold" markerWidth="14" markerHeight="14" refX="11" refY="7" orient="auto" markerUnits="strokeWidth">
+      <path d="M 2 2 L 12 7 L 2 12 Z" fill="#C5A55A"/>
+    </marker>
+
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#1B2A4A" flood-opacity="0.10"/>
+    </filter>
+
+    <style>
+      .bg { fill: #FFFFFF; }
+      .container { fill: #F2F2F2; stroke: #1B2A4A; stroke-width: 2; rx: 18; opacity: 0.58; }
+      .card { fill: #FFFFFF; stroke: #1B2A4A; stroke-width: 2; rx: 8; filter: url(#softShadow); }
+      .card-secondary { fill: #F2F2F2; stroke: #1B2A4A; stroke-width: 2; rx: 8; filter: url(#softShadow); }
+      .emphasis { fill: #1B2A4A; stroke: #1B2A4A; stroke-width: 2; rx: 8; filter: url(#softShadow); }
+      .title { fill: #1B2A4A; font: 700 58px Georgia, "Times New Roman", serif; letter-spacing: 0; }
+      .subtitle { fill: #1B2A4A; font: 400 27px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; opacity: 0.78; letter-spacing: 0; }
+      .group-label { fill: #1B2A4A; font: 700 24px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 2.4px; }
+      .label { fill: #1B2A4A; font: 650 30px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 0; }
+      .small-label { fill: #1B2A4A; font: 650 25px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 0; }
+      .white-label { fill: #FFFFFF; font: 700 31px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 0; }
+      .arrow { fill: none; stroke: #C5A55A; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#arrowGold); }
+      .route { fill: none; stroke: #C5A55A; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+      .icon-line { fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+      .icon-navy { color: #1B2A4A; opacity: 0.9; }
+      .icon-white { color: #FFFFFF; opacity: 0.95; }
+    </style>
+  </defs>
+
+  <rect class="bg" width="2400" height="1500"/>
+  <rect width="2400" height="1500" fill="url(#dotGrid)"/>
+
+  <text class="title" x="96" y="116">BarqFlow Architecture</text>
+  <text class="subtitle" x="98" y="164">Queue-backed execution across a Rust control plane</text>
+  <rect x="98" y="198" width="60" height="3" fill="#C5A55A" rx="1.5"/>
+
+  <!-- Entry -->
+  <rect class="emphasis" x="110" y="382" width="360" height="150"/>
+  <g class="icon-white" transform="translate(142 421)">
+    <rect class="icon-line" x="0" y="0" width="52" height="36" rx="4"/>
+    <path class="icon-line" d="M 19 50 L 33 50 M 26 36 L 26 50"/>
+  </g>
+  <text class="white-label" x="290" y="441" text-anchor="middle">Vue 3</text>
+  <text class="white-label" x="290" y="482" text-anchor="middle">Control Plane</text>
+
+  <!-- API -->
+  <rect class="card" x="580" y="382" width="430" height="150"/>
+  <g class="icon-navy" transform="translate(614 421)">
+    <path class="icon-line" d="M 9 7 H 47 A 8 8 0 0 1 55 15 V 43 A 8 8 0 0 1 47 51 H 9 A 8 8 0 0 1 1 43 V 15 A 8 8 0 0 1 9 7 Z"/>
+    <path class="icon-line" d="M 1 21 H 55 M 14 35 H 28 M 36 35 H 44"/>
+  </g>
+  <text class="label" x="795" y="441" text-anchor="middle">Axum REST API /</text>
+  <text class="label" x="795" y="482" text-anchor="middle">Webhook Runtime</text>
+
+  <!-- Platform services -->
+  <rect class="container" x="1120" y="270" width="520" height="560"/>
+  <text class="group-label" x="1185" y="324">PLATFORM SERVICES</text>
+
+  <rect class="card" x="1185" y="368" width="390" height="100"/>
+  <text class="small-label" x="1380" y="409" text-anchor="middle">Auth / Workspaces /</text>
+  <text class="small-label" x="1380" y="443" text-anchor="middle">Governance</text>
+
+  <rect class="card" x="1185" y="516" width="390" height="100"/>
+  <text class="small-label" x="1380" y="557" text-anchor="middle">Node &amp; Credential</text>
+  <text class="small-label" x="1380" y="591" text-anchor="middle">Registry</text>
+
+  <rect class="card-secondary" x="1185" y="664" width="390" height="100"/>
+  <text class="small-label" x="1380" y="705" text-anchor="middle">Execution Dispatch</text>
+  <text class="small-label" x="1380" y="739" text-anchor="middle">Queue</text>
+
+  <!-- Execution workers -->
+  <rect class="container" x="1760" y="336" width="500" height="390"/>
+  <text class="group-label" x="1824" y="390">EXECUTION WORKERS</text>
+
+  <rect class="card" x="1832" y="430" width="356" height="96"/>
+  <text class="label" x="2010" y="491" text-anchor="middle">Run Workers</text>
+
+  <rect class="card" x="1832" y="578" width="356" height="96"/>
+  <text class="label" x="2010" y="639" text-anchor="middle">Trigger Workers</text>
+
+  <!-- Runtime -->
+  <rect class="card" x="1748" y="866" width="524" height="132"/>
+  <g class="icon-navy" transform="translate(1791 902)">
+    <path class="icon-line" d="M 18 10 L 2 28 L 18 46"/>
+    <path class="icon-line" d="M 42 10 L 58 28 L 42 46"/>
+    <path class="icon-line" d="M 35 6 L 25 50"/>
+  </g>
+  <text class="label" x="2010" y="918" text-anchor="middle">Node Runtime /</text>
+  <text class="label" x="2010" y="959" text-anchor="middle">Integrations / Code</text>
+
+  <!-- PostgreSQL datastore -->
+  <g filter="url(#softShadow)">
+    <path d="M 1835 1133 C 1835 1098 2195 1098 2195 1133 L 2195 1284 C 2195 1319 1835 1319 1835 1284 Z" fill="#1B2A4A" stroke="#1B2A4A" stroke-width="2"/>
+    <ellipse cx="2015" cy="1133" rx="180" ry="35" fill="#1B2A4A" stroke="#FFFFFF" stroke-width="2" opacity="0.28"/>
+    <path d="M 1835 1133 C 1835 1168 2195 1168 2195 1133" fill="none" stroke="#FFFFFF" stroke-width="2" opacity="0.28"/>
+  </g>
+  <text class="white-label" x="2015" y="1221" text-anchor="middle">PostgreSQL</text>
+
+  <!-- Primary flow -->
+  <path class="arrow" d="M 470 457 H 580"/>
+
+  <!-- API branch to platform services -->
+  <path class="route" d="M 1010 457 H 1072 V 418 H 1185"/>
+  <path class="route" d="M 1072 457 V 566 H 1185"/>
+  <path class="arrow" d="M 1072 714 H 1185"/>
+  <path class="route" d="M 1072 566 V 714"/>
+
+  <!-- Queue to workers and worker fan-out -->
+  <path class="route" d="M 1575 714 H 1688 V 478 H 1832"/>
+  <path class="arrow" d="M 1688 626 H 1832"/>
+  <path class="route" d="M 1688 478 V 626"/>
+
+  <!-- Workers to runtime -->
+  <path class="route" d="M 2010 526 V 552"/>
+  <path class="route" d="M 2010 674 V 782"/>
+  <path class="arrow" d="M 2010 782 V 866"/>
+  <path class="route" d="M 2010 552 V 578"/>
+
+  <!-- Registry to runtime -->
+  <path class="route" d="M 1575 566 H 1668 V 932 H 1748"/>
+  <path class="arrow" d="M 1668 932 H 1748"/>
+
+  <!-- API and workers to PostgreSQL -->
+  <path class="route" d="M 795 532 V 1196 H 1835"/>
+  <path class="arrow" d="M 795 1196 H 1835"/>
+  <path class="arrow" d="M 2195 932 V 1133"/>
+  <path class="route" d="M 2010 998 V 1046 H 2195 V 932"/>
+</svg>
